@@ -1,0 +1,3 @@
+sources=['netcdf_stubs.f']
+env=Environment( FORTRAN = 'gfortran-4.6')
+env.Library('netcdf',sources)

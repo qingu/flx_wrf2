@@ -1,0 +1,123 @@
+Converting FLEXPART main loop to OpenCL
+
+1. Translate all source files into C using F2C-ACC 
+2. Create particles_mainloop.c from timemanager.c, a function that only contains the main loop over all particles
+3. F2C-ACC is of course a bit broken. So we need manual operations:
+3.1 Comment out all externs variables
+3.2 remove "extern" from function declarations
+3.3 run cpp to get rid of f2c macros, but only after determining which variables are required.
+
+	cpp -P -C particles_mainloop.c > particles_mainloop_exp.c
+	gcc  -c particles_mainloop_exp.c
+
+Also, I added two macros:
+
+#define int(n) \
+	(int)n 
+#define sngl(n) \
+	(float)n 
+#define float(n) \
+	(float)nG
+and I remove all the macros that define the constants. 
+
+As a first step, all the missing vars are function arguments, but the code is C, not yet OpenCL.
+The purpose is to check if it compiles. I need to add <math.h> as includes after running cpp
+and before running gcc.
+The current status is: 
+
+[wim@wim-vanderbauwhedes-macbook-pro F2C_translated_files]$ gcc -Wall  -c particles_mainloop_exp.c 
+particles_mainloop_exp.c: In function ‘particles_mainloop’:
+particles_mainloop_exp.c:554: warning: implicit declaration of function ‘abs’
+But abs() is defined in OpenCL, so that is not an issue
+
+Note that I did not need constants.h at all!
+
+4. The next step is to have a look at the functions called by the main loop, basically doing the same thing as
+for the main loop.
+5. Once these functions are clean, copy&paste them into the main loop source file
+6. Then turn this one into proper OpenCL. But as a first step, it might be best to
+call this function from FORTRAN in the loop over all particles. In fact, this is essential!
+// float float;
+// float sngl;
+ 
+7. Other fixes which I forgot earlier:
+- comments with a * are not treated as comments by F2C-ACC!
+
+
+The current approach is way too ad-hoc. I need to write a script to try and automate most of if.
+The main problem is the globals, so that's what I should focus on.
+Unfortunately, all vars in all includes are really "common"
+This is a big problem, it means we need to pass all of them as pointers!
+
+Converion of labels to goto is very broken for cases that should be "break": extra } instead of the label
+
+* How can I work out where an array is written and where it is read?
+for every array:
+	- look at where the array is assigned
+	- look at where it is read
+
+================================================================================
+
+Outline
+0. Separate out the main particle loop in FORTRAN
+	0.1 Split out into a separate subroutine
+	0.2 Get rid of "common" variables, move them into function arguments 
+		This is refactoring, and there is really only one proper way to do this:
+		- parse the FORTRAN source in a labeled-block-aware way
+		- check which variables from the common block are used
+		- put them in the function signature
+		- for variables declared outside the block in question, find the ones that are used within the block
+		and add them to the function signature as well
+1. Convert main loop into OpenCL kernel
+1.1 Using F2C-ACC, translate the main loop files into C
+	1.1.1 Identify dependencies via call-chain tracing (Perl script)
+	1.1.2 Run F2C-ACC on each of them.
+	Status: done, I think
+1.2 Fix the C code (bugs and unsupported features in F2C-ACC)
+	See above for specifics. Fixing F2C-ACC would of course be better
+	Status: done for initialize and advance
+1.3 Make the C-code kernel-like, i.e. no static/extern variables
+	This is complicated, because the number of OpenCL arguments is limited
+	1.3.1 Remove all extern vars (comment out) and identify the used ones from compile errors
+	Status: script to do this, done for advance, maybe redo for initialize
+	1.3.2 Analyse the arguments to determine:
+		- which ones are I, O or I/O 
+		- and what is needed where, i.e. args that ar only used by nested functions can be lifted
+		- some args could maybe be turned into macros or const parameters
+	Status: analysis script is ready, results to be properly analysed, more automation needed
+	1.3.3 Make the modifications
+		This is the really hard part. The main difficulty is that all function signatures 
+		of called functions need to change.
+	1.3.4 Combine all functions into a single kernel source file
+	1.3.5 Turn this file into an actual OpenCL kernel
+
+2. Create an interface between FLEXPART and the OpenCL kernel
+2.1 Create a simple integration between the C-code and the FORTRAN code
+	In principle, it is sufficient to give the C function the correct name and call it inside the time loop.
+	Initially, the function will loop over all particles. So I must mainly work out what it should return.
+	My guess is that this would be
+		- coordinates for all particles
+		- maybe a measure for their radio-activity
+		- maybe a measure for their physical status, e.g. mass, volume, humidity, who knows
+	This assumes that the particle loop does not change the wind fields (seems logical to me)
+
+2.2 Create a mechanism to integrate OpenCL C++ into FORTRAN
+	This means replacing the C function by a call to the OpenCL device for every iteration of the time loop
+	I will use the OclWrapper, instantiate it in flexpart_wrf.f and pass the "pseudo-pointer" around
+	Working with C++ objects in FORTRAN is possible as follows:
+		- dynamically create a new object, e.g. 
+			Object* op = new Object(...);
+		- cast the object pointer to void*:
+			void* vp=(void*)op;
+		- cast the void pointer to 64-bit integer (which I call a "pseudo-pointer"):
+			long long int pp = (long long int)vp;
+		- FORTRAN passes by reference, so we need to use a pointer to return the pseudo-pointer:
+			long long int * ppp; // one of the wrapper function arguments
+			*ppp=pp;
+			
+3. Create a build system that can handle the integration
+3.1 Convert the current Makefile to SCons
+3.2 Modify it to deal with calling C/C++
+3.3 Modify it to deal with building OpenCL
+
+

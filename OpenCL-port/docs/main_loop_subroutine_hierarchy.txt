@@ -1,0 +1,29 @@
+timemanager.f
+
+main loop over all particles:
+
+	initialize()
+		hanna()
+		hanna1()
+		interpol_all()	
+		interpol_wind()	
+		ran3()	random.f
+	advance()
+		hanna()
+		hanna1()
+		hanna_short()
+		interpol_all()	
+		interpol_all_nests()	
+		interpol_wind()	
+		interpol_misslev()
+		interpol_misslev_nests()
+		interpol_vdep()
+		interpol_vdep_nests()
+		interpol_wind_nests()
+		interpol_wind_short()
+		interpol_wind_short_nests()
+		ran3()	random.f
+		windalign()	
+	calcfluxes()
+	drydepokernel()
+	drydepokernel_nest()
