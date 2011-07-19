@@ -297,7 +297,7 @@ C Compute interval since radioactive decay of deposited mass was computed
 
 C Loop over all particles
 *************************
-
+C BEGIN particles_main_loop
         do 20 j=1,numpart
 
 
@@ -327,7 +327,7 @@ C Memorize particle positions
             yold=ytra1(j)
             zold=ztra1(j)
 
-C Integrate Lagevin equation for lsynctime seconds
+C Integrate Langevin equation for lsynctime seconds
 **************************************************
 
             call advance(itime,idt(j),uap(j),ucp(j),uzp(j),us(j),
@@ -389,6 +389,7 @@ C Terminate trajectories that are older than maximum allowed age
           endif
 
 20        continue                         ! end of loop over particles
+C END particles_main_loop
           
 
 10      continue                           ! end of loop over simulation time
