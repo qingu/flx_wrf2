@@ -111,7 +111,12 @@ $stateref=get_info_per_line ( $stateref );
 
 show_info ( $stateref );
 
+# Refactor the source
+ $stateref= refactor_code ($stateref); 
+
 # Emit the refactored source
+
+
 exit(0);
   
 sub parse_fortran_src {
@@ -153,8 +158,57 @@ sub parse_fortran_src {
 
 }    # END of parse_fortran_src()
 # =============================================================================
+=info_refactoring
+
+for every line
+- check if it needs changing:
+- need to mark the insert points for subroutine calls that replace the refactored blocks! 
+This is a node called 'RefactoredSubroutineCall'
+- we also need the "entry point" for adding the declarations for the localized global variables 'ExGlobVarDecls'
+
+* SubroutineSig: add the globals to the signature
+(* VarDecls: keep as is)
+* ExGlobVarDecls: add new var decls
+* SubroutineCall: add globals for that subroutine to the call
+* RefactoredSubroutineCall: insert a new subroutine call instead of the "begin of block" comment. 
+* InBlock: skip; we need to handle the blocks separately
+* BeginBlock: insert the new subroutine signature and variable declarations
+* EndBlock: insert END
+* BeginDo: just remove the label
+* EndDo: replace CONTINUE by END DO
+(* Break: keep as is; add a comment to identify it as a break)
+* BreakTarget: replace CONTINUE with "call noop"
 
 
+=cut
+sub refactor_code {
+ (my $stref)=@_;
+    for my $f (keys %{ $stref->{'Sources'}}) {
+    	print "\nSOURCE FILE: $f\n\n";
+        my @lines=@{ $stref->{'Sources'}{$f}{'Lines'} };
+        my @info = @{ $stref->{'Sources'}{$f}{'Info'} };
+    	
+    }
+    return $stref;        
+}
+
+sub show_info {
+    (my $stref)=@_;
+    for my $f (keys %{ $stref->{'Sources'}}) {
+        print "\nSOURCE FILE: $f\n\n";
+        my @lines=@{ $stref->{'Sources'}{$f}{'Lines'} };
+        my @info = @{ $stref->{'Sources'}{$f}{'Info'} };
+        my %keys=();
+        for my $item (@info) {
+            if (defined $item) {
+                 for my $elt ( map {$_->[0]} @{$item}) {
+                    $keys{$elt}=1;
+                 }
+            }
+        }
+        print join(',',keys %keys),"\n";
+    }   
+}
 # =============================================================================
 sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
@@ -377,10 +431,13 @@ sub refactor_blocks {
 			$in_block = 1;
 			$block    = $1;
 			push @{ $blocks{'OUTER'} }, $line;
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'RefactoredSubroutineCall'}{'Pos'} }, $index;
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'BeginBlock'}{'Pos'} },$index;
 			next;
 		}
 		if ( $line =~ /^C\s+END\s+(\w+)/ ) {
 			$in_block = 0;
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'EndBlock'}{'Pos'} },$index;
 			next;
 		}
 		if ($in_block) {
@@ -554,23 +611,7 @@ sub get_info_per_line {
 	return $stref;
 }
 
-sub show_info {
-    (my $stref)=@_;
-    for my $f (keys %{ $stref->{'Sources'}}) {
-        print "\nSOURCE FILE: $f\n\n";
-        my @lines=@{ $stref->{'Sources'}{$f}{'Lines'} };
-        my @info = @{ $stref->{'Sources'}{$f}{'Info'} };
-        my %keys=();
-        for my $item (@info) {
-            if (defined $item) {
-                 for my $elt ( map {$_->[0]} @{$item}) {
-                    $keys{$elt}=1;
-                 }
-            }
-        }
-        print join(',',keys %keys),"\n";
-    }   
-}
+
 
 #sub Info{ (my $f,my $stref) =@_;
 #	return $stref->{'Sources'}{$f}{'Info'} ;
