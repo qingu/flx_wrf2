@@ -2,6 +2,7 @@
 use warnings;
 use strict;
 use Data::Dumper;
+
 =pod
 
 0.2 Get rid of "common" variables, move them into function arguments 
@@ -74,11 +75,13 @@ After building this structure, what we need is to go through it an revert it so 
 our $V = 1;
 
 die "Please specifiy FORTRAN source to refactor\n" if not @ARGV;
-my $filename = $ARGV[0];    
+my $filename = $ARGV[0];
+
 # without '.f'
-$filename=~s/\.f//;
+$filename =~ s/\.f//;
 my $stateref = {
 	'Commons' => {},
+	'Parameters' => {},
 	'Sources' => {
 
 		#		 for every file, a list of the source lines.
@@ -101,37 +104,32 @@ my $stateref = {
 	'RefactoredSources' => {},
 };
 
-# First we analyse the code for use of globals and blocks to be transformed into subroutines  
+# First we analyse the code for use of globals and blocks to be transformed into subroutines
 $stateref = parse_fortran_src( $filename, $stateref );
 
 # Then we create an "inverted index" of the information we have gathered, by line of the orginal source.
 # One important point is that we must mark all blocks to be refactored as such, so those lines can be skipped!
 
-$stateref=get_info_per_line ( $stateref );
+$stateref = get_info_per_line($stateref);
 
-show_info ( $stateref );
+show_info($stateref);
 
 # Refactor the source
- $stateref= refactor_code ($stateref); 
+$stateref = refactor_code($stateref);
 
 # Emit the refactored source
 
-
 exit(0);
-  
+
 sub parse_fortran_src {
-	( my $f, my $stref ) = @_;	
-    my $is_incl = $stref->{'Sources'}{$f}{'IsIncl'} || 0;
-#    print Dumper($stref->{'Sources'}{$f});
-#    print "$f: $is_incl\n";
-    my $ext= $is_incl ? '' : '.f';
-	( my $srcref, my $has_blocks ) = read_fortran_src("$f$ext");
-    
-	$stref->{'Sources'}{$f}{'Lines'}     = $srcref;
-	$stref->{'Sources'}{$f}{'HasBlocks'} = $has_blocks;
-	
-    
-#    $stref = mark_comments( $f, $stref );
+	( my $f, my $stref ) = @_;
+
+	$stref = read_fortran_src( $f, $stref );
+
+	my $is_incl    = $stref->{'Sources'}{$f}{'IsIncl'};
+	my $has_blocks = $stref->{'Sources'}{$f}{'HasBlocks'};
+
+	#    $stref = mark_comments( $f, $stref );
 
 	# 2. Parse the type declarations in the source, create a table %vars
 	$stref = get_var_decls( $f, $stref );
@@ -143,21 +141,30 @@ sub parse_fortran_src {
 		$stref = remove_globals_from_subroutines( $f, $stref );
 	}
 	else {    # includes
-		      # 4. For includes, parse common blocks, create $stref->{'Commons'}
-		$stref = get_commons_from_includes( $f, $stref );
+		      # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
+		$stref = get_commons_params_from_includes( $f, $stref );
 	}
 
+    for my $i ( keys %{$stref->{'Sources'}{$f}{'Nodes'}{'Include'} }) {    	
+    	if ($stref->{'Sources'}{$i}{'InclType'} eq 'Common') {
+    		$stref->{'Sources'}{$f}{'HasCommons'}=1;    		
+    		last;
+    	}    	
+    }
+    
 # 5. Split the source based on the block markers
 # As there could be several blocks (later), use a hash per block
 # This could happen in any file except includes; but include processing never comes here
 	if ($has_blocks) {
 		$stref = refactor_blocks( $f, $stref );
 	}
-
+    
 	return $stref;
 
 }    # END of parse_fortran_src()
+
 # =============================================================================
+
 =info_refactoring
 
 for every line
@@ -181,60 +188,112 @@ This is a node called 'RefactoredSubroutineCall'
 
 
 =cut
+
 sub refactor_code {
- (my $stref)=@_;
-    for my $f (keys %{ $stref->{'Sources'}}) {
-    	print "\nSOURCE FILE: $f\n\n";
-        my @lines=@{ $stref->{'Sources'}{$f}{'Lines'} };
-        my @info = @{ $stref->{'Sources'}{$f}{'Info'} };
-    	
+	if ($V) {
+    print "\n\n";
+    print "#" x 80, "\n";
+    print "Refactoring\n";
+    print "#" x 80, "\n\n";
     }
-    return $stref;        
+	( my $stref ) = @_;
+	for my $f ( keys %{ $stref->{'Sources'} } ) {
+		print "\nSOURCE FILE: $f\n\n";
+		my @lines = @{ $stref->{'Sources'}{$f}{'Lines'} };
+		my @info  = @{ $stref->{'Sources'}{$f}{'Info'} };
+		if ($stref->{'Sources'}{$f}{'HasCommons'}) {
+		for my $line (@lines) {
+			my $tags_lref = shift @info;
+			my %tags = (defined $tags_lref ) ? %{$tags_lref} : ('Nil'=>[]);
+			my $skip=0;			
+			if ( exists $tags{'Comment'}) {
+				$skip=1;
+			}
+
+				if (exists $tags{'SubroutineSig'}) {
+					my $name=$tags{'SubroutineSig'}{'Name'};
+					my @args=@{$tags{'SubroutineSig'}{'Args'}};
+					my @exglobs = @{ $stref->{'Sources'}{$f}{'Nodes'}{'ExGlobVarDecls'}{'Globals'} };
+					print ' ' x 6, 'subroutine ',$name,'(',join(',', (@args,@exglobs)),')',"\n"; 
+					$skip=1;
+				}
+				if (exists $tags{'ExGlobVarDecls'}) {
+                    for my $var (@{$tags{'ExGlobVarDecls'}{'Globals'} }) {
+                    	print $stref->{'Commons'}{$var}{'Decl'},"\n";
+                    }                    
+                }
+			    if (exists $tags{'Include'} ) {
+			    	(my $inc,my $r)= each %{$tags{'Include'}};
+			    	if ($stref->{'Sources'}{$inc}{'InclType'} eq 'Common') {
+			    		$skip=1;
+			    	}
+			    }
+			print $line,"\n" unless $skip; 
+            
+		}
+		die;
+		}
+	}
+	return $stref;
 }
 
 sub show_info {
-    (my $stref)=@_;
-    for my $f (keys %{ $stref->{'Sources'}}) {
-        print "\nSOURCE FILE: $f\n\n";
-        my @lines=@{ $stref->{'Sources'}{$f}{'Lines'} };
-        my @info = @{ $stref->{'Sources'}{$f}{'Info'} };
-        my %keys=();
-        for my $item (@info) {
-            if (defined $item) {
-                 for my $elt ( map {$_->[0]} @{$item}) {
-                    $keys{$elt}=1;
-                 }
-            }
-        }
-        print join(',',keys %keys),"\n";
-    }   
+	   if ($V) {
+    print "\n\n";
+    print "#" x 80, "\n";
+    print "Info\n";
+    print "#" x 80, "\n\n";
+    }
+	( my $stref ) = @_;
+	for my $f ( keys %{ $stref->{'Sources'} } ) {
+		print "\nSOURCE FILE: $f\n\n";
+		if (exists $stref->{'Sources'}{$f}{'Lines'}) {
+		my @lines = @{ $stref->{'Sources'}{$f}{'Lines'} };
+		my @info  = @{ $stref->{'Sources'}{$f}{'Info'} };
+		
+		for my $item (@info) {
+			if ( defined $item ) {			
+				 print join( ',',keys %{$item}), "\n";				
+			}
+		}
+		}
+	}
 }
+
 # =============================================================================
 sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
 	my $srcref = $stref->{'Sources'}{$f}{'Lines'};
 	my $index  = 0;
 	for my $line ( @{$srcref} ) {
-		if ($line=~/^C\s+/) {
+		if ( $line =~ /^C\s+/ ) {
 			$index++;
 			next;
 		}
-		if ( $line =~ /call\s(\w+)\(([\w,]*)\)/ ) {
-#			print $line, "\n" if $V;
+		if ( $line =~ /call\s(\w+)\((.*)\)/ ) {
+
+			#			print $line, "\n" if $V;
 			my $name = $1;
+			my $argstr= $2;
+			# Not nice, but as we push the index and the args at the same time, it should be OK
 			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'SubroutineCall'}{$name}
 				  {'Pos'} }, $index;
+            push @{ $stref->{'Sources'}{$f}{'Nodes'}{'SubroutineCall'}{$name}
+                  {'Args'} }, $argstr;				  
 
-			if (not exists $stref->{'Sources'}{$name} or not exists $stref->{'Sources'}{$name}{'IsSub'} ) {
+			if (   not exists $stref->{'Sources'}{$name}
+				or not exists $stref->{'Sources'}{$name}{'IsSub'} )
+			{
 				$stref->{'Sources'}{$name}{'IsIncl'} = 0;
 				$stref->{'Sources'}{$name}{'IsSub'}  = 1;
 				print "Processing SUBROUTINE $name\n";
 				$stref = parse_fortran_src( $name, $stref );
-			} 
-#			else {
-#				print "DIED in $f, $name call\n";
-#				die Dumper($stref->{'Sources'}{$f});
-#			}
+			}
+
+			#			else {
+			#				print "DIED in $f, $name call\n";
+			#				die Dumper($stref->{'Sources'}{$f});
+			#			}
 
 		}
 		$index++;
@@ -243,34 +302,37 @@ sub parse_subroutine_calls {
 }
 
 sub remove_globals_from_subroutines {
-    # we descend in the subroutine
-    # we resolve all globals
-	 # so all we need to do really here is add a list of the used globals to the Node
-	 # 7. Identify which commons are used in inner, make them function arguments
-	 # This is almost the same as above
+
+# we descend in the subroutine
+# we resolve all globals
+# so all we need to do really here is add a list of the used globals to the Node
+# 7. Identify which commons are used in inner, make them function arguments
+# This is almost the same as above
 	( my $f, my $stref ) = @_;
-	my $srcref = $stref->{'Sources'}{$f}{'Lines'};
-	my $index  = 0;
-	my @args_from_globs   = ();
-	my %tvars  = %{ $stref->{'Commons'} };           # Hurray for pass-by-value!
-	
+	my $srcref          = $stref->{'Sources'}{$f}{'Lines'};
+	my $index           = 0;
+	my @args_from_globs = ();
+	my %tvars = %{ $stref->{'Commons'} };    # Hurray for pass-by-value!
 
 	for my $line ( @{$srcref} ) {
-		if ($line=~/^C\s+/) {
-            $index++;
-            next;
-        }
-		
-		if ($line =~ /^\s+subroutine\s+(\w+)\((.*)\)/ ) {
-			my $name=$1;
-			my $argstr=$2;
-			my @args=split(/\s*,\s*/,$argstr);
-			# FIXME: this assumes a single subroutine per file. So we should actually ensure that this is the case!
+		if ( $line =~ /^C\s+/ ) {
+			$index++;
+			next;
+		}
+
+		if ( $line =~ /^\s+subroutine\s+(\w+)\((.*)\)/ ) {
+			my $name   = $1;
+			my $argstr = $2;
+			my @args   = split( /\s*,\s*/, $argstr );
+
+# FIXME: this assumes a single subroutine per file. So we should actually ensure that this is the case!
 			$stref->{'Sources'}{$f}{'Nodes'}{'SubroutineSig'}{'Args'} = \@args;
-			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'SubroutineSig'}{'Pos'} }, $index;
+			$stref->{'Sources'}{$f}{'Nodes'}{'SubroutineSig'}{'Name'} = $name;
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'SubroutineSig'}{'Pos'} },
+			  $index;
 		}
 		for my $var ( keys %tvars ) {
-			if ( $line =~ /\W$var\W/ ) {				
+			if ( $line =~ /\W$var\W/ ) {
 				push @args_from_globs, $var;
 				delete $tvars{$var};
 			}
@@ -278,13 +340,13 @@ sub remove_globals_from_subroutines {
 		$index++;
 	}
 	if ($V) {
-		print "\nCOMMON VARS in subroutine $f:\n\n" ;
-		for my $var ( @args_from_globs ) {
+		print "\nCOMMON VARS in subroutine $f:\n\n";
+		for my $var (@args_from_globs) {
 			print "$var\n";
 		}
 	}
-	$stref->{'Sources'}{$f}{'Nodes'}{'Globals'} = \@args_from_globs;
-    return $stref;
+	$stref->{'Sources'}{$f}{'Nodes'}{'ExGlobVarDecls'}{'Globals'} = \@args_from_globs;
+	return $stref;
 }
 
 sub parse_includes {
@@ -292,25 +354,28 @@ sub parse_includes {
 	my $srcref = $stref->{'Sources'}{$f}{'Lines'};
 	my $index  = 0;
 	for my $line ( @{$srcref} ) {
-        if ($line=~/^C\s+/) {
-            $index++;
-            next;
-        }
-		
+		if ( $line =~ /^C\s+/ ) {
+			$index++;
+			next;
+		}
+
 		if ( $line =~ /^\s*include\s+\'(\w+)\'/ )
 		{    # TODO: nested includes not supported!
-			
-			my $name = $1;
+
+			my $name = $1;			
 			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'Include'}{$name}{'Pos'} },
 			  $index;
 
-			if ( not exists $stref->{'Sources'}{$name} or not exists $stref->{'Sources'}{$name}{'IsIncl'} ) {
-				$line                             = 'C ' . $line;
+			if (   not exists $stref->{'Sources'}{$name}
+				or not exists $stref->{'Sources'}{$name}{'IsIncl'} )
+			{
+#				$line = 'C ' . $line;
 				print $line, "\n" if $V;
 				$stref->{'Sources'}{$name}{'IsIncl'} = 1;
-				$stref->{'Sources'}{$name}{'IsSub'}  = 0;				
+				$stref->{'Sources'}{$name}{'IsSub'}  = 0;
 				$stref = parse_fortran_src( $name, $stref );
-			} else {
+			}
+			else {
 				print $line, " already processed\n" if $V;
 			}
 
@@ -327,80 +392,160 @@ sub get_var_decls {
 	print "\n VAR DECLS in $f:\n" if $V;
 	my %vars  = ();
 	my $index = 0;
+	my $first = 1;
 	for my $line ( @{$srcref} ) {
-		
-        if ($line=~/^C\s+/) {
-            $index++;
-            next;
-        }
-		
+
+		if ( $line =~ /^C\s+/ ) {
+			$index++;
+			next;
+		}
+# real surfstrn(0:nxmaxn-1,0:nymaxn-1,1,2,maxnests)
 		if ( $line =~
 /(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
 		  )
 		{
 			my $type   = $1;
 			my $varlst = $2;
-			$varlst =~ s/\(.*?\)/(0)/g;    # clean up arrays
-			my @tvars = split( /\s*\,\s*/, $varlst );
+			my $tvarlst = $varlst;
+#			$tvarlst =~ s/\(.*?\)/(0)/g;    # clean up arrays
+#            $tvarlst =~ s/\(//;
+
+if ($tvarlst =~/\(((?:[^\(\),]*?,)+[^\(]*?)\)/) {
+	while ($tvarlst =~/\(((?:[^\(\),]*?,)+[^\(]*?)\)/) {
+	my $chunk=$1;
+	my $chunkr=$chunk;
+	$chunkr=~s/,/;/g;
+	my $pos=index($tvarlst,$chunk);
+	substr($tvarlst,$pos,length($chunk),$chunkr);
+#	print "FOUND $line:\n$chunk\t$chunkr\n$tvarlst\n";
+} }
+
+#			$tvarlst =~ s/\(([^\(\),]*?),([^\(]*?)\)/($1;$2)/g && print $tvarlst ,"\n"; 
+			my @tvars = split( /\s*\,\s*/, $tvarlst );
 			my $p = '';
-			for my $var (@tvars) {
+			for my $var (@tvars) {				
 				$var =~ s/^\s+//;
 				$var =~ s/\s+$//;
-				if ( $var =~ s/\(.*?\)// ) {
-					$var =~
+				my $tvar=$var;
+				$tvar =~ s/\(.*?\)/(0)/g;				
+				if ( $tvar =~ s/\(.*?\)// ) {
+					$tvar =~
 					  s/\*\d+//;   # FIXME: char string handling is not correct!
-					$vars{$var}{'Kind'} = 'Array';
+					$vars{$tvar}{'Kind'} = 'Array';
 					$p = '()';
 				}
 				else {
-					$vars{$var}{'Kind'} = 'Scalar';
+					$vars{$tvar}{'Kind'} = 'Scalar';
 				}
-				$vars{$var}{'Type'} = $type;
-				print $type, $p, "\t<", $var, ">\n" if $V;
+				$vars{$tvar}{'Type'} = $type;
+				$var=~s/;/,/g;
+				$vars{$tvar}{'Decl'} = "      $type $var"; # TODO: this should maybe not be a textual representation
+				print $type, $p, "\t<", $tvar, ">: $var\n" if $V;
 			}
-			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'VarDecl'}{$f}{'Pos'} },
+			
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'VarDecl'}{'Pos'} },
 			  $index;
+			if ($first) {
+				$first = 0;
+				push @{ $stref->{'Sources'}{$f}{'Nodes'}{'ExGlobVarDecls'}
+					  {'Pos'} },
+				  $index;
+			}
 		}
+		
 		$index++;
 	}
+	
 	$stref->{'Vars'}{$f} = \%vars;
 	return $stref;
 }
 
-sub get_commons_from_includes {
+sub get_commons_params_from_includes {
 	( my $f, my $stref ) = @_;
 	my $srcref = $stref->{'Sources'}{$f}{'Lines'};
 	my %vars   = %{ $stref->{'Vars'}{$f} };
-	print "\nCOMMON VARS in include '$f'\n" if $V;
-	my $index=0;
+	my $has_pars=0;
+	my $has_commons=0;
+	my $index = 0;
+
 	for my $line ( @{$srcref} ) {
-        if ($line=~/^C\s+/) {
-            $index++;
-            next;
-        }
-		
-		if ( $line =~ /^\s*common\s+\/\w+\/\s+(.+)$/ ) {
+		if ( $line =~ /^C\s+/ ) {
+			$index++;
+			next;
+		}
+
+		if ( $line =~ /^\s*common\s+\/[\w\d]+\/\s+(.+)$/ ) {	
+			
 			my $commonlst = $1;
+			$has_commons=1;
+
 			my @tcommons = split( /\s*\,\s*/, $commonlst );
+			
 			for my $var (@tcommons) {
 				if ( not defined $vars{$var} ) {
-					print "MISSING: <", $var, ">\n" if $V;
+					print "MISSING: <", $var, ">\n" ;
 				}
 				else {
-					print $var,"\t",Dumper($vars{$var}),"\n" if $V;
+#					print $var, "\t",  $vars{$var}{'Type'}, "\n" if $V;
 					$stref->{'Commons'}{$var} = $vars{$var};
 				}
 			}
+			         push @{ $stref->{'Sources'}{$f}{'Nodes'}{'Common'}{$f}{'Pos'} },
+              $index;
+			
 		}
+		
+      if ($line=~/parameter\s*\(\s*(.*)\s*\)/ ) { 
+              my $parliststr=$1;
+              $has_pars=1;
+              my @partups = split(/\s*,\s*/,$parliststr);
+              my @pvars=map {s/\s*=.+//;$_} @partups;
+              
+               for my $var (@pvars) {
+                if ( not defined $vars{$var} ) {
+                    print "NOT A PARAMETER: <", $var, ">\n" ;
+                }
+                else {
+#                    print $var, "\t",  $vars{$var}{'Type'}, "\n" if $V;
+                    $stref->{'Parameters'}{$var} = $vars{$var};
+                }
+            }
+                    push @{ $stref->{'Sources'}{$f}{'Nodes'}{'Parameter'}{$f}{'Pos'} },
+              $index;   
+            
+        }
+		
+		
 		$index++;
 	}
-	 
-#	if ($V) {
-#		print "\nCOMMON VARS:\n\n" ;
-#		for my $v ( keys %{ $stref->{'Commons'} } ) {
-#			print $stref->{'Commons'}{$v}, "\t", $v, "\n";
-#		}
-#	}
+
+	#	if ($V) {
+	#		print "\nCOMMON VARS:\n\n" ;
+	#		for my $v ( keys %{ $stref->{'Commons'} } ) {
+	#			print $stref->{'Commons'}{$v}, "\t", $v, "\n";
+	#		}
+	#	}
+	
+	# FIXME!
+	# An include file should basically only contain parameters and commons.
+	# If it contains commons, we should remove them!
+	if ($has_commons && $has_pars){
+		die "The include file $f contains both parameters and commons, this is at the moment not supported.\n";
+	} elsif ($has_commons) {
+		$stref->{'Sources'}{$f}{'InclType'}='Common';
+	} elsif ($has_pars) {
+		$stref->{'Sources'}{$f}{'InclType'}='Parameter';
+	} else {
+		die "The include file $f contains neither parameters nor commons, this is at the moment not supported.\n";
+	}
+	for my $var (keys %vars) {
+		if ( 
+		  ($has_pars and not exists( $stref->{'Parameters'}{$var})) 
+		  or ($has_commons and not exists( $stref->{'Commons'}{$var}) )
+		) {
+			die "The include $f contains a variable $var that is neither a parameter nor a common variable\n"; 
+		}
+	}
 
 	return $stref;
 }
@@ -415,12 +560,12 @@ sub refactor_blocks {
 	my %blocks   = ();
 	my $in_block = 0;
 	my $block    = 'OUTER';
-	my $index=0;
+	my $index    = 0;
 	for my $line ( @{$srcref} ) {
-        if ($line=~/^C\s+/) {
-            $index++;
-            next;
-        }
+		if ( $line =~ /^C\s+/ ) {
+			$index++;
+			next;
+		}
 
 		# skip subroutine decl
 		$line =~ /^\s+subroutine/ && next;
@@ -431,18 +576,24 @@ sub refactor_blocks {
 			$in_block = 1;
 			$block    = $1;
 			push @{ $blocks{'OUTER'} }, $line;
-			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'RefactoredSubroutineCall'}{'Pos'} }, $index;
-			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'BeginBlock'}{'Pos'} },$index;
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'RefactoredSubroutineCall'}
+				  {'Pos'} }, $index;
+			$stref->{'Sources'}{$f}{'Nodes'}{'RefactoredSubroutineCall'}
+			  {'Name'} = $block;
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'BeginBlock'}{'Pos'} },
+			  $index;
 			next;
 		}
 		if ( $line =~ /^C\s+END\s+(\w+)/ ) {
 			$in_block = 0;
-			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'EndBlock'}{'Pos'} },$index;
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'EndBlock'}{'Pos'} },
+			  $index;
 			next;
 		}
 		if ($in_block) {
 			push @{ $blocks{$block} }, $line;
-			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'InBlock'}{'Pos'} },$index;
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'InBlock'}{'Pos'} },
+			  $index;
 		}
 		else {
 			push @{ $blocks{'OUTER'} }, $line;
@@ -495,21 +646,21 @@ sub refactor_blocks {
 		next if $block eq 'OUTER';
 		my @lines = @{ $blocks{$block} };
 		my %tvars = %{ $stref->{'Commons'} };    # Hurray for pass-by-value!
-		
+
 		for my $line (@lines) {
 			for my $var ( keys %tvars ) {
 				if ( $line =~ /\W$var\W/ ) {
-					
+
 					push @{ $args{$block} }, $var;
 					delete $tvars{$var};
 				}
 			}
 		}
 		if ($V) {
-		print "\nCOMMON VARS in block $block:\n\n";
-		for my $var (@{ $args{$block} }) {
-			print "$var\n";
-		}
+			print "\nCOMMON VARS in block $block:\n\n";
+			for my $var ( @{ $args{$block} } ) {
+				print "$var\n";
+			}
 		}
 		$stref->{'Sources'}{$f}{'Blocks'}{$block}{'Args'} = $args{$block};
 	}
@@ -525,6 +676,7 @@ sub refactor_blocks {
 			$decls .= $type . ' ' . $argv . "\n";
 		}
 		$sig =~ s/\,$/)\n/s;
+		$stref->{'Sources'}{$f}{'Blocks'}{$block}{'Args'}  = $args{$block};
 		$stref->{'Sources'}{$f}{'Blocks'}{$block}{'Sig'}   = $sig;
 		$stref->{'Sources'}{$f}{'Blocks'}{$block}{'Decls'} = $decls;
 		print $sig   if $V;
@@ -534,8 +686,15 @@ sub refactor_blocks {
 }    # END of refactor_blocks()
 
 sub read_fortran_src {
-	( my $f ) = @_;
-	open my $SRC, '<', $f or die "Can't find $f\n";
+	( my $f, my $stref ) = @_;
+	my $is_incl = $stref->{'Sources'}{$f}{'IsIncl'} || 0;
+	my $ext = $is_incl ? '' : '.f';
+    my $ok=1;
+	open my $SRC, '<', "$f$ext" or do {
+		print STDERR "Can't find $f$ext\n";
+		$ok=0;
+	};
+	if ($ok) {
 	my $lines      = [];
 	my $prevline   = '';
 	my $has_blocks = 0;
@@ -543,7 +702,8 @@ sub read_fortran_src {
 	# 0. Slurp the source; standardise the comments
 	# 1. Join up the continuation lines
 	# TODO: split lines with ;
-	my $line = '';
+	my $index = 0;
+	my $line  = '';
 	while (<$SRC>) {
 		$line = $_;
 		chomp $line;
@@ -556,7 +716,10 @@ sub read_fortran_src {
 			$line =~ s/^[Cc\*\!]/C /;
 			push @{$lines}, $line
 			  ; # bit half-baked, it might be better to tag the line as being a comment?
-			  next;
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'Comments'}{'Pos'} },
+			  $index;
+			$index++;
+			next;
 		}
 		elsif ( $line =~ /C\s+BEGIN\s+\w+/ ) {
 			$has_blocks = 1;
@@ -566,6 +729,10 @@ sub read_fortran_src {
 		if ( $line =~ /\s+\!.*$/ ) {
 			( $line, my $comment ) = split( /\s+\!/, $line );
 			push @{$lines}, 'C ' . $comment;
+			push
+			  @{ $stref->{'Sources'}{$f}{'Nodes'}{'TrailingComments'}{'Pos'} },
+			  $index;
+			$index++;
 
 			#       $line=~s/\s+\!.*$//;
 		}
@@ -575,43 +742,98 @@ sub read_fortran_src {
 		}
 		else {
 			push @{$lines}, lc($prevline);
+			$stref->{'Sources'}{$f}{'Info'}->[$index] = { 'Nil'=>[]};
+			$index++;
 			$prevline = $line;
 		}
 	}
-	push @{$lines}, lc($line);
-
+	if ($line ne $prevline) {
+		push @{$lines}, lc($prevline);
+	}		
+	push @{$lines}, lc($line);	
+	$index++;
+	
 	close $SRC;
-	return ( $lines, $has_blocks );
-}
 
-sub get_info_per_line {
-	( my $stref ) = @_;
-	my @info = ();
-	for my $f (keys %{ $stref->{'Sources'} }) {
-		for my $node ( keys %{ $stref->{'Sources'}{$f}{'Nodes'} } ) {
-			next if $node eq 'Globals';
-			print "NODE: $node\n" if $V;
-			if (exists $stref->{'Sources'}{$f}{'Nodes'}{$node}{'Pos'}) {
-			my @indices = @{ $stref->{'Sources'}{$f}{'Nodes'}{$node}{'Pos'} };
-			for my $index (@indices) {
-				push @{ $info[$index] }, [$node,$stref->{'Sources'}{$f}{'Nodes'}{$node}];
-			}
-			} else {
-				for my $key (keys %{$stref->{'Sources'}{$f}{'Nodes'}{$node}} ){
-					print "\tNAME: $key\n" if $V;
-		            my @indices = @{ $stref->{'Sources'}{$f}{'Nodes'}{$node}{$key}{'Pos'} };
-		            for my $index (@indices) {
-		                push @{ $info[$index] }, [$node,$stref->{'Sources'}{$f}{'Nodes'}{$node}{$key}];
-		            }					
-				}				
-			}
-		}
-		$stref->{'Sources'}{$f}{'Info'}=\@info;
+	$stref->{'Sources'}{$f}{'Lines'}     = $lines;
+	$stref->{'Sources'}{$f}{'HasBlocks'} = $has_blocks;
 	}
 	return $stref;
 }
 
+sub get_info_per_line {
+	if ($V) {
+	print "\n\n";
+	print "#" x 80, "\n";
+	print "Collecting information by line\n";
+	print "#" x 80, "\n\n";
+	}
+	 
+	( my $stref ) = @_;
 
+	for my $f ( keys %{ $stref->{'Sources'} } ) {
+		print "SOURCE: $f\n" if $V;
+		if (exists $stref->{'Sources'}{$f}{'Info'}) {
+		my $aref =  $stref->{'Sources'}{$f}{'Info'} || [];
+		my @info = @{ $aref } ;
+		for my $node ( keys %{ $stref->{'Sources'}{$f}{'Nodes'} } ) {
+#			next if $node eq 'Globals';
+			print "\tNODE: $node\n" if $V;
+			if ( exists $stref->{'Sources'}{$f}{'Nodes'}{$node}{'Pos'} ) {
+				my @indices =
+				  @{ $stref->{'Sources'}{$f}{'Nodes'}{$node}{'Pos'} };
+				for my $index (@indices) {
+#					$info[$index]={};
+					$info[$index]->{$node} = $stref->{'Sources'}{$f}{'Nodes'}{$node} ;
+				}
+			}
+			else {
+				for
+				  my $key ( keys %{ $stref->{'Sources'}{$f}{'Nodes'}{$node} } )
+				{
+					print "\t\tNAME: $key\n" if $V;
+					my @indices =
+					  @{ $stref->{'Sources'}{$f}{'Nodes'}{$node}{$key}{'Pos'} };
+					my @attrs=();  
+					my $i=0;
+					for my $index (@indices) {
+						my $tref={};
+	                    for my $kkey (keys %{ $stref->{'Sources'}{$f}{'Nodes'}{$node}{$key} } ){
+	                        
+	                        # We assume that all these entries are lists with a one-on-one match to Pos
+	                        $tref->{$kkey}=$stref->{'Sources'}{$f}{'Nodes'}{$node}{$key}{$kkey}[$i];
+	                    }
+#						$info[$index]={};
+						$info[$index]->{$node}= {$key => $tref};
+						$i++;						  
+					}
+				}
+			}
+		}
+		$stref->{'Sources'}{$f}{'Info'} = \@info;
+		} else {
+			print "No info for $f\n";
+			$stref->{'Sources'}{$f}{'Info'} = [];
+		}
+#		if ($V) {
+#			for my $i ( 0 .. @info - 1 ) {
+#				print $i, "\t";
+#				if ( defined $info[$i] ) {
+#					for my $item ( @{ $info[$i] } ) {
+#						print $item->[0], "\t";
+#					}
+#
+#				}
+#				else {
+#					print "Nil";
+#				}
+#				print "\n";
+#			}
+#		}
+	}
+
+	return $stref;
+}
 
 #sub Info{ (my $f,my $stref) =@_;
 #	return $stref->{'Sources'}{$f}{'Info'} ;
