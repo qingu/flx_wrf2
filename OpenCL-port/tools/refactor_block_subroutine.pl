@@ -2,7 +2,23 @@
 use warnings;
 use strict;
 use Data::Dumper;
+=todos
+One of the assumptions is that there is a single subroutine per file and that the names match
+This is not always the case. Obviously, as soon as there is more than one sub per file, the names can't match.
+So we must split out the subroutines to meet the convention, best to do this in a pre-processing step.
+Alternatively, we could create a map of file=>[subs], that might actually be better
 
+BUGS:
+- there are duplicates between the original var decls and the ex-globals: ix, jy; but they are not globals!
+CAUSE: the "common" variables are not fully global and I should not put them all in one big namespace.
+Basically, we need to store the commons per include, and only use the union of the commons in all include files that
+are of InclType = Common 
+
+- nspec from includecom is not transformed into an argument -> TODO
+
+
+
+=cut
 =pod
 
 0.2 Get rid of "common" variables, move them into function arguments 
@@ -112,7 +128,7 @@ $stateref = parse_fortran_src( $filename, $stateref );
 
 $stateref = get_info_per_line($stateref);
 
-show_info($stateref);
+#show_info($stateref);
 
 # Refactor the source
 $stateref = refactor_code($stateref);
@@ -197,43 +213,99 @@ sub refactor_code {
     print "#" x 80, "\n\n";
     }
 	( my $stref ) = @_;
-	for my $f ( keys %{ $stref->{'Sources'} } ) {
+	my $f='timemanager';
+#	for my $f ( keys %{ $stref->{'Sources'} } ) {
 		print "\nSOURCE FILE: $f\n\n";
 		my @lines = @{ $stref->{'Sources'}{$f}{'Lines'} };
 		my @info  = @{ $stref->{'Sources'}{$f}{'Info'} };
-		if ($stref->{'Sources'}{$f}{'HasCommons'}) {
+		my $annlines=[];
 		for my $line (@lines) {
-			my $tags_lref = shift @info;
-			my %tags = (defined $tags_lref ) ? %{$tags_lref} : ('Nil'=>[]);
-			my $skip=0;			
-			if ( exists $tags{'Comment'}) {
-				$skip=1;
-			}
-
-				if (exists $tags{'SubroutineSig'}) {
-					my $name=$tags{'SubroutineSig'}{'Name'};
-					my @args=@{$tags{'SubroutineSig'}{'Args'}};
-					my @exglobs = @{ $stref->{'Sources'}{$f}{'Nodes'}{'ExGlobVarDecls'}{'Globals'} };
-					print ' ' x 6, 'subroutine ',$name,'(',join(',', (@args,@exglobs)),')',"\n"; 
-					$skip=1;
-				}
-				if (exists $tags{'ExGlobVarDecls'}) {
-                    for my $var (@{$tags{'ExGlobVarDecls'}{'Globals'} }) {
-                    	print $stref->{'Commons'}{$var}{'Decl'},"\n";
-                    }                    
+			my $tags = shift @info;
+			push @{$annlines}, [$line,$tags];
+		}
+		my $rlines=[];
+		if ($stref->{'Sources'}{$f}{'HasCommons'}) {
+			for my $annline (@{$annlines}) {
+								
+				my $line= $annline->[0];
+				my $tags_lref = $annline->[1];
+				if (not defined $tags_lref ) { die "BOOM!"};
+				my %tags = (defined $tags_lref ) ? %{$tags_lref} : ('Nil'=>[]);
+				print '*** '.join(',',keys(%tags)),"\n";
+				print "$line\n";
+				my $skip=0;			
+#				if ( exists $tags{'Comments'}) {
+#					$skip=1;
+#				}
+	
+					if (exists $tags{'SubroutineSig'}) {
+						my $name=$tags{'SubroutineSig'}{'Name'};
+						my @args=@{$tags{'SubroutineSig'}{'Args'}};
+						my @exglobs = @{ $stref->{'Sources'}{$f}{'Nodes'}{'ExGlobVarDecls'}{'Globals'} };
+						my $rline= '      subroutine '.$name.'('.join(',', (@args,@exglobs)).')';
+						$tags{'Refactored'} =1;
+						push @${rlines}, [$rline,$tags_lref]; 
+						$skip=1;
+					}
+					if (exists $tags{'ExGlobVarDecls'}) {
+	                    for my $var (@{$tags{'ExGlobVarDecls'}{'Globals'} }) {
+	                    	my $rline= $stref->{'Commons'}{$var}{'Decl'};
+	                    	push @{$rlines}, [$rline,$tags_lref];
+	                    }                    
+	                }
+				    if (exists $tags{'Include'} ) {
+				    	(my $inc,my $r)= each %{$tags{'Include'}};
+				    	if ($stref->{'Sources'}{$inc}{'InclType'} eq 'Common') {
+				    		$skip=1;
+				    	}
+				    }
+				push @{$rlines}, $annline unless $skip; 	            
+			}		
+		}
+		$annlines=$rlines;
+		$rlines=[];
+#		die Dumper($stref->{'Sources'}{$f});
+        if ($stref->{'Sources'}{$f}{'HasBlocks'}==1) { 
+            for my $annline (@{$annlines}) {
+                my $line= $annline->[0];
+                print "$line\n";
+                my $tags_lref = $annline->[1];
+                my %tags = (defined $tags_lref ) ? %{$tags_lref} : ('Nil'=>[]);
+                my $skip=0;         
+#                if ( exists $tags{'Comments'} or exists $tags{'InBlock'} ) {
+#                    $skip=1;
+#                }
+    
+                    if (exists $tags{'RefactoredSubroutineCall'}) {                    	
+                        my $name=$tags{'RefactoredSubroutineCall'}{'Name'};                       
+                        my @args=@{  $stref->{'Sources'}{$f}{'Blocks'}{$name}{'Args'} };
+#                        my @exglobs = @{ $stref->{'Sources'}{$f}{'Nodes'}{'ExGlobVarDecls'}{'Globals'} };
+                        my $rline= '      call '.$name.'('.join(',', @args).')';
+                        delete $tags_lref->{'Comments'};
+                        push @{$rlines}, [$rline,$tags_lref]; 
+                        $skip=1;
+                    }
+                push @{$rlines}, $annline unless $skip;                 
+            }       
+        }
+        $annlines=$rlines;
+        $rlines=[];        
+        for my $annline (@{$annlines}) {
+                my $line= $annline->[0];
+                my $tags_lref = $annline->[1];
+                my %tags =  %{$tags_lref} ;
+                if ( not exists $tags{'Comments'} ) {
+#                	print "ORIG: $line\n"; 
+                    my @split_lines=split_long_line($line);
+                    for my $sline (@split_lines) {
+                        print "$sline\n";
+                    }
+                } else {
+#                	print "$line\n";
                 }
-			    if (exists $tags{'Include'} ) {
-			    	(my $inc,my $r)= each %{$tags{'Include'}};
-			    	if ($stref->{'Sources'}{$inc}{'InclType'} eq 'Common') {
-			    		$skip=1;
-			    	}
-			    }
-			print $line,"\n" unless $skip; 
-            
-		}
+        }		
 		die;
-		}
-	}
+#	}
 	return $stref;
 }
 
@@ -245,29 +317,39 @@ sub show_info {
     print "#" x 80, "\n\n";
     }
 	( my $stref ) = @_;
+
 	for my $f ( keys %{ $stref->{'Sources'} } ) {
 		print "\nSOURCE FILE: $f\n\n";
 		if (exists $stref->{'Sources'}{$f}{'Lines'}) {
 		my @lines = @{ $stref->{'Sources'}{$f}{'Lines'} };
 		my @info  = @{ $stref->{'Sources'}{$f}{'Info'} };
-		
-		for my $item (@info) {
-			if ( defined $item ) {			
+		if( scalar(@lines)!=scalar(@info)) {
+			die scalar(@lines).'!='.scalar(@info)." for $f";
+		} else {
+		 
+		for my $i (0..@lines-1) {
+			my $line=$lines[$i];
+			my $item=$info[$i];
+			if ( defined $item ) {
+				print $line, "\t\t**** ";			
 				 print join( ',',keys %{$item}), "\n";				
 			}
 		}
 		}
+		}
+
 	}
+	
 }
 
 # =============================================================================
 sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
 	my $srcref = $stref->{'Sources'}{$f}{'Lines'};
-	my $index  = 0;
-	for my $line ( @{$srcref} ) {
-		if ( $line =~ /^C\s+/ ) {
-			$index++;
+    if (defined $srcref) {	
+	for my $index (0.. scalar(@{$srcref}) -1 ) {
+		my $line=$srcref->[$index];
+		if ( $line =~ /^C\s+/ ) {			
 			next;
 		}
 		if ( $line =~ /call\s(\w+)\((.*)\)/ ) {
@@ -294,10 +376,9 @@ sub parse_subroutine_calls {
 			#				print "DIED in $f, $name call\n";
 			#				die Dumper($stref->{'Sources'}{$f});
 			#			}
-
 		}
-		$index++;
 	}
+    }
 	return $stref;
 }
 
@@ -310,13 +391,18 @@ sub remove_globals_from_subroutines {
 # This is almost the same as above
 	( my $f, my $stref ) = @_;
 	my $srcref          = $stref->{'Sources'}{$f}{'Lines'};
-	my $index           = 0;
+	if (defined $srcref ) {
 	my @args_from_globs = ();
-	my %tvars = %{ $stref->{'Commons'} };    # Hurray for pass-by-value!
+#	my %tvars = %{ $stref->{'Commons'} };    # Hurray for pass-by-value!
+	my %tvars = map {$_ => 1 } keys( %{ $stref->{'Commons'} } );
+	print "GLOBAL VAR ANALYSIS in $f\n";
+for my $global (sort keys %tvars) {
+	print "$global\n";
+}
+	   for my $index (0.. scalar(@{$srcref}) -1 ) {
+        my $line=$srcref->[$index];
 
-	for my $line ( @{$srcref} ) {
 		if ( $line =~ /^C\s+/ ) {
-			$index++;
 			next;
 		}
 
@@ -332,12 +418,13 @@ sub remove_globals_from_subroutines {
 			  $index;
 		}
 		for my $var ( keys %tvars ) {
+			
 			if ( $line =~ /\W$var\W/ ) {
+				print "FOUND $var in $line\n"; 
 				push @args_from_globs, $var;
 				delete $tvars{$var};
 			}
 		}
-		$index++;
 	}
 	if ($V) {
 		print "\nCOMMON VARS in subroutine $f:\n\n";
@@ -346,16 +433,17 @@ sub remove_globals_from_subroutines {
 		}
 	}
 	$stref->{'Sources'}{$f}{'Nodes'}{'ExGlobVarDecls'}{'Globals'} = \@args_from_globs;
+	}
 	return $stref;
 }
 
 sub parse_includes {
 	( my $f, my $stref ) = @_;
 	my $srcref = $stref->{'Sources'}{$f}{'Lines'};
-	my $index  = 0;
-	for my $line ( @{$srcref} ) {
+	if (defined $srcref) {
+    for my $index (0.. scalar(@{$srcref}) -1 ) {
+        my $line=$srcref->[$index];
 		if ( $line =~ /^C\s+/ ) {
-			$index++;
 			next;
 		}
 
@@ -380,23 +468,23 @@ sub parse_includes {
 			}
 
 		}
-		$index++;
+	}
 	}
 	return $stref;
 }
 
 sub get_var_decls {
 	( my $f, my $stref ) = @_;
+	
 	my $srcref = $stref->{'Sources'}{$f}{'Lines'};
-
+    if (defined $srcref) {
 	print "\n VAR DECLS in $f:\n" if $V;
 	my %vars  = ();
-	my $index = 0;
-	my $first = 1;
-	for my $line ( @{$srcref} ) {
+	my $first = 1;	
+    for my $index (0.. scalar(@{$srcref}) -1 ) {
+        my $line=$srcref->[$index];
 
 		if ( $line =~ /^C\s+/ ) {
-			$index++;
 			next;
 		}
 # real surfstrn(0:nxmaxn-1,0:nymaxn-1,1,2,maxnests)
@@ -453,24 +541,24 @@ if ($tvarlst =~/\(((?:[^\(\),]*?,)+[^\(]*?)\)/) {
 			}
 		}
 		
-		$index++;
 	}
 	
-	$stref->{'Vars'}{$f} = \%vars;
+	$stref->{'Vars'}{$f} = \%vars; # FIXME: should be $stref->{'Sources'}{$f}{'Vars'} 
+    }
 	return $stref;
 }
 
 sub get_commons_params_from_includes {
 	( my $f, my $stref ) = @_;
 	my $srcref = $stref->{'Sources'}{$f}{'Lines'};
+	if (defined $srcref) {
 	my %vars   = %{ $stref->{'Vars'}{$f} };
 	my $has_pars=0;
 	my $has_commons=0;
-	my $index = 0;
-
-	for my $line ( @{$srcref} ) {
+	
+    for my $index (0.. scalar(@{$srcref}) -1 ) {
+        my $line=$srcref->[$index];
 		if ( $line =~ /^C\s+/ ) {
-			$index++;
 			next;
 		}
 
@@ -486,7 +574,7 @@ sub get_commons_params_from_includes {
 					print "MISSING: <", $var, ">\n" ;
 				}
 				else {
-#					print $var, "\t",  $vars{$var}{'Type'}, "\n" if $V;
+					print $var, "\t",  $vars{$var}{'Type'}, "\n" if $V;
 					$stref->{'Commons'}{$var} = $vars{$var};
 				}
 			}
@@ -514,17 +602,15 @@ sub get_commons_params_from_includes {
               $index;   
             
         }
-		
-		
-		$index++;
+			
 	}
 
-	#	if ($V) {
-	#		print "\nCOMMON VARS:\n\n" ;
-	#		for my $v ( keys %{ $stref->{'Commons'} } ) {
-	#			print $stref->{'Commons'}{$v}, "\t", $v, "\n";
-	#		}
-	#	}
+		if ($V) {
+			print "\nCOMMONS for $f:\n\n" ;
+			for my $v ( sort keys %{ $stref->{'Commons'} } ) {
+				print $v, "\n";
+			}
+		}
 	
 	# FIXME!
 	# An include file should basically only contain parameters and commons.
@@ -546,12 +632,13 @@ sub get_commons_params_from_includes {
 			die "The include $f contains a variable $var that is neither a parameter nor a common variable\n"; 
 		}
 	}
-
+	}
 	return $stref;
 }
 
-sub refactor_blocks {
+sub refactor_blocks { 
 	( my $f, my $stref ) = @_;
+	
 	my $srcref = $stref->{'Sources'}{$f}{'Lines'};
 	my %vars   = %{ $stref->{'Vars'}{$f} };
 	my %occs   = ();
@@ -560,19 +647,17 @@ sub refactor_blocks {
 	my %blocks   = ();
 	my $in_block = 0;
 	my $block    = 'OUTER';
-	my $index    = 0;
-	for my $line ( @{$srcref} ) {
-		if ( $line =~ /^C\s+/ ) {
-			$index++;
-			next;
-		}
-
-		# skip subroutine decl
-		$line =~ /^\s+subroutine/ && next;
-		$line =~
-/(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
-		  && next;
-		if ( $line =~ /^C\s+BEGIN\s+(\w+)/ ) {
+    for my $index (0.. scalar(@{$srcref}) -1 ) {
+        my $line=$srcref->[$index];
+#		if ( $line =~ /^C\s+/ && $line !~ /^C\s+(BEGIN|END)/ ) {
+#			next;
+#		}
+#		# skip subroutine decl
+#		$line =~ /^\s+subroutine/ && next;
+#		$line =~
+#/(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
+#		  && next;
+		if ( $line =~ /^C\s+BEGIN\s+(\w+)/ ) { 
 			$in_block = 1;
 			$block    = $1;
 			push @{ $blocks{'OUTER'} }, $line;
@@ -597,9 +682,9 @@ sub refactor_blocks {
 		}
 		else {
 			push @{ $blocks{'OUTER'} }, $line;
-		}
-		$index++;
+		}	
 	}
+	
 	for my $block ( keys %blocks ) {
 		$stref->{'Sources'}{$f}{'Blocks'}{$block}{'Lines'} = $blocks{$block};
 	}
@@ -645,7 +730,7 @@ sub refactor_blocks {
 	for my $block ( keys %blocks ) {
 		next if $block eq 'OUTER';
 		my @lines = @{ $blocks{$block} };
-		my %tvars = %{ $stref->{'Commons'} };    # Hurray for pass-by-value!
+		my %tvars = map {$_ => 1 } keys( %{ $stref->{'Commons'} } );    # Hurray for pass-by-value!
 
 		for my $line (@lines) {
 			for my $var ( keys %tvars ) {
@@ -695,14 +780,17 @@ sub read_fortran_src {
 		$ok=0;
 	};
 	if ($ok) {
+		print "READING SOURCE for $f\n" if $V;
 	my $lines      = [];
 	my $prevline   = '';
-	my $has_blocks = 0;
+	
 
 	# 0. Slurp the source; standardise the comments
 	# 1. Join up the continuation lines
 	# TODO: split lines with ;
-	my $index = 0;
+	# TODO: Special case: comments in continuation lines. 
+	# For now, I just throw them away. 
+	my $cont=0;	
 	my $line  = '';
 	while (<$SRC>) {
 		$line = $_;
@@ -710,53 +798,61 @@ sub read_fortran_src {
 
 		# Skip blanks
 		$line =~ /^\s*$/ && next;
-
+        
 		# Detect and standardise comments
-		if ( $line =~ /^[C\*\!]/i && $line !~ /C\s+(?:BEGIN|END)\s+\w+/ ) {
+		if ( $line =~ /^[C\*\!]/i  ) {
 			$line =~ s/^[Cc\*\!]/C /;
-			push @{$lines}, $line
-			  ; # bit half-baked, it might be better to tag the line as being a comment?
-			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'Comments'}{'Pos'} },
-			  $index;
-			$index++;
-			next;
-		}
-		elsif ( $line =~ /C\s+BEGIN\s+\w+/ ) {
-			$has_blocks = 1;
-		}
-
-		# convert trailing comments into comments on the previous line
-		if ( $line =~ /\s+\!.*$/ ) {
+		} elsif ( $line =~ /\s+\!.*$/ ) {
+			 # convert trailing comments into comments on the previous line
 			( $line, my $comment ) = split( /\s+\!/, $line );
-			push @{$lines}, 'C ' . $comment;
-			push
-			  @{ $stref->{'Sources'}{$f}{'Nodes'}{'TrailingComments'}{'Pos'} },
-			  $index;
-			$index++;
-
-			#       $line=~s/\s+\!.*$//;
+#			push @{$lines}, '! ' . $comment;
 		}
+		
 		if ( $line =~ /^\s+[\+\&]/ ) {    # continuation line
 			$line =~ s/^\s+[\+\&]\s*/ /;
 			$prevline .= $line;
-		}
-		else {
-			push @{$lines}, lc($prevline);
-			$stref->{'Sources'}{$f}{'Info'}->[$index] = { 'Nil'=>[]};
-			$index++;
+			$cont=1;
+		} elsif ($line=~/^C\ / && ($cont==1)) {
+			# A comment occuring after a continuation line. Skip!
+			next;
+		} else {
+			my $lcprevline=(substr($prevline,0,2) eq 'C ')?$prevline:lc($prevline);
+			push @{$lines}, $lcprevline;
 			$prevline = $line;
+			$cont=0;
 		}
 	}
 	if ($line ne $prevline) {
-		push @{$lines}, lc($prevline);
+		my $lcprevline=(substr($prevline,0,2) eq 'C ')?$prevline:lc($prevline);
+		push @{$lines}, $lcprevline;
 	}		
-	push @{$lines}, lc($line);	
-	$index++;
+	my $lcline=(substr($line,0,2) eq 'C ')?$line:lc($line);
+	push @{$lines}, $lcline;	
 	
 	close $SRC;
+	my $has_blocks = 0;
+	for my $index (0 .. scalar( @{$lines} )-1) {
+		my $line=$lines->[$index];
+		if ( $line =~ /^C\s/i ) {
+			push @{ $stref->{'Sources'}{$f}{'Nodes'}{'Comments'}{'Pos'} }, $index;
+			if ($line =~ /C\s+BEGIN\s+\w+/) {
+				$has_blocks = 1;
+			} 
+			print "$line\n";  
+			next;
+		}
+        if ( $line =~ /^\!\s/ ) {
+            push @{ $stref->{'Sources'}{$f}{'Nodes'}{'TrailingComments'}{'Pos'} }, $index;
+            print "$line\n";  
+            next;
+        }
+		push @{ $stref->{'Sources'}{$f}{'Nodes'}{'Nil'}{'Pos'} }, $index;
+		print "$line\n";           
+	}
 
 	$stref->{'Sources'}{$f}{'Lines'}     = $lines;
 	$stref->{'Sources'}{$f}{'HasBlocks'} = $has_blocks;
+	$stref->{'Sources'}{$f}{'Info'} =[];
 	}
 	return $stref;
 }
@@ -860,32 +956,50 @@ We also need a convenience function to split long lines.
 - count the number of characters, i.e. length()
 - find the last comma before we exceed 64 characters (I guess it's really 72-5?):
 =cut
-
 sub split_long_line {
 	my $line     = shift;
 	my @chunks   = @_;
+	
 	my $nchars   = 64;
+	if (scalar(@chunks)==0) {
+		$nchars   = 72;
+	}
 	my $split_on = ',';
-	my $ll       = length($line);
-	my $rline    = join( '', reverse( split( '', $line ) ) );
-	my $idx      = index( $rline, $split_on, $ll - $nchars );
-	push @chunks, substr( $line, 0, $ll - $idx, '' );
+	my $split_on2 = ' ';
 
 	if ( length($line) > $nchars ) {
+        my $ll       = length($line);
+        my $rline    = join( '', reverse( split( '', $line ) ) );
+        my $idx      = index( $rline, $split_on, $ll - $nchars );
+        my $idx2      = index( $rline, $split_on2, $ll - $nchars );
+        if ($idx<0 && $idx2<0) {
+        	die "Could not split line $line";;
+        } elsif ($idx<0 && $idx2>=0) {
+        $idx = $idx2;
+        }
+        push @chunks, substr( $line, 0, $ll - $idx, '' );
 		&split_long_line( $line, @chunks );
 	}
 	else {
 		push @chunks, $line;
 		my @split_lines = ();
+		if (@chunks>1) {
 		my $fst         = 1;
 		for my $chunk (@chunks) {
 			if ($fst) {
 				$fst = 0;
 			}
 			else {
-				$chunk = '    &   ' . $chunk;
+				if ($chunk=~/^\s*$/) {
+					$chunk='';
+				} else {
+				$chunk = '     &  ' . $chunk;
+				}
 			}
 			push @split_lines, $chunk;
+		}
+		} else {
+			@split_lines=@chunks;
 		}
 		return @split_lines;
 	}
