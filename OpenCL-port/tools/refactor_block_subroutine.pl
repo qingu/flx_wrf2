@@ -113,7 +113,7 @@ sub main {
 		
 	};
 	# Find all subroutines in the source code tree
-	$stateref = find_subroutines($stateref);
+	$stateref = find_subroutines_and_includes($stateref);
 	
 	# First we analyse the code for use of globals and blocks to be transformed into subroutines	
 	$stateref = parse_fortran_src( $subname, $stateref );
@@ -151,6 +151,7 @@ sub parse_fortran_src {
 		$stref = parse_includes( $f, $stref );
 		$stref = parse_subroutine_calls( $f, $stref );
 		$stref = identify_globals_used_in_subroutine( $f, $stref );
+		$stref = identify_loops_breaks( $f, $stref );
 	}
 	else {    # includes
 		 # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
@@ -229,9 +230,9 @@ sub refactor_code {
 			my $line      = $annline->[0]||'';
 			my $tags_lref = $annline->[1];
 #			if ( not defined $tags_lref ) { die "BOOM!" }
-			my %tags = ( defined $tags_lref ) ? %{$tags_lref} : ( 'Nil' => [] );
-			print '*** ' . join( ',', keys(%tags) ), "\n";
-			print "$line\n";
+			my %tags = ( defined $tags_lref ) ? %{$tags_lref} : ();
+			print '*** ' . join( ',', keys(%tags) ). "\n";
+			print '*** '.$line."\n";
 			my $skip = 0;
 
 			if ( exists $tags{'Signature'} ) {
@@ -239,6 +240,8 @@ sub refactor_code {
 				my @args = @{ $tags{'Signature'}{'Args'} };
 				  my @exglobs=();
 				  for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Globals'} }){
+				  	print "INFO: INC $inc in $f\n";
+				  	if (not exists $stref->{'Includes'}{$inc}{'Root'} ) { die "$inc has no Root in $f"}
 				  	if (  $stref->{'Includes'}{$inc}{'Root'} eq $f ) {
 				  		print "INFO: $f is root for $inc\n";
 				  		next;
@@ -258,6 +261,14 @@ sub refactor_code {
 			}
 			if ( exists $tags{'ExGlobVarDecls'} ) {
 				for my $inc (keys %{  $stref->{'Subroutines'}{$f}{'Globals'} }) {
+                    if ($stref->{'Subroutines'}{$f}{'Nodes'}{'Include'}{$inc}==-1 ) {
+                        my $rline="      include '$inc'";
+                        $tags_lref->{'Include'}{'Name'}=$inc;
+                       push @{$rlines}, [ $rline, $tags_lref ];
+                    }
+                }
+				
+				for my $inc (keys %{  $stref->{'Subroutines'}{$f}{'Globals'} }) {
 					for my $var ( @{  $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } ) {
 						my $rline = $stref->{'Subroutines'}{$f}{'Commons'}{$var}{'Decl'};
 						if (not defined $rline) {
@@ -269,7 +280,8 @@ sub refactor_code {
 			}
 			if ( exists $tags{'Include'} ) {
 				my $inc =$tags{'Include'}{'Name'};
-				if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common' ) {
+				print "INFO: INC $inc in $f\n";
+				if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common' and $stref->{'Includes'}{$inc}{'Root'} ne $f) {
 					$skip = 1;
 				}
 			}
@@ -321,6 +333,9 @@ sub refactor_code {
 				# is the root for the globals; but that means we need to separate the globals per include				 
 				$skip = 1;
 			}
+			if ( exists $tags{'InBlock'} or exists $tags{'EndBlock'} ) {
+				$skip=1;
+			}
 			push @{$rlines}, $annline unless $skip;
 		}		
 	}
@@ -371,47 +386,62 @@ sub parse_subroutine_calls {
 				  )
 				{
 					print "\tCALL $name\n";
-					$called_subs{$name}=1;
+					
 #					print "Processing SUBROUTINE $name\n" if $V;
 					$stref = parse_fortran_src( $name, $stref );
 #					$stref->{'Subroutines'}{$name}{'Status'}=2;
-                for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Nodes'}{'Include'} } ) {
-                    if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common' ) {
-                    	$child_include_count{$inc}++;
-                    	if ($child_include_count{$inc}==2) {
-                    		print "INFO: $inc occurs in more than one child, make parent $f root\n";
-                    		$stref->{'Includes'}{$inc}{'Root'}=$f;
-                    		$stref->{'Subroutines'}{$f}{'Nodes'}{'Include'}{$inc}=-1;
-                    	}
+                    
+                    for my $inc ( keys %{ $stref->{'Subroutines'}{$name}{'Nodes'}{'Include'} } ) {
+                        if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common') {
+                    	   $child_include_count{$f}{$inc}++;
+#                    	   print $child_include_count{$f}{$inc};
+#                    	   print '<>',join(',',keys %{ $stref->{'Subroutines'}{$f}{'Nodes'}{'Include'} })," in $f\n";
+                        }
                     }
-                }
+                    $called_subs{$name}=$name;                                        
 				}
 			}
 		}
-		print "ANALYZING called subs in $f\n";
-		my %globs=();
-		%child_include_count=();
-		for my $name (keys %called_subs) {						
-                  for my $inc (keys %{ $stref->{'Subroutines'}{$name}{'Globals'} }) {
-                  	$child_include_count{$inc}++;                  	
-                        if ($stref->{'Includes'}{$inc}{'Root'} ne $name) {
-                            $globs{$inc} = union($globs{$inc},$stref->{'Subroutines'}{$name}{'Globals'}{$inc});
-                        } else {
-                            print "INFO: $name is root for $inc\n";
-                        }
-                    }
+#		print "ANALYZING called subs in $f\n";
+		my %globs=();		
+		my @child_is_root=();
+		for my $inc (keys %{$child_include_count{$f}}) {
+			if (not exists $stref->{'Subroutines'}{$f}{'Nodes'}{'Include'}{$inc}) {
+				 if ($child_include_count{$f}{$inc}==1 ) {
+					push @child_is_root,$inc;					
+				} elsif ($child_include_count{$f}{$inc}>1) {
+	                print "INFO: $inc occurs in more than one child, not present in parent => make parent $f root\n";
+	                $stref->{'Includes'}{$inc}{'Root'}=$f;
+	                $stref->{'Subroutines'}{$f}{'Nodes'}{'Include'}{$inc}=-1;
+	           }
+			}
 		}
-		for my $inc (keys %child_include_count) {
-			if ($child_include_count{$inc}>1) {
-				# make parent root, 
-			     # add union to parent's globs
-			     # delete $inc 
-			} 
+		
+	    for my $name (keys %called_subs) {	    	
+	    	my $root_inc='';                      
+            for my $inc (@child_is_root) {            	
+                if (exists $stref->{'Subroutines'}{$name}{'Nodes'}{'Include'}{$inc}) {
+                	$stref->{'Includes'}{$inc}{'Root'}=$name;
+                	$root_inc=$inc;
+                    print "INFO: $name is root for $inc\n";                    
+                }
+            }
+            for my $inc (keys %{ $stref->{'Subroutines'}{$name}{'Globals'} }) {
+            	next if $inc eq $root_inc;            
+                $globs{$inc}=union($globs{$inc}, $stref->{'Subroutines'}{$name}{'Globals'}{$inc});                
+	       }                       
+        }
+#        print Dumper($stref->{'Subroutines'}{$f});
+		for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Nodes'}{'Include'} }) {
+			print "INFO: $inc in $f\n";
+			next unless $stref->{'Includes'}{$inc}{'Type'} eq 'Common';
+			if (exists $stref->{'Subroutines'}{$f}{'Globals'}{$inc}) {
+			     $stref->{'Subroutines'}{$f}{'Globals'}{$inc}=union($stref->{'Subroutines'}{$f}{'Globals'}{$inc},$globs{$inc});
+			} else {
+				$stref->{'Subroutines'}{$f}{'Globals'}{$inc}=$globs{$inc};
+			}
 		}
-		# with the remaining $incs, union with the parent's globs unless they are really root!
-                  for my $inc (keys %globs) {
-                  	$stref->{'Subroutines'}{$f}{'Globals'}{$inc}=$globs{$inc};
-                  }
+#		die Dumper($stref->{'Subroutines'}{$f}{'Globals'}) if $f eq 'timemanager'; 
 	}
 	return $stref;
 } # END of parse_subroutine_calls()
@@ -511,10 +541,10 @@ sub parse_includes {
 				my $name = $1;
 				$stref->{'Subroutines'}{$f}{'Nodes'}{'Include'}{$name}=$index;
                 $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Include'}{'Name'}=$name;
-				if ( not exists $stref->{'Includes'}{$name} ) {
-
+				if ( $stref->{'Includes'}{$name}{'Status'} == 0 ) {
 					#				$line = 'C ' . $line;
 					print $line, "\n" if $V;
+					# Initial guess for Root
 					$stref->{'Includes'}{$name}{'Root'} = $f;
 					$stref = parse_fortran_src( $name, $stref );
 				}
@@ -715,26 +745,10 @@ sub refactor_blocks_into_subroutines {
 	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 		my $line = $srcref->[$index];
 
-#		if ( $line =~ /^C\s+/ && $line !~ /^C\s+(BEGIN|END)/ ) {
-#			next;
-#		}
-#		# skip subroutine decl
-#		$line =~ /^\s+subroutine/ && next;
-#		$line =~
-#/(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
-#		  && next;
 		if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
 			$in_block = 1;
 			$block    = $1;
 			push @{ $blocks{'OUTER'} }, $line;
-#			push @{ $stref->{'Subroutines'}{$f}{'Nodes'}
-#				  {'RefactoredSubroutineCall'}{'Pos'} }, $index;
-#				  # FIXME: there can be more than one RefactoredSubroutineCall so I guess we need $block as a key!
-#			push @{ $stref->{'Subroutines'}{$f}{'Nodes'}{'RefactoredSubroutineCall'}{'Name'} }, $block;
-#			push @{ $stref->{'Subroutines'}{$f}{'Nodes'}{'BeginBlock'}{'Pos'} },
-#			  $index;
-#            push @{ $stref->{'Subroutines'}{$f}{'Nodes'}{'BeginBlock'}{'Name'} },
-#              $block;
 			  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'RefactoredSubroutineCall'}{'Name'} =$block;
 			  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'BeginBlock'}{'Name'} =$block;
 			next;
@@ -855,6 +869,75 @@ sub refactor_blocks_into_subroutines {
 	}
 	return $stref;
 } # END of refactor_blocks_into_subroutines()
+# -----------------------------------------------------------------------------
+sub identify_loops_breaks {
+    ( my $f, my $stref ) = @_;
+    local $V=0;
+    my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+    
+    my %do_loops=();
+    my %gotos=();
+    my $nest=0;
+    for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+        my $line = $srcref->[$index];
+        next if $line =~ /^C\s+/;
+# BeginDo: 
+        $line=~/^\s+do\s+(\d+)\s+\w/ && do {
+        	my $label=$1;
+        	$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'BeginDo'}{'Label'} =$label;
+        	if (not exists $do_loops{$label} ) {  
+        	   @{$do_loops{$label}}=([$index],$nest);
+        	   $nest++;
+        	} else {        		
+        		push @{ $do_loops{$label}[0] },$index;
+#        		print STDERR "WARNING: $f: Found duplicate label $label at: ".join(',',@{ $do_loops{$label}[0] })."\n";
+        	}
+        	next;
+        };
+# Goto        
+        $line=~/^\s+.*\s+goto\s+(\d+)\s*$/ && do {
+            my $label=$1;
+            $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Goto'}{'Label'} =$label;
+            @{$gotos{$label}}=($index,$nest);            
+            next;
+        };
+        
+# continue can be end of do loop or break target (amongs others?)
+        $line=~/^\s{0,4}(\d+)\s+(continue|\w+)/ && do {
+        	my $label=$1;
+        	my $is_cont = $2 eq 'continue' ? 1 : 0 ;
+            if (exists $do_loops{$label} ) {
+            	if ($nest==$do_loops{$label}[1]+1) {            
+                    $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'EndDo'}{'Label'} =$label;
+                    $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'EndDo'}{'Count'} = scalar @{ $do_loops{$label}[0] };
+                    delete $do_loops{$label};
+                    $nest--;        	
+            	} else {
+            		print STDERR "WARNING: $f: Found continue for label $label but nesting level is wrong: $nest<>$do_loops{$label}[1]\n";
+            	}
+            } elsif (exists $gotos{$label}) {                
+                	my $target = 'GotoTarget';
+                	if ($nest<=$gotos{$label}[1]) {                                
+                    if ($is_cont ) {             
+                    	$target = 'NoopBreakTarget';       
+                        $stref->{'Subroutines'}{$f}{'Info'}->[$gotos{$label}[0]]{'Break'}{'Label'} =$label;
+                    } else {
+                    	$target = 'BreakTarget';                    	
+                    	$stref->{'Subroutines'}{$f}{'Info'}->[$gotos{$label}[0]]{'Break'}{'Label'} =$label;
+#                    	print STDERR "WARNING: $f: Found BREAK target not NOOP for label $label\n";                    	
+                    }
+                	} else {
+                		print STDERR "WARNING: $f: Found GOTO target not BREAK for label $label: wrong nesting $nest<>$gotos{$label}[1]\n";
+                	}
+                    $stref->{'Subroutines'}{$f}{'Info'}->[$index]{$target}{'Label'} =$label;
+                    delete $gotos{$label};                            
+            	
+            }
+            next;
+        };
+    }
+	return $stref;
+} # END of identify_loops_breaks()
 # -----------------------------------------------------------------------------
 sub read_fortran_src {
 	( my $s, my $stref ) = @_;
@@ -993,7 +1076,7 @@ sub read_fortran_src {
 } # END of read_fortran_src()
 # -----------------------------------------------------------------------------
 # Find all source files in the current directory
-sub find_subroutines {
+sub find_subroutines_and_includes {
     my $stref = shift;
     my $dir   = '.';
     my $ext   = '.f';
@@ -1044,11 +1127,18 @@ sub find_subroutines {
                       . " exists.\n";
                 }
             };
+             $line =~ /^\s*include\s+\'(\w+)\'/ && do {
+             	my $inc=$1;
+             	if (not exists $stref->{'Includes'}{$inc}) {
+             		 $stref->{'Includes'}{$inc}{'Status'}=0;
+             	}
+             };
+            
         }
         close $SRC;
     }
     return $stref;
-} # END of find_subroutines()
+} # END of find_subroutines_and_includes()
 
 # -----------------------------------------------------------------------------
 #
@@ -1271,7 +1361,7 @@ sub union {
 	for my $elt (@{ $bref} ) {
 		  $a{$elt}=1;
 	}
-	my @u=keys %a;
+	my @u=sort keys %a;
 	return \@u;
 } # END of union()
 # -----------------------------------------------------------------------------
