@@ -3,12 +3,7 @@ use warnings;
 use strict;
 
 =TODOs
-- for the root, we do need the include of the common vars.
-- The 'is root for' approach is broken: somehow, in Fortran, two subroutines share vars if they both include the same common block, even if they don't depend on one another.
-- So what I actually need is not the first encounter of an include, for example initialize() nad advance() both include 'includehanna';
-- So what happens is that the values for those variable are set in initialize() and used in advance(). That means that they must be function args of both routines and declared in the one above that!
-So the rule is: if, in a given subroutine, only a single subroutine uses a given include, that subroutine is the root; but if there is more than one, it must be the one above that!
-     
+Conversion of labeled do loops to block do loops     
 =cut
 
 =pod
@@ -80,9 +75,11 @@ After building this structure, what we need is to go through it an revert it so 
 
 =cut
 
-use Data::Dumper;
 use File::Find;
-our $V = 0;
+use File::Copy;
+use Digest::MD5;
+our $V = 1;
+use Data::Dumper;
 
 &main();
 # -----------------------------------------------------------------------------
@@ -91,46 +88,36 @@ sub main {
 	my $subname = $ARGV[0];
 	
 	my $stateref = {
+		'Top' => $subname,
 		'Includes'   => {},
-		    # $name => {Root =>$source, Type => Common | Param | Both,'Commons'    => {},    'Parameters' => {},    }
 		'Subroutines' => {
 			#		 $name => {
 			#			'Source' => $src,
-			#			'Lines' =>[],
-			#			'Blocks'=>{$block=>[]},
-			#		  'HasBlocks'=>0|1
-			#		  'Nodes'=>	{
-			#		  	'SubroutineCall'=>{
-			#		  		$name=>{'Pos'=>[$index,...],'Globals'=>[],...};
-			#            }
+			#			'Lines' =>[$line],
+			#			'Blocks'=>{},
+			#		    'HasBlocks'=>0|1
 			#		    'Signature'=>{'Pos'=>[$index,...],'Globals'=>[],...};
 			#		    'VarDecls'=>
 			#		    'RefactoredCode' => {},
 			#		  }
 	
-		},
-		
-		
+		}
 	};
 	# Find all subroutines in the source code tree
 	$stateref = find_subroutines_and_includes($stateref);
 	
 	# First we analyse the code for use of globals and blocks to be transformed into subroutines	
-	$stateref = parse_fortran_src( $subname, $stateref );
+	$stateref = parse_fortran_src( $subname, $stateref );	              
 	
-	# Then we create an "inverted index" of the information we have gathered, by line of the orginal source.
-	# One important point is that we must mark all blocks to be refactored as such, so those lines can be skipped!
-#	$stateref = get_info_per_line($stateref);	
 #	show_info($stateref);
 
 	# Refactor the source
-	$stateref = refactor_code('timemanager',$stateref);	
-#	print Dumper($stateref->{'Subroutines'}{'timemanager'}{'RefactoredCode'});
-#	print Dumper($stateref->{'Subroutines'}{'particles_main_loop'}{'RefactoredCode'});
-#	$stateref = refactor_all($stateref);
-	# Emit the refactored source
-	emit_refactored_code('particles_main_loop',$stateref);
+#	$stateref = refactor_subroutine('timemanager',$stateref);	
+	$stateref = refactor_all_subroutines($stateref);
 	
+	# Emit the refactored source
+#	emit_refactored_subroutine('tlift','../Test',$stateref);
+	emit_all($stateref);
 	exit(0);
 
 } # END of main()
@@ -138,7 +125,12 @@ sub main {
 # -----------------------------------------------------------------------------
 # This is the most important routine
 # It parses the FORTRAN source as discussed above
-# T
+# Identification of
+# Signature
+# VarDecl
+# InBlock etc
+# Includes
+
 sub parse_fortran_src {
 	( my $f, my $stref ) = @_;
     # Read the source and do some minimal processsing
@@ -151,17 +143,18 @@ sub parse_fortran_src {
 
 	# 3. Parse includes, recursively doing 0/1/2
 	if ( not $is_incl ) {
-		$stref = detect_blocks( $f, $stref );
-		$stref = parse_includes( $f, $stref );		
-		$stref = parse_subroutine_calls( $f, $stref );		
-		$stref = identify_globals_used_in_subroutine( $f, $stref );		
+		$stref = detect_blocks( $f, $stref );				
+		$stref = parse_includes( $f, $stref );				
+		$stref = parse_subroutine_calls( $f, $stref );				
+		$stref = identify_globals_used_in_subroutine( $f, $stref );
+				
 	# 5. Split the source based on the block markers
 	# As there could be several blocks (later), use a hash per block
 	# This could happen in any file except includes; but include processing never comes here
-	    if ($stref->{'Subroutines'}{$f}{'HasBlocks'}) {
+	    if ($stref->{'Subroutines'}{$f}{'HasBlocks'}==1) {
 	        $stref = separate_blocks( $f, $stref );
 	    }		
-	    $stref = identify_loops_breaks( $f, $stref );
+	    $stref = identify_loops_breaks( $f, $stref );	    
 	}
 	else {    # includes
 		 # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
@@ -203,7 +196,7 @@ This is a node called 'RefactoredSubroutineCall'
 (* Break: keep as is; add a comment to identify it as a break)
 * BreakTarget: replace CONTINUE with "call noop"
 =cut
-sub refactor_code {
+sub refactor_subroutine {
 	( my $f, my $stref ) = @_;
     if ($V) {
         print "\n\n";
@@ -211,7 +204,7 @@ sub refactor_code {
         print "Refactoring $f\n";
         print "#" x 80, "\n";
     }
-
+#print Dumper($stref->{'Subroutines'}{$f}{'Info'});
     my @lines    = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
     my @info     = @{ $stref->{'Subroutines'}{$f}{'Info'} };
     my $annlines = [];
@@ -222,17 +215,18 @@ sub refactor_code {
     
     my $rlines = [];
     if ( $stref->{'Subroutines'}{$f}{'HasCommons'} ) {
-        
+    	my @globs=();
+                    for my $inc (keys %{  $stref->{'Subroutines'}{$f}{'Globals'} }) {
+                        @globs=(@globs, @{  $stref->{'Subroutines'}{$f}{'Globals'}{$inc} });
+                    }
+        my %globals=map {$_=>1} @globs;
         for my $annline ( @{$annlines} ) {
             my $line      = $annline->[0]||'';
             my $tags_lref = $annline->[1];
 #           if ( not defined $tags_lref ) { die "BOOM!" }
             my %tags = ( defined $tags_lref ) ? %{$tags_lref} : ();
-            if ($f=~/particle/) {
-            	local $V=1;
             print '*** ' . join( ',', keys(%tags) ). "\n" if $V;
             print '*** '.$line."\n" if $V;
-            }
             my $skip = 0;
 
             if ( exists $tags{'Signature'} ) {
@@ -251,6 +245,7 @@ sub refactor_code {
 #                   }
                      @exglobs=(@exglobs,@{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } );
                   }
+                  print join(',',@exglobs),"\n" if $V;
                 my $rline =
                     '      subroutine ' 
                   . $name . '('
@@ -259,11 +254,21 @@ sub refactor_code {
                 push @${rlines}, [ $rline, $tags_lref ];
                 $skip = 1;
             }
+            if ( exists $tags{'Include'} ) {
+                my $inc =$tags{'Include'}{'Name'};
+                print "INFO: INC $inc in $f\n" if $V;
+                if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common' and ( $stref->{'Includes'}{$inc}{'Root'} ne $f
+                or ( $stref->{'Includes'}{$inc}{'Root'} eq $f and $f eq $stref->{'Top'}))
+                ) {
+                    $skip = 1;
+                }
+            }
+                        
             if ( exists $tags{'ExGlobVarDecls'} ) {
-            	if ($f eq 'particles_main_loop') {die "BOOM!"}
             	# We abuse ExGlobVarDecls as a hook for the addional includes
                 for my $inc (keys %{  $stref->{'Subroutines'}{$f}{'Globals'} }) {
-                    if ($stref->{'Subroutines'}{$f}{'Includes'}{$inc}==-1 ) {
+                	print "INC: $inc, root: $stref->{'Includes'}{$inc}{'Root'} \n" if $V;
+                    if ($stref->{'Subroutines'}{$f}{'Includes'}{$inc}==-1 and $f ne $stref->{'Top'}) { # FIXME: not sure about this!
                         my $rline="      include '$inc'";
                         $tags_lref->{'Include'}{'Name'}=$inc;
                        push @{$rlines}, [ $rline, $tags_lref ];
@@ -272,32 +277,39 @@ sub refactor_code {
                 
                 for my $inc (keys %{  $stref->{'Subroutines'}{$f}{'Globals'} }) {
                     for my $var ( @{  $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } ) {
-                        my $rline = $stref->{'Subroutines'}{$f}{'Commons'}{$var}{'Decl'};
+                    	print "\tGLOBAL $var from $inc in $f\n";
+                        my $rline = $stref->{'Subroutines'}{$f}{'Commons'}{$inc}{$var}{'Decl'};
                         if (not defined $rline) {
-                            $rline ="*** NO DECL for $var!";
+                            $rline ="*** NO DECL for $var in $f!";
                         }                   
                         push @{$rlines}, [ $rline, $tags_lref ];
                     }
                 }
             }
-            if ( exists $tags{'Include'} ) {
-                my $inc =$tags{'Include'}{'Name'};
-                print "INFO: INC $inc in $f\n" if $V;
-                if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common' and $stref->{'Includes'}{$inc}{'Root'} ne $f) {
-                    $skip = 1;
-                }
+            if (exists $tags{'VarDecl'}) {
+            	my @vars=@{$tags{'VarDecl'}};
+            	my $rline=$line;
+            	for my $var (@vars) {
+            		if (exists $globals{$var}) {
+            			$rline=~s/$var\s*\,?//;
+            		}
+            	}
+            	push @{$rlines}, [ $rline, $tags_lref ];
+            	$skip=1;
             }
             if ( exists $tags{'SubroutineCall'} ) {
 #               print "SUBCALL: $line\n";               
                 # simply tag the common vars onto the arguments
                 my $name=$tags{'SubroutineCall'}{'Name'};
                 my @globals=();
-                for my $inc (keys %{ $stref->{'Subroutines'}{$name}{'Globals'} }) {             
+                for my $inc (keys %{ $stref->{'Subroutines'}{$name}{'Globals'} }) {
+                	next if $stref->{'Includes'}{$inc}{'Root'} eq $name;
                     @globals=(@globals,@{ $stref->{'Subroutines'}{$name}{'Globals'}{$inc} });
                 }   
-                if (@globals) {unshift @globals,''}             
-                my $global_args_str = join(',',@globals);
                 my $orig_args_str=$tags{'SubroutineCall'}{'Args'};
+                if (@globals && $orig_args_str ne '') {unshift @globals,''}             
+                my $global_args_str = join(',',@globals);
+                
                 $line=~s/call\s.*$//;
                 my $rline = "call $name($orig_args_str $global_args_str)\n";
                 push @{$rlines}, [ $line.$rline, $tags_lref ];
@@ -309,7 +321,7 @@ sub refactor_code {
     $annlines = $rlines;
      
     
-    if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) {
+    if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) { 
     	$rlines   = [];
     	my @blocks=();
         my $name='NONE'; 
@@ -333,7 +345,7 @@ sub refactor_code {
             }
             if ( exists $tags{'InBlock'} or exists $tags{'EndBlock'} ) {                
                 if ($name ne 'NONE') {
-                    push @{ $stref->{'Subroutines'}{$name}{'Info'} },$tags_lref ;
+                    push @{ $stref->{'Subroutines'}{$f}{'Blocks'}{$name}{'Info'} },$tags_lref ;
                 }               
                 $skip=1;
 #               if( exists $tags{'EndBlock'} and $name ne 'NONE') {
@@ -344,23 +356,22 @@ sub refactor_code {
         }       
     
 	    for my $name (@blocks) {
-	        $stref=create_subroutine_source($name,$stref);
+	        $stref=create_subroutine_source($name,$f,$stref);
 	        # Now we must parse this source	        
-	        die Dumper($stref->{'Subroutines'}{$f}{'Info'}) if $name=~/particle/;
-	        $stref = get_var_decls( $name, $stref );
-	        $stref = detect_blocks( $name, $stref );
-	        $stref = parse_includes( $name, $stref );      
-	        $stref = parse_subroutine_calls( $name, $stref );      
-	        $stref = identify_globals_used_in_subroutine( $name, $stref );     
+	        $stref = get_var_decls( $name, $stref );	        
+#	        $stref = detect_blocks( $name, $stref );
+	        $stref = parse_includes( $name, $stref );      	        
+	        $stref = parse_subroutine_calls( $name, $stref );	              
+	        $stref = identify_globals_used_in_subroutine( $name, $stref );
 	        # Now we're ready to refactor this source	        
-	        $stref = refactor_code($name,$stref); # shiver!
+	        $stref = refactor_subroutine($name,$stref); # shiver!
 	    }
     } # HasBlocks
     $annlines = $rlines;
     $rlines   = [];
     for my $annline ( @{$annlines} ) {
         my $line      = $annline->[0] || ''; # FIXME: why would line be undefined?
-        my $tags_lref = $annline->[1];
+        my $tags_lref = $annline->[1] || {};
         my %tags      = %{$tags_lref};
         if ( not exists $tags{'Comments'} ) {
             print $line,"\n" if $V;
@@ -374,30 +385,73 @@ sub refactor_code {
     }
 
     return $stref;
-} # END Of refactor_code()
+} # END of refactor_subroutine()
 # -----------------------------------------------------------------------------
-sub refactor_all {
+sub refactor_all_subroutines {
 	( my $stref ) = @_;
+#	print Dumper(keys %{ $stref->{'Subroutines'} });
 	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
-	   $stref = refactor_code($f,$stref);
+		if (not defined $stref->{'Subroutines'}{$f}{'Status'}) {
+			$stref->{'Subroutines'}{$f}{'Status'} = 0;
+			print STDERR "WARNING: no Status for $f\n";
+		}
+        next if  $stref->{'Subroutines'}{$f}{'Status'} == 0;		
+	   $stref = refactor_subroutine($f,$stref);
     }
 	return $stref;
-} # END Of refactor_all()
+} # END of refactor_all_subroutines()
 # -----------------------------------------------------------------------------
-sub emit_refactored_code { (my $f, my $stref ) = @_;
-	local $V=1;
-	my $srcref=$stref->{'Subroutines'}{$f}{'RefactoredCode'};
-    if ( defined $srcref ) {
-        my %child_include_count=();
-        my %called_subs=();
-        for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-            my $line = $srcref->[$index];
+sub emit_refactored_subroutine { (my $f, my $dir, my $stref ) = @_;	   
+    	my $srcref=$stref->{'Subroutines'}{$f}{'RefactoredCode'};
+    	my $s=$stref->{'Subroutines'}{$f}{'Source'};
+    	print "INFO: emitting refactored code fo $s\n" if $V;
+    	my $mode='>';
+    	if (-e "$dir/$s") {
+    		$mode='>>';
+    	}
+    	open my $SRC, $mode,"$dir/$s" or die $!;
+    	if ($mode eq '>>') {
+    		print $SRC "\n*** SUBROUTINE $f ***\n";
+    	}
+        for my $line (  @{$srcref} ) {            
+            print $SRC "$line\n";
             print "$line\n" if $V;
         }
-    }	
-} # END of emit_refactored_code()
+        close $SRC;
+} # END of emit_refactored_subroutine()
 # -----------------------------------------------------------------------------
-
+sub emit_all { (my $stref ) = @_;
+	my $dir='../RefactoredSources';
+    if (not -e $dir) {
+    	mkdir $dir;
+    	my @incs = glob('include*');
+    	map { copy($_,"$dir/$_") } @incs; 
+    } elsif (not -d $dir) {
+    	die "$dir exists but is not a directory!\n";
+    } else {
+        my @oldsrcs=glob("$dir/*.f");
+        map { unlink $_} @oldsrcs;
+        # Check if includes have changed 
+        my @incs = glob('include*');
+        for my $inc (@incs) {
+            open(my $OLD, $inc);
+            binmode($OLD);
+            open(my $NEW, $inc);
+            binmode($NEW);
+            if(
+                Digest::MD5->new->addfile($OLD)->hexdigest
+                ne
+                Digest::MD5->new->addfile($NEW)->hexdigest
+            ) {
+        		 copy($inc,"$dir/$inc");
+        	}
+        }
+    }   
+    for my $f ( keys %{ $stref->{'Subroutines'} } ) {
+        emit_refactored_subroutine($f,$dir,$stref);	
+    }   
+} # END of emit_all()
+# -----------------------------------------------------------------------------
 
 sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
@@ -413,6 +467,9 @@ sub parse_subroutine_calls {
 			if ( $line =~ /call\s(\w+)\((.*)\)/ ) { 	
 				my $name   = $1;
 				my $argstr = $2;
+				if ($argstr =~ /^\s*$/) {
+					$argstr='';
+				}
 				$called_subs{$name}=$name; 
                 $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'SubroutineCall'}{'Args'}=$argstr;
                 $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'SubroutineCall'}{'Name'}=$name;
@@ -466,7 +523,6 @@ sub parse_subroutine_calls {
                 $globs{$inc}=union($globs{$inc}, $stref->{'Subroutines'}{$name}{'Globals'}{$inc});                
 	       }                       
         }
-#        print Dumper($stref->{'Subroutines'}{$f});
 		for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {
 			print "INFO: $inc in $f\n" if $V;
 			next unless $stref->{'Includes'}{$inc}{'Type'} eq 'Common';
@@ -476,21 +532,23 @@ sub parse_subroutine_calls {
 				$stref->{'Subroutines'}{$f}{'Globals'}{$inc}=$globs{$inc};
 			}
 		}
-#		die Dumper($stref->{'Subroutines'}{$f}{'Globals'}) if $f eq 'timemanager'; 
 	}
 	return $stref;
 } # END of parse_subroutine_calls()
 # -----------------------------------------------------------------------------
 # Identify which globals from the includes are used in the subroutine 
 sub identify_globals_used_in_subroutine {
-	( my $f, my $stref ) = @_;	
+	( my $f, my $stref ) = @_;		
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	if ( defined $srcref ) {
 		my %commons=();
 		if (not exists $stref->{'Subroutines'}{$f}{'Commons'} ) {
-			for my $i ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
-	            if ( $stref->{'Includes'}{$i}{'Type'} eq 'Common' ) {
-	            	$commons{$i}= $stref->{'Includes'}{$i}{'Commons'};
+			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
+	            if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common'
+	            and  ($stref->{'Includes'}{$inc}{'Root'} ne $f or
+	            ($stref->{'Includes'}{$inc}{'Root'} eq $f and $f eq $stref->{'Top'}))
+	            ) {
+	            	$commons{$inc}= $stref->{'Includes'}{$inc}{'Commons'};
 	            }
 			}					
 			$stref->{'Subroutines'}{$f}{'Commons'}=\%commons;
@@ -500,16 +558,16 @@ sub identify_globals_used_in_subroutine {
 		}
 		
 		for my $inc (keys %commons) {
-			print "GLOBAL VAR ANALYSIS for $inc in $f\n" if $V;
+			print "\nGLOBAL VAR ANALYSIS for $inc in $f\n" if $V;
 			my @inherited_globs = (defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc}) ? @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } : ();
 			my @globs = ();
-		my @tvars = keys %{ $commons{$inc} };
-		
-		if ($V) {
-			for my $global ( @tvars ) {
-				print "$global\n";
-			}
-		}
+#		my @tvars = keys %{ $commons{$inc} };
+		my %tvars =  %{ $commons{$inc} };
+#		if ($V) {
+#			for my $global ( @tvars ) {
+#				print "$global\n";
+#			}
+#		}
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $line = $srcref->[$index];
 			if ( $line =~ /^C\s+/ ) {
@@ -520,31 +578,39 @@ sub identify_globals_used_in_subroutine {
 				my $argstr = $2;
 				my @args   = split( /\s*,\s*/, $argstr );
 
-#				$stref->{'Subroutines'}{$f}{'Nodes'}{'Signature'}{'Args'} =
-#				  \@args;
-#				$stref->{'Subroutines'}{$f}{'Nodes'}{'Signature'}{'Name'} =
-#				  $name;
-#				push
-#				  @{ $stref->{'Subroutines'}{$f}{'Nodes'}{'Signature'}{'Pos'} },
-#				  $index;
 				  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Args'}=\@args;
 				  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Name'}=$name;
 			}
-			for my $var ( @tvars ) {
-				next if not defined $var;
-				if ( $line =~ /\W$var\W/ ) {
-					print "FOUND $var in $line\n" if $V;
-					push @globs, $var;
-					undef $var;
+#			next if $line=~/^\s*\d+\s+continue/;
+#			next if $line=~/^\s+endif\s*$/;
+#			next if $line=~/^\s+end\s+do/;
+
+#			for my $var ( @tvars ) {
+#				next if not defined $var;
+#				# This is the slowest line in the code
+#				if ( $line =~ /\W$var\W/ or  $line =~ /\W$var\s*$/ ) {
+#					print "FOUND global $var in $line\n" if $V;
+#					push @globs, $var;
+#					undef $var;
+#				}
+#			}
+            my @chunks= split(/\W+/,$line);
+			for my $mvar (@chunks) {
+#				next if $mvar =~/\b(?:if|then|do|goto|integer|real|call|\d+)\b/; # is slower!
+				if (exists $tvars{$mvar}) {
+#					print "FOUND global $mvar in $line\n" if $V;
+                    push @globs, $mvar;
+                    delete $tvars{$mvar};
 				}
 			}
 		}
 		@globs=@{ union(\@globs,\@inherited_globs)  };
 		if ($V) {
-			print "\nCOMMON VARS from $inc in subroutine $f:\n\n";
+			print "\nALL GLOBAL VARS from $inc in subroutine $f:\n\n";
 			for my $var (@globs) {
 				print "$var\n";
 			}
+			print "\n";
 		}
 		$stref->{'Subroutines'}{$f}{'Globals'}{$inc} =
 		  \@globs;		 
@@ -554,60 +620,47 @@ sub identify_globals_used_in_subroutine {
 } # END of identify_globals_used_in_subroutine()
 # -----------------------------------------------------------------------------
 sub detect_blocks {
-	( my $s, my $stref ) = @_;
-    my $srcref = $stref->{'Subroutines'}{$s}{'Lines'};
-    if ( defined $srcref ) {
-        my $has_blocks = 0;    
-        for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-            my $line = $srcref->[$index];        
-            $stref->{'Subroutines'}{$s}{'Info'}->[$index]={};
+	   ( my $s, my $stref ) = @_;
+	    $stref->{'Subroutines'}{$s}{'HasBlocks'} = 0;
+        my $srcref = $stref->{'Subroutines'}{$s}{'Lines'};
+        for my $line (  @{$srcref} ) {
             if ( $line =~ /^C\s/i ) {
-              $stref->{'Subroutines'}{$s}{'Info'}->[$index]{'Comments'}={};            
-                if ( $line =~ /C\s+BEGIN\sSUBROUTINE\s\w+/ ) {
-                    $has_blocks = 1;
+                if ( $line =~ /C\s+BEGIN\sSUBROUTINE\s\w+/ ) {                    
+                    $stref->{'Subroutines'}{$s}{'HasBlocks'} = 1;
                 }
-                print "$line\n" if $V;
-                next;
+                last;
             }
-            if ( $line =~ /^\!\s/ ) {
-              $stref->{'Subroutines'}{$s}{'Info'}->[$index]{'TrailingComments'}={};
-                print "$line\n" if $V;
-                next;
-            }
-            print "$line\n" if $V;
         }
-        $stref->{'Subroutines'}{$s}{'HasBlocks'} = $has_blocks;
-    }
-    return $stref;
+        return $stref;
 } # END of detect_blocks()
 # -----------------------------------------------------------------------------
 sub create_subroutine_source {
-    ( my $f, my $stref ) = @_;
-    my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
-    if ( defined $srcref ) {
-    
-	    my @lines    = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
-	    my @info     = @{ $stref->{'Subroutines'}{$f}{'Info'} };
+    ( my $f,my $p, my $stref ) = @_;
+ 
+	    my @lines    = @{ $stref->{'Subroutines'}{$p}{'Blocks'}{$f}{'Lines'} };
+	    my @info     = @{ $stref->{'Subroutines'}{$p}{'Blocks'}{$f}{'Info'} };
 #	    my $annlines = [];
 	    my $index=0;
+	    
 	    my $rlines = [];
-	    push @{$rlines},$stref->{'Subroutines'}{$f}{'Sig'};
+	    push @{$rlines},$stref->{'Subroutines'}{$p}{'Blocks'}{$f}{'Sig'};
 	    $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Name'}=$f;
-	    $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Args'}=$stref->{'Subroutines'}{$f}{'Args'};
+	    $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Args'}=$stref->{'Subroutines'}{$p}{'Blocks'}{$f}{'Args'};
 	    $index++;
-	    for my $inc (keys %{$stref->{'Subroutines'}{$f}{'Includes'} } ) {
+	    for my $inc (keys %{$stref->{'Subroutines'}{$p}{'Blocks'}{$f}{'Includes'} } ) {
             push @{$rlines}, "        include '$inc'" ;
             $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Include'}{'Name'}=$inc;
             $index++;
         }
         my $first=1;
-	    for my $decl (@{$stref->{'Subroutines'}{$f}{'Decls'} } ) {
+	    for my $decl (@{$stref->{'Subroutines'}{$p}{'Blocks'}{$f}{'Decls'} } ) {
+	    	my $var=shift @{$stref->{'Subroutines'}{$p}{'Blocks'}{$f}{'Args'} };
 	    	push @{$rlines}, "  $decl";
 	    	if ($first==1) {
 	    		$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'ExGlobVarDecls'}={};
 	    		$first=0;
 	    	}
-	    	$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'VarDecl'}={};
+	    	$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'VarDecl'}=[$var];
 	    	$index++;
 	    }           
         for my $line (@lines) {     
@@ -620,10 +673,24 @@ sub create_subroutine_source {
         $stref->{'Subroutines'}{$f}{'Lines'} =$rlines;
 #        $stref->{'Subroutines'}{$f}{'Info'} =[];
         $stref->{'Subroutines'}{$f}{'Status'}=1;
-        delete $stref->{'Subroutines'}{$f}{'Decls'};
-        delete $stref->{'Subroutines'}{$f}{'Sig'};
-        delete $stref->{'Subroutines'}{$f}{'Args'};
-    }     
+        $stref->{'Subroutines'}{$f}{'HasBlocks'} = 0;
+        $stref->{'Subroutines'}{$f}{'Source'} = $stref->{'Subroutines'}{$p}{'Source'} ;
+        if ($V) {
+        @lines    = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
+        @info     = @{ $stref->{'Subroutines'}{$f}{'Info'} };
+	    my $annlines = [];
+	    for my $line (@lines) {     
+	        my $tags = shift @info;
+	       push @{$annlines}, [ $line, $tags ];
+	    }            
+        for my $annline ( @{$annlines} ) {
+            my $line      = $annline->[0]||'';
+            my $tags_lref = $annline->[1];
+            my %tags = ( defined $tags_lref ) ? %{$tags_lref} : ();
+            print STDERR '*** ' . join( ',', keys(%tags) ). "\n";
+            print STDERR '*** '.$line."\n";
+            }
+        }
     return $stref;
 } # END of create_subroutine_source()
 # -----------------------------------------------------------------------------
@@ -631,10 +698,9 @@ sub create_subroutine_source {
 sub parse_includes {
 	( my $f, my $stref ) = @_;
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
-	if ( defined $srcref ) {
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $line = $srcref->[$index];
-			if ( $line =~ /^C\s+/ ) {
+			if ( $line =~ /^C\s+/  or $line =~ /^\!\s/) {
 				next;
 			}
 
@@ -645,7 +711,6 @@ sub parse_includes {
 				$stref->{'Subroutines'}{$f}{'Includes'}{$name}=$index;
                 $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Include'}{'Name'}=$name;
 				if ( $stref->{'Includes'}{$name}{'Status'} == 0 ) {
-					#				$line = 'C ' . $line;
 					print $line, "\n" if $V;
 					# Initial guess for Root
 					$stref->{'Includes'}{$name}{'Root'} = $f;
@@ -654,10 +719,9 @@ sub parse_includes {
 				else {
 					print $line, " already processed\n" if $V;
 				}
-
 			}
 		}
-	}
+
 	return $stref;
 } # END of parse_includes()
 # -----------------------------------------------------------------------------
@@ -667,7 +731,6 @@ sub get_var_decls {
 	
     my $is_incl = exists $stref->{'Includes'}{$f} ? 1 : 0;
     my $sub_or_incl = $is_incl ? 'Includes' : 'Subroutines';
-#    my $f = $is_incl ? $s : $stref->{'Subroutines'}{$s}{'Source'};
 	
 	my $srcref = $stref->{$sub_or_incl}{$f}{'Lines'};
 	if ( defined $srcref ) {
@@ -676,10 +739,15 @@ sub get_var_decls {
 		my $first = 1;
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $line = $srcref->[$index];
-
+            $stref->{$sub_or_incl}{$f}{'Info'}->[$index]={};
 			if ( $line =~ /^C\s+/ ) {
+				$stref->{$sub_or_incl}{$f}{'Info'}->[$index]{'Comments'}={};
 				next;
 			}
+            if ( $line =~ /^\!\s/ ) {
+              $stref->{$sub_or_incl}{$f}{'Info'}->[$index]{'TrailingComments'}={};
+                next;
+            }
 
 			# real surfstrn(0:nxmaxn-1,0:nymaxn-1,1,2,maxnests)
 			if ( $line =~
@@ -689,7 +757,7 @@ sub get_var_decls {
 				my $type    = $1;
 				my $varlst  = $2;
 				my $tvarlst = $varlst;
-#print $line,"\n";
+
 				if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
 					while ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
 						my $chunk  = $1;
@@ -697,22 +765,19 @@ sub get_var_decls {
 						$chunkr =~ s/,/;/g;
 						my $pos = index( $tvarlst, $chunk );
 						substr( $tvarlst, $pos, length($chunk), $chunkr );
-
-						#	print "FOUND $line:\n$chunk\t$chunkr\n$tvarlst\n";
 					}
 				}
 
- #			$tvarlst =~ s/\(([^\(\),]*?),([^\(]*?)\)/($1;$2)/g && print $tvarlst ,"\n";
 				my @tvars = split( /\s*\,\s*/, $tvarlst );
 				my $p = '';
+				my @varnames=();
 				for my $var (@tvars) {
 					$var =~ s/^\s+//;
 					$var =~ s/\s+$//;
 					my $tvar = $var;
 					$tvar =~ s/\(.*?\)/(0)/g;
 					if ( $tvar =~ s/\(.*?\)// ) {
-						$tvar =~ s/\*\d+//
-						  ;    # FIXME: char string handling is not correct!
+						$tvar =~ s/\*\d+//; # FIXME: char string handling is not correct!
 						$vars{$tvar}{'Kind'} = 'Array';
 						$p = '()';
 					}
@@ -721,14 +786,16 @@ sub get_var_decls {
 					}
 					$vars{$tvar}{'Type'} = $type;
 					$var =~ s/;/,/g;
-					$vars{$tvar}{'Decl'} = "      $type $var"
-					  ; # TODO: this should maybe not be a textual representation					
+					$vars{$tvar}{'Decl'} = "        $type $var"; # TODO: this should maybe not be a textual representation
+					
+					  push @varnames,$tvar;					
 				}
-
-			  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'VarDecl'}={};
+              print "\t",join(',',@varnames),"\n" if $V;
+#              print "$f : $sub_or_incl; $index\n" if $V;
+			  $stref->{$sub_or_incl}{$f}{'Info'}->[$index]{'VarDecl'}=\@varnames;
 				if ($first) {
 					$first = 0;
-					  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'ExGlobVarDecls'}={};					  
+					  $stref->{$sub_or_incl}{$f}{'Info'}->[$index]{'ExGlobVarDecls'}={};					  
 				}
 			}
 
@@ -835,7 +902,7 @@ sub get_commons_params_from_includes {
 
 sub separate_blocks {
 	( my $f, my $stref ) = @_;
-    local $V=0;
+    
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	my %vars   = %{ $stref->{'Subroutines'}{$f}{'Vars'} };
 	my %occs   = ();
@@ -889,8 +956,8 @@ sub separate_blocks {
 		print "\nVARS in $block:\n\n" if $V;
 		for my $line (@lines) {
 			for my $var ( keys %tvars ) {
-				if ( $line =~ /\W$var\W/ ) {
-					print "$var\n" if $V;
+				if ( $line =~ /\W$var\W/ or $line=~/\W$var\s*$/) {
+					print "FOUND $var\n" if $V;
 					$occs{$block}{$var} = $var;
 					delete $tvars{$var};
 				}
@@ -970,15 +1037,16 @@ sub separate_blocks {
 #        $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Lines'} = $blocks{$block};
 #        $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Source'} = $stref->{'Subroutines'}{$f}{'Source'};
         for my $inc (keys %{$stref->{'Subroutines'}{$f}{'Includes'}}) {
-        	if($stref->{'Subroutines'}{$f}{'Includes'}{$inc}!=-1) {
+#        	if($stref->{'Subroutines'}{$f}{'Includes'}{$inc}!=-1) {
 		      $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Includes'}{$inc} = -2;
-        	}
+#        	}
         }
 		if ($V) {
 		print $sig,"\n";
-		print join("|n",@{$decls}),"\n";
+		print join("\n",@{$decls}),"\n";
 		}		
 	}
+	
 	return $stref;
 } # END of separate_blocks()
 # -----------------------------------------------------------------------------
@@ -1131,7 +1199,6 @@ sub read_fortran_src {
 				$cont = 1;
 			}
 			elsif ( $line =~ /^C\ / && ( $cont == 1 ) ) {
-
 				# A comment occuring after a continuation line. Skip!
 				next;
 			}
