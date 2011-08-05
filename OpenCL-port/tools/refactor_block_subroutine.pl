@@ -159,7 +159,7 @@ sub parse_fortran_src {
 	# As there could be several blocks (later), use a hash per block
 	# This could happen in any file except includes; but include processing never comes here
 	    if ($stref->{'Subroutines'}{$f}{'HasBlocks'}) {
-	        $stref = refactor_blocks_into_subroutines( $f, $stref );
+	        $stref = separate_blocks( $f, $stref );
 	    }		
 	    $stref = identify_loops_breaks( $f, $stref );
 	}
@@ -812,14 +812,12 @@ sub get_commons_params_from_includes {
 } # END of get_commons_params_from_includes()
 # -----------------------------------------------------------------------------
 
-sub refactor_blocks_into_subroutines {
+sub separate_blocks {
 	( my $f, my $stref ) = @_;
     local $V=0;
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	my %vars   = %{ $stref->{'Subroutines'}{$f}{'Vars'} };
 	my %occs   = ();
-
-	#        my %occs=%{$stref->{'Occs'}{$f}};
 	my %blocks   = ();
 	my $in_block = 0;
 	my $block    = 'OUTER';
@@ -852,8 +850,8 @@ sub refactor_blocks_into_subroutines {
 
 	for my $block ( keys %blocks ) {
 		next if $block eq 'OUTER';
-        $stref->{'Subroutines'}{$block}{'Lines'} = $blocks{$block};
-        $stref->{'Subroutines'}{$block}{'Source'} = $stref->{'Subroutines'}{$f}{'Source'};
+        $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Lines'} = $blocks{$block};
+        $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Source'} = $stref->{'Subroutines'}{$f}{'Source'};
 	}
 
   # So now we have split the file in blocks, we have identified the common vars.
@@ -945,14 +943,14 @@ sub refactor_blocks_into_subroutines {
 			push @{$decls},$decl;			
 		}
 		$sig =~ s/\,$/)\n/s;
-#		$stref->{'Subroutines'}{$block}{'Args'}  = $args{$block};
-		$stref->{'Subroutines'}{$block}{'Sig'}   = $sig;
-		$stref->{'Subroutines'}{$block}{'Decls'} = $decls;
-        $stref->{'Subroutines'}{$block}{'Lines'} = $blocks{$block};
-        $stref->{'Subroutines'}{$block}{'Source'} = $stref->{'Subroutines'}{$f}{'Source'};
+		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Args'}  = $args{$block};
+		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Sig'}   = $sig;
+		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Decls'} = $decls;
+#        $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Lines'} = $blocks{$block};
+#        $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Source'} = $stref->{'Subroutines'}{$f}{'Source'};
         for my $inc (keys %{$stref->{'Subroutines'}{$f}{'Includes'}}) {
         	if($stref->{'Subroutines'}{$f}{'Includes'}{$inc}!=-1) {
-		      $stref->{'Subroutines'}{$block}{'Includes'}{$inc} = -2;
+		      $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Includes'}{$inc} = -2;
         	}
         }
 		if ($V) {
@@ -961,7 +959,7 @@ sub refactor_blocks_into_subroutines {
 		}		
 	}
 	return $stref;
-} # END of refactor_blocks_into_subroutines()
+} # END of separate_blocks()
 # -----------------------------------------------------------------------------
 sub identify_loops_breaks {
     ( my $f, my $stref ) = @_;
