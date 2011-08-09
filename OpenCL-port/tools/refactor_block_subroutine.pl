@@ -346,7 +346,7 @@ sub refactor_code {
 	    for my $name (@blocks) {
 	        $stref=create_subroutine_source($name,$stref);
 	        # Now we must parse this source	        
-	        die Dumper($stref->{'Subroutines'}{$f}{'Info'}) if $name=~/particle/;
+	        die Dumper($stref->{'Subroutines'}{$name}{'Info'}) if $name=~/particle/;
 	        $stref = get_var_decls( $name, $stref );
 	        $stref = detect_blocks( $name, $stref );
 	        $stref = parse_includes( $name, $stref );      
