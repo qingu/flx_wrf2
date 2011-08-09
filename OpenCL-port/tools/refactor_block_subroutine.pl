@@ -3,7 +3,8 @@ use warnings;
 use strict;
 
 =TODOs
-Conversion of labeled do loops to block do loops     
+- Conversion of labeled do loops to block do loops     
+- Create intermediate directories for converted files
 =cut
 
 =pod
@@ -84,7 +85,7 @@ use Data::Dumper;
 &main();
 # -----------------------------------------------------------------------------
 sub main {
-	die "Please specifiy FORTRAN subroutine to refactor\n" if not @ARGV;
+	die "Please specifiy FORTRAN subroutine or program to refactor\n" if not @ARGV;
 	my $subname = $ARGV[0];
 	
 	my $stateref = {
@@ -277,9 +278,10 @@ sub refactor_subroutine {
                 
                 for my $inc (keys %{  $stref->{'Subroutines'}{$f}{'Globals'} }) {
                     for my $var ( @{  $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } ) {
-                    	print "\tGLOBAL $var from $inc in $f\n";
+                    	print "\tGLOBAL $var from $inc in $f\n" if $V;
                         my $rline = $stref->{'Subroutines'}{$f}{'Commons'}{$inc}{$var}{'Decl'};
                         if (not defined $rline) {
+                        	print "*** NO DECL for $var in $f!\n" if $V;
                             $rline ="*** NO DECL for $var in $f!";
                         }                   
                         push @{$rlines}, [ $rline, $tags_lref ];
@@ -581,6 +583,12 @@ sub identify_globals_used_in_subroutine {
 				  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Args'}=\@args;
 				  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Name'}=$name;
 			}
+            if ( $line =~ /^\s+program\s+(\w+)\s*$/ ) {
+                my $name   = $1;
+                  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Args'}=[];
+                  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Name'}=$name;
+            }
+			
 #			next if $line=~/^\s*\d+\s+continue/;
 #			next if $line=~/^\s+endif\s*$/;
 #			next if $line=~/^\s+end\s+do/;
@@ -734,11 +742,12 @@ sub get_var_decls {
 	
 	my $srcref = $stref->{$sub_or_incl}{$f}{'Lines'};
 	if ( defined $srcref ) {
-		print "\n VAR DECLS in $f:\n" if $V;
+		print "\nVAR DECLS in $f:\n" if $V;
 		my %vars  = ();
 		my $first = 1;
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $line = $srcref->[$index];
+#			print $line,"\n";
             $stref->{$sub_or_incl}{$f}{'Info'}->[$index]={};
 			if ( $line =~ /^C\s+/ ) {
 				$stref->{$sub_or_incl}{$f}{'Info'}->[$index]{'Comments'}={};
@@ -803,6 +812,7 @@ sub get_var_decls {
 
 		$stref->{$sub_or_incl}{$f}{'Vars'} =  \%vars;    
 	}
+
 	return $stref;
 } # END of get_var_decls()
 # -----------------------------------------------------------------------------
@@ -816,7 +826,7 @@ sub get_commons_params_from_includes {
 		my $has_commons = 0;
 
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-			my $line = $srcref->[$index];
+			my $line = $srcref->[$index];			
 			if ( $line =~ /^C\s+/ ) {
 				next;
 			}
@@ -840,6 +850,7 @@ sub get_commons_params_from_includes {
 			}
 
 			if ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) {
+				
 				my $parliststr = $1;
 				$has_pars = 1;
 				my @partups = split( /\s*,\s*/, $parliststr );
@@ -1170,9 +1181,9 @@ sub read_fortran_src {
   # If it's a subroutine source, skip all lines before the matching subroutine signature
   #and all lines from (and including) the next non-matching subroutine signature
         if ($is_incl==0) { 
-			if ( $line !~ /^C/ and $line =~ /subroutine\s+/i ) {
+			if ( $line !~ /^C/ and $line =~ /(?:program|subroutine)\s+/i ) {
 				$sub_ok = 0;
-				if ( $line =~ /subroutine\s+$s/i ) {
+				if ( $line =~ /(?:program|subroutine)\s+$s/i ) {
 					$sub_ok = 1;
 				}
 			}
@@ -1252,8 +1263,12 @@ sub find_subroutines_and_includes {
 
             # Detect and standardise comments
             $line =~ /^[C\*\!]/i && next;
-            $line =~ /^\s+subroutine\s+(\w+)/i && do {
-                my $sub = lc($1);
+            $line =~ /^\s+(subroutine|program)\s+(\w+)/i && do {
+            	my $is_prog=$1 eq 'program' ? 1 :0;
+            	if ($is_prog==1) {
+            		print "Found program $2 in $src\n" if $V;
+            	}
+                my $sub = lc($2);
                 if (
                     not exists $stref->{'Subroutines'}{$sub}{'Source'}
                     or (    $src =~ /$sub\.f/
@@ -1272,6 +1287,7 @@ sub find_subroutines_and_includes {
                     }
                     $stref->{'Subroutines'}{$sub}{'Source'} = $src;
                     $stref->{'Subroutines'}{$sub}{'Status'} = 0;
+                    $stref->{'Subroutines'}{$sub}{'Program'} = $is_prog;
                 }
                 else {
                     print STDERR
@@ -1357,17 +1373,38 @@ sub split_long_line {
 	}
 	my $split_on  = ',';
 	my $split_on2 = ' ';
-
+    my $split_on3 = '.ro.';
+    my $split_on4 = '.dna.';
+    my $smart=0;
 	if ( length($line) > $nchars ) {
 		my $ll    = length($line);
 		my $rline = join( '', reverse( split( '', $line ) ) );
+		print $rline,"\n";
+		print "$ll - $nchars = ",$ll - $nchars,"\n";
 		my $idx   = index( $rline, $split_on, $ll - $nchars );
 		my $idx2  = index( $rline, $split_on2, $ll - $nchars );
-		if ( $idx < 0 && $idx2 < 0 ) {
-			die "Could not split line $line";
+		my $idx3  = index( $rline, $split_on3, $ll - $nchars );
+        my $idx4  = index( $rline, $split_on4, $ll - $nchars );
+		if ( $idx < 0 && $idx2 < 0 && $idx3 < 0) {
+			print  "Can't split line \n$line\n" if $V;
 		}
 		elsif ( $idx < 0 && $idx2 >= 0 ) {
 			$idx = $idx2;
+		}
+		elsif ( $idx < 0 && $idx3 >= 0 ) {
+            $idx = $idx3;
+            print  "Split line \n$line\n on $idx3\n" if $V;
+            # Need smarter split
+            $smart=1;
+        }
+        elsif ( $idx < 0 && $idx4 >= 0 ) {
+            $idx = $idx4;
+            print  "Split line \n$line\n on $idx4\n" if $V;
+            # Need smarter split
+            $smart=1;
+        }
+		if ($smart==1) {
+			die substr( $line, 0, $ll - $idx3, '' ) if length(substr( $line, 0, $ll - $idx3, '' ))>$nchars;
 		}
 		push @chunks, substr( $line, 0, $ll - $idx, '' );
 		&split_long_line( $line, @chunks );
