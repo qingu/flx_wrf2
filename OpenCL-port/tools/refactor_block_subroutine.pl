@@ -3,19 +3,13 @@ use warnings;
 use strict;
 
 =TODOs
-- Conversion of labeled do loops to block do loops     
 - Create intermediate directories for converted files
 - Determine if a subroutine argument is I, O or I/O
-
-- The removal of duplicate arguments is not quite correct: 
-it assumes that the name of the arg in the call is the same as the name in the argument list.
-This is fine to remove duplicate globals, but doesn't work for conflicts between globals and local arguments.
-
-- Some subroutines are currently not parsed I think, which means that the refactoring is very limited.
 
 =cut
 
 =pod
+Draft Outline  
 
 0.2 Get rid of "common" variables, move them into function arguments 
 		This is refactoring, and there is really only one proper way to do this:
@@ -194,7 +188,277 @@ sub parse_fortran_src {
 }    # END of parse_fortran_src()
 
 # -----------------------------------------------------------------------------
+sub refactor_globals {
+	(my $stref, my $f, my $annlines)=@_;	
+        my $rlines=[];
+        my @globs=();
+        for my $inc (keys %{  $stref->{'Subroutines'}{$f}{'Globals'} }) {
+            @globs=(@globs, @{  $stref->{'Subroutines'}{$f}{'Globals'}{$inc} });
+        }
+        my %globals=map {$_=>1} @globs;
+        my %args=();
+        my %conflicting_locals=();
+        for my $annline ( @{$annlines} ) {
+            my $line      = $annline->[0]||'';
+            my $tags_lref = $annline->[1];
+            my %tags = ( defined $tags_lref ) ? %{$tags_lref} : ();
+            print '*** ' . join( ',', keys(%tags) ). "\n" if $V;
+            print '*** '.$line."\n" if $V;
+            my $skip = 0;
 
+            if ( exists $tags{'Signature'} ) {
+                my $name = $tags{'Signature'}{'Name'};
+#                @orig_args = @{ $tags{'Signature'}{'Args'} };
+                %args=map {$_=>1} @{ $tags{'Signature'}{'Args'} };
+#                print STDERR "ARGS for $f: ",join(',',keys %args),"\n" if $f=~/particles_/;
+                  my @exglobs=();
+                  for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Globals'} }){
+                    print "INFO: INC $inc in $f\n" if $V;
+                    if (not exists $stref->{'Includes'}{$inc}{'Root'} ) { die "$inc has no Root in $f"}
+                    if (  $stref->{'Includes'}{$inc}{'Root'} eq $f ) {
+                        print "INFO: $f is root for $inc\n" if $V;
+                        next;
+                    } 
+                     @exglobs=(@exglobs,@{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } );
+                  }
+                  print join(',',@exglobs),"\n" if $V;
+                  my $args_ref=ordered_union($tags{'Signature'}{'Args'},\@exglobs);
+                  my $args_str=join(',',@{$args_ref});
+#                  die $args_str if $f =~/particles_main/;
+                my $rline = '';
+                if ($stref->{'Subroutines'}{$f}{'Program'}) {
+                    $rline = '      program ' . $name ;
+                } else {
+                    $rline = '      subroutine ' 
+                  . $name . '('
+                  . $args_str . ')';
+                }
+#                my $rline =
+#                    '      subroutine ' 
+#                  . $name . '('
+#                  . join( ',', ( @orig_args, @exglobs ) ) . ')';
+                $tags{'Refactored'} = 1;
+                push @${rlines}, [ $rline, $tags_lref ];
+                $skip = 1;
+            }
+            
+            if ( exists $tags{'Include'} ) {
+                my $inc =$tags{'Include'}{'Name'};
+                print "INFO: INC $inc in $f\n" if $V;
+                if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common' and ( 
+                $stref->{'Includes'}{$inc}{'Root'} ne $f
+#                or ( ($stref->{'Includes'}{$inc}{'Root'} eq $f) and ($f eq $stref->{'Top'}))
+                )
+                ) {
+                    if ($V) {
+                    print "SKIPPED $inc: Root: ",($stref->{'Includes'}{$inc}{'Root'} ne $f)?0:1,"\tTop:",  ( ($stref->{'Includes'}{$inc}{'Root'} eq $f) and ($f eq $stref->{'Top'}))?1:0,"\n";
+                    }
+                    $skip = 1;
+                }
+            }
+                        
+            if ( exists $tags{'ExGlobVarDecls'} ) {
+                # We abuse ExGlobVarDecls as a hook for the addional includes
+                for my $inc (keys %{  $stref->{'Subroutines'}{$f}{'Globals'} }) {
+                    print "INC: $inc, root: $stref->{'Includes'}{$inc}{'Root'} \n" if $V;
+                    if ($stref->{'Subroutines'}{$f}{'Includes'}{$inc}<0 and $f eq $stref->{'Includes'}{$inc}{'Root'}) { # and $f ne $stref->{'Top'}) { # FIXME: not sure about this!
+                        my $rline="      include '$inc'";
+                        $tags_lref->{'Include'}{'Name'}=$inc;
+                       push @{$rlines}, [ $rline, $tags_lref ];
+                    }
+                }
+                
+                
+                for my $inc (keys %{  $stref->{'Subroutines'}{$f}{'Globals'} }) {
+                    print "INFO: GLOBALS from INC $inc in $f\n" if $V;
+                    for my $var ( @{  $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } ) {
+                        if (exists $args{$var}) {
+                                   my $rline ="*** ARG MASKS GLOB $var in $f!";                                
+                                push @{$rlines}, [ $rline, $tags_lref ];
+                        } else {
+                        if (exists $stref->{'Subroutines'}{$f}{'Commons'}{$inc}) {
+                            if ($f ne $stref->{'Includes'}{$inc}{'Root'}) {
+                                print "\tGLOBAL $var from $inc in $f\n" if $V;
+                                my $rline = $stref->{'Subroutines'}{$f}{'Commons'}{$inc}{$var}{'Decl'};
+                                if (not defined $rline) {
+                                    print "*** NO DECL for $var in $f!\n" if $V;
+                                    $rline ="*** NO DECL for $var in $f!";
+                                }
+                                push @{$rlines}, [ $rline, $tags_lref ];
+                            } elsif ($V) {
+                                print "*** NO COMMONS from $inc because $f is Root\n";
+                                last;
+                            }                   
+                        } elsif ($V) {
+                            print "*** NO COMMONS for $inc in $f " ;
+                            if ($f eq $stref->{'Includes'}{$inc}{'Root'}) { print '(Root)'."\n";}else{ print 'BUT NOT ROOT!'."\n"; };
+                            last;                            
+                        }
+                        }
+                    }
+                }
+            }
+            if (exists $tags{'VarDecl'}) {
+                my @vars=@{$tags{'VarDecl'}};
+                my $rline=$line;                
+                for my $var (@vars) {
+                    if (exists $globals{$var} and not exists $args{$var}) {                     
+                        print STDERR "WARNING: local $var in $f ($stref->{'Subroutines'}{$f}{'Source'}) conflicts with global of same name, will be renamed to $var\_LOCAL\n";
+                        # We should actually rename these conflicting vars, rather than removing them.
+                        # The complication is that the global of the same name might have to be passed to a subroutine call
+                        # So in each call we must check first for the local, then for the global
+                        my $nvar=$var.'_LOCAL';
+                        $conflicting_locals{$var}=$nvar;
+                        
+                        $rline=~s/\b$var\b/$nvar/;                                                                      
+                    }
+                }
+                $rline=~s/,\s*$//;
+                push @{$rlines}, [ $rline, $tags_lref ];
+                $skip=1;
+            }
+            if ( exists $tags{'SubroutineCall'} ) {
+#               print "SUBCALL: $line\n";               
+                # simply tag the common vars onto the arguments
+                my $name=$tags{'SubroutineCall'}{'Name'};
+                my @globals=();
+                for my $inc (keys %{ $stref->{'Subroutines'}{$name}{'Globals'} }) {
+                    next if $stref->{'Includes'}{$inc}{'Root'} eq $name;
+                    @globals=(@globals,@{ $stref->{'Subroutines'}{$name}{'Globals'}{$inc} });
+                }   
+                my $orig_args=[];
+                for my $arg (@{ $tags{'SubroutineCall'}{'Args'} }) {
+                    if (exists $conflicting_locals{$arg}) {
+                        push @{$orig_args},$conflicting_locals{$arg};
+                    } else {
+                        push @{$orig_args},$arg;
+                    }
+                }
+#                my @orig_args=@{$tags{'SubroutineCall'}{'Args'}};
+                my $args_ref=ordered_union($orig_args,\@globals);
+#                if (@globals && @orig_args) {unshift @globals,''}             
+#                my $global_args_str = join(',',@globals);
+#                my $orig_args_str = join(',',@orig_args);
+                my $args_str=join(',',@{$args_ref});
+                $line=~s/call\s.*$//;
+#                my $rline = "call $name($orig_args_str $global_args_str)\n";
+                my $rline = "call $name($args_str)\n";
+                push @{$rlines}, [ $line.$rline, $tags_lref ];
+                $skip=1;
+            }
+            if ( not exists $tags{'Comments'} and $skip==0 ) {
+                my $rline=$line;
+                for my $lvar (keys %conflicting_locals) {
+                   if ($rline=~/\b$lvar\b/) {
+#                   print  "REPLACING $lvar with $conflicting_locals{$lvar} in $f LINE '$line'\n"; 
+                      $rline=~s/\b$lvar\b/$conflicting_locals{$lvar}/g;
+#                     print "NEW LINE: '$rline'\n";
+                   }                   
+                }
+#                if ($rline ne $line) {
+#                   print STDERR "WARNING: renamed conflicting locals in $f, LINE $rline\n";
+#                }
+                push @{$rlines}, [ $rline, $tags_lref ];
+                $skip=1;
+            }
+            push @{$rlines}, $annline unless $skip;
+        }	
+	return $rlines;
+} # END of refactor_globals()
+# -----------------------------------------------------------------------------
+sub refactor_blocks {
+    (my $stref, my $f, my $annlines)=@_;
+        my $rlines=[];
+        print "REFACTORING BLOCKS in $f\n" if $V;
+        my @blocks=();
+#        my $refactor_block_ = sub {
+#            (my $name, my $f, my $stref) =@_;
+#            $stref=create_subroutine_source($name,$f,$stref);
+#            # Now we must parse this source         
+#            $stref = get_var_decls( $name, $stref );            
+##           $stref = detect_blocks( $name, $stref );
+#            $stref = parse_includes( $name, $stref );               
+#            $stref = parse_subroutine_calls( $name, $stref );                 
+#            $stref = identify_globals_used_in_subroutine( $name, $stref );
+#            # Now we're ready to refactor this source           
+#            $stref = refactor_subroutine($name,$stref); # shiver!
+#            return $stref;        	
+#        };
+        my $name='NONE'; 
+        for my $annline ( @{$annlines} ) {
+            my $line = $annline->[0];
+            my $tags_lref = $annline->[1];
+            my %tags = ( defined $tags_lref ) ? %{$tags_lref} : ( 'Nil' => [] ); # FIXME: needed?
+            my $skip = 0;            
+            if ( exists $tags{'RefactoredSubroutineCall'} ) {
+                $name = $tags{'RefactoredSubroutineCall'}{'Name'};
+                $tags{'RefactoredSubroutineCall'}{'Args'}=[@{$stref->{'Subroutines'}{$f}{'Blocks'}{$name}{'Args'}}];
+                push @blocks,$name;
+                
+                #we should refactor the block here to get the correct args
+#                $stref=$refactor_block_->($name,$f,$stref);
+                my @args =
+                  @{ $stref->{'Subroutines'}{$name}{'Args'} };
+                my $rline =
+                  'C     call ' . $name . '(' . join( ',', @args ) . ')';
+                $tags_lref={%tags};
+                delete $tags_lref->{'Comments'};                                
+                push @{$rlines}, [ $rline, $tags_lref ];
+                $skip = 1;
+            }
+            if ( exists $tags{'InBlock'} or exists $tags{'EndBlock'} ) {                
+                if ($name ne 'NONE') {
+                    push @{ $stref->{'Subroutines'}{$f}{'Blocks'}{$name}{'Info'} },$tags_lref ;
+                }               
+                $skip=1;
+            }
+            push @{$rlines}, $annline unless $skip;
+        }       
+        
+        for my $name (@blocks) {
+            $stref=create_subroutine_source($name,$f,$stref);
+            # Now we must parse this source         
+            $stref = get_var_decls( $name, $stref );            
+#           $stref = detect_blocks( $name, $stref );
+            $stref = parse_includes( $name, $stref );               
+            $stref = parse_subroutine_calls( $name, $stref );                 
+            $stref = identify_globals_used_in_subroutine( $name, $stref );            
+            # Now we're ready to refactor this source           
+            $stref = refactor_subroutine($name,$stref); # shiver!
+        }      
+        # Now go through the lines again and create the proper call  
+#        $annlines=$rlines;
+        for my $annline ( @{$rlines} ) {        	
+            my $line = $annline->[0];
+            my $tags_lref = $annline->[1];
+            my %tags = ( defined $tags_lref ) ? %{$tags_lref} : ( 'Nil' => [] ); # FIXME: needed?
+            if ( exists $tags{'RefactoredSubroutineCall'} ) {
+                # simply tag the common vars onto the arguments
+                my $name=$tags{'RefactoredSubroutineCall'}{'Name'};
+                my @globals=();
+                for my $inc (keys %{ $stref->{'Subroutines'}{$name}{'Globals'} }) {
+                    next if $stref->{'Includes'}{$inc}{'Root'} eq $name;
+                    @globals=(@globals,@{ $stref->{'Subroutines'}{$name}{'Globals'}{$inc} });
+                }   
+                my $orig_args=[];                
+                # FIXME: do I need to check for conflicting locals? 
+                for my $arg (@{ $tags{'RefactoredSubroutineCall'}{'Args'} }) {
+#                    if (exists $conflicting_locals{$arg}) {
+#                        push @{$orig_args},$conflicting_locals{$arg};
+#                    } else {
+                        push @{$orig_args},$arg;
+#                    }
+                }
+                my $args_ref=ordered_union($orig_args,\@globals);
+                my $args_str=join(',',@{$args_ref});                                
+                my $rline = "      call $name($args_str)";                
+                $annline->[0]= $rline;                                
+            }            
+        }       
+        
+	return ($stref,$rlines);
+}
+# -----------------------------------------------------------------------------
 =info_refactoring
 
 for every line
@@ -240,7 +504,10 @@ sub refactor_subroutine {
     }
     
     my $rlines = $annlines;
+    
     if ( $stref->{'Subroutines'}{$f}{'HasCommons'} ) {
+    	$rlines= refactor_globals($stref,$f,$annlines);
+=old    	
     	$rlines=[];
     	my @globs=();
                     for my $inc (keys %{  $stref->{'Subroutines'}{$f}{'Globals'} }) {
@@ -413,6 +680,7 @@ sub refactor_subroutine {
             }
             push @{$rlines}, $annline unless $skip;
         }
+=cut        
     }
 #    $annlines = $rlines;
      
@@ -420,7 +688,9 @@ sub refactor_subroutine {
 #	print STDERR "WARNING: SUB $f undefined HasBlocks\n"; 
 #}
     
-    if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) { 
+    if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) {
+    	($stref,$rlines)=refactor_blocks($stref,$f,$rlines);
+=old2    	 
     	print "REFACTORING BLOCKS in $f\n" if $V;
     	$annlines = $rlines;
     	$rlines   = [];
@@ -467,6 +737,7 @@ sub refactor_subroutine {
 	        # Now we're ready to refactor this source	        
 	        $stref = refactor_subroutine($name,$stref); # shiver!
 	    }
+=cut	    
     } # HasBlocks
     
     if (not exists $stref->{'Subroutines'}{$f}{'RefactoredCode'} or $stref->{'Subroutines'}{$f}{'RefactoredCode'}==[]) {
@@ -762,85 +1033,69 @@ sub identify_globals_used_in_subroutine {
 			print "already done\n" if $V;
 			%commons=%{ $stref->{'Subroutines'}{$f}{'Commons'} };
 		}
-		
+		my $first=1;
 		for my $inc (keys %commons) {
 			print "\nGLOBAL VAR ANALYSIS for $inc in $f\n" if $V;
 			my @inherited_globs = (defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc}) ? @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } : ();
 			my @globs = ();
-#		my @tvars = keys %{ $commons{$inc} };
-		my %tvars =  %{ $commons{$inc} };
-#		if ($V) {
-#			for my $global ( @tvars ) {
-#				print "$global\n";
-#			}
-#		}
-		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-			my $line = $srcref->[$index];
-			if ( $line =~ /^C\s+/ ) {
-				next;
-			}
-			# We shouldn't look for globals in the declarations, silly!
-			if ( $line =~
-/(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
-              )
-            {
-            	next;
-            }
-			if ( $line =~ /^\s+subroutine\s+(\w+)\((.*)\)/ ) {
-				my $name   = $1;
-				my $argstr = $2;
-				$argstr=~s/^\s+//;
-				$argstr=~s/\s+$//;
-				my @args   = split( /\s*,\s*/, $argstr );
-#                print STDERR "ARGS for $f: <",join(',',@args),">\n" if $V and $f=~/gridinfo/;
-				  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Args'}=\@args;
-				  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Name'}=$name;
-			}
-            if ( $line =~ /^\s+program\s+(\w+)\s*$/ ) {
-                my $name   = $1;
-                  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Args'}=[];
-                  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Name'}=$name;
-            }
-			
-#			next if $line=~/^\s*\d+\s+continue/;
-#			next if $line=~/^\s+endif\s*$/;
-#			next if $line=~/^\s+end\s+do/;
-
-#			for my $var ( @tvars ) {
-#				next if not defined $var;
-#				# This is the slowest line in the code
-#				if ( $line =~ /\W$var\W/ or  $line =~ /\W$var\s*$/ ) {
-#					print "FOUND global $var in $line\n" if $V;
-#					push @globs, $var;
-#					undef $var;
-#				}
-#			}
-            # Need to skip literal strings and formats!
-            my $tline=$line;
-            while ($tline=~/\'.+?\'/) {
-                $tline=~s/\'.*?\'//;
-            }
-            my @chunks= split(/\W+/,$tline);
-			for my $mvar (@chunks) {
-#				next if $mvar =~/\b(?:if|then|do|goto|integer|real|call|\d+)\b/; # is slower!
-                # if a var on a line is declared locally, it is obviously not a global!
-				if (exists $tvars{$mvar} and not $stref->{'Subroutines'}{$f}{'Vars'}{$mvar}  ) {
-					print "FOUND global $mvar in $tline\n" if $V;
-                    push @globs, $mvar;
-                    delete $tvars{$mvar};
+    		my %tvars =  %{ $commons{$inc} };
+			for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+				my $line = $srcref->[$index];
+				if ( $line =~ /^C\s+/ ) {
+					next;
 				}
+				# We shouldn't look for globals in the declarations, silly!
+				if ( $line =~
+	/(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
+	              )
+	            {
+	            	next;
+	            }
+	            # FIXME: Not sure why this is done here?
+				if ( $first && $line =~ /^\s+subroutine\s+(\w+)\((.*)\)/ ) {
+					my $name   = $1;
+					my $argstr = $2;
+					$argstr=~s/^\s+//;
+					$argstr=~s/\s+$//;
+					my @args   = split( /\s*,\s*/, $argstr );				 
+#					print "ARGS FOR $f ($inc): <",join(',',@args),">\n" if $V and $f=~/particles_/;
+#	                print STDERR "ARGS for $f ($inc): <",join(',',@args),">\n" if $V and $f=~/particles_/;
+					  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Args'}=\@args;
+					  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Name'}=$name;
+				}
+	            if ( $first && $line =~ /^\s+program\s+(\w+)\s*$/ ) {
+	                my $name   = $1;
+	                  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Args'}=[];
+	                  $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Signature'}{'Name'}=$name;
+	            }
+				
+#	            # Need to skip literal strings and formats!
+#	            my $tline=$line;
+#	            while ($tline=~/\'.+?\'/) {
+#	                $tline=~s/\'.*?\'//;
+#	            }
+	            my @chunks= split(/\W+/,$line);
+				for my $mvar (@chunks) {
+	#				next if $mvar =~/\b(?:if|then|do|goto|integer|real|call|\d+)\b/; # is slower!
+	                # if a var on a line is declared locally, it is obviously not a global!
+					if (exists $tvars{$mvar} and not $stref->{'Subroutines'}{$f}{'Vars'}{$mvar}  ) {
+						print "FOUND global $mvar in $line\n" if $V;
+	                    push @globs, $mvar;
+	                    delete $tvars{$mvar};
+					}
+				}
+			} # for each line
+			@globs=@{ union(\@globs,\@inherited_globs)  };
+			if ($V) {
+				print "\nALL GLOBAL VARS from $inc in subroutine $f:\n\n";
+				for my $var (@globs) {
+					print "$var\n";
+				}
+				print "\n";
 			}
-		}
-		@globs=@{ union(\@globs,\@inherited_globs)  };
-		if ($V) {
-			print "\nALL GLOBAL VARS from $inc in subroutine $f:\n\n";
-			for my $var (@globs) {
-				print "$var\n";
-			}
-			print "\n";
-		}
-		$stref->{'Subroutines'}{$f}{'Globals'}{$inc} =
-		  \@globs;		 
+		  $stref->{'Subroutines'}{$f}{'Globals'}{$inc} =
+		  \@globs;	
+		  $first=0;	 
 		}
 	}	
 	return $stref;
@@ -866,6 +1121,11 @@ sub detect_blocks {
 sub create_subroutine_source {
     ( my $f,my $p, my $stref ) = @_;    
         print "CREATING SOURCE for $f\n" if $V;
+#        print STDERR "KEYS in $p\n";
+#        for my $k (sort keys %{$stref->{'Subroutines'}{$p}}) {
+#        	print STDERR "$k\n";
+#        };
+       
 	    my @lines    = @{ $stref->{'Subroutines'}{$p}{'Blocks'}{$f}{'Lines'} };
 	    my @info     = @{ $stref->{'Subroutines'}{$p}{'Blocks'}{$f}{'Info'} };
 #	    my $annlines = [];
@@ -903,6 +1163,8 @@ sub create_subroutine_source {
 #        $stref->{'Subroutines'}{$f}{'Info'} =[];
         $stref->{'Subroutines'}{$f}{'Status'}=3;
         $stref->{'Subroutines'}{$f}{'HasBlocks'} = 0;
+        $stref->{'Subroutines'}{$f}{'Program'} = 0;
+        $stref->{'Subroutines'}{$f}{'StringConsts'} = $stref->{'Subroutines'}{$p}{'StringConsts'};
         $stref->{'Subroutines'}{$f}{'Source'} = $stref->{'Subroutines'}{$p}{'Source'} ;
         if ($V) {
         @lines    = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
@@ -920,6 +1182,13 @@ sub create_subroutine_source {
             print '*** '.$line."\n" if $V;
             }
         }
+        
+#         print STDERR "KEYS in $f\n";
+#        for my $k (sort keys %{$stref->{'Subroutines'}{$f}}) {
+#            print STDERR "$k\n";
+#        };
+        
+
     return $stref;
 } # END of create_subroutine_source()
 # -----------------------------------------------------------------------------
@@ -1353,6 +1622,8 @@ sub identify_loops_breaks {
             }
             next;
         };     
+        # When an open() fails, you can pass a label to some place for error handling
+        # Some evil code combines this end-of-do-block labels
         $line=~/^\s+open.*?\,\s*err\s*=\s*(\d+)\s*\)/ && do {
         	my $label=$1;
         	$stref->{'Subroutines'}{$f}{'Gotos'}{$label}=1;
