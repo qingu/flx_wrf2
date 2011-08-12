@@ -1,14 +1,6 @@
 ./options/
 ./output/
-<<<<<<< HEAD
-<<<<<<< HEAD
 /Users/wim/SoC_Research/FLEXPART/flx_wrf2/IceLand/
-=======
-/Users/wim/IceLand/
->>>>>>> 4d8f198ecaa957eeb3da01c7440cc49676b39622
-=======
-/Users/wim/SoC_Research/FLEXPART/flx_wrf2/IceLand/
->>>>>>> e324de2717c85231f85147f70570ba072b5c0b30
 ./AVAILABLE.d01
 ============================================
 

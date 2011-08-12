@@ -11,7 +11,7 @@ sub get_calls {
         /^C/i && next;
         /^\s*\!/ && next;
         if (
-                /^\s+.*?\s+call\s+(\w+)\(/ 
+                /^\s+.*?\s+call\s+/ 
            ) {
         
             my $f=$1;
@@ -32,7 +32,7 @@ my $f=$ARGV[0];
 $f=~s/\.f$//;
 &get_calls($f,0);
 
-my $GPU_ROOT=$ENV{'GPU_ROOT'};
+# my $GPU_ROOT=$ENV{'GPU_ROOT'};
 
 print "\n\nFunctions called from $f:\n\n";
 for my $file (sort keys %calls) {

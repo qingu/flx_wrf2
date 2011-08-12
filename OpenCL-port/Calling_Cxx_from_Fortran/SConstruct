@@ -6,5 +6,5 @@ fsources=['test_Cxx_in_F.f']
 envCxx=Environment(CXX='g++');
 envCxx.Library('testCxx',cxxsources)
 
-envF=Environment(FORTRAN='gfortran-4.6')
+envF=Environment(FORTRAN='gfortran')
 envF.Program('testF',fsources,LIBS=['testCxx','stdc++'],LIBPATH='.')

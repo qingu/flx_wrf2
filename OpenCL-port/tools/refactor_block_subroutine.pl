@@ -98,7 +98,7 @@ After building this structure, what we need is to go through it an revert it so 
 use File::Find;
 use File::Copy;
 use Digest::MD5;
-our $V = 1;
+our $V = 0;
 use Data::Dumper;
 
 &main();
@@ -110,7 +110,8 @@ sub main {
 	my $stateref = {
 		'Top' => $subname,
 		'Includes'   => {},
-		'Subroutines' => {}			
+		'Subroutines' => {},
+		'Indents' => 0			
 	};
 	# Find all subroutines in the source code tree
 	$stateref = find_subroutines_and_includes($stateref);
@@ -889,6 +890,9 @@ sub emit_all { (my $stref ) = @_;
 sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
 	           print "PARSING SUBROUTINE CALLS in $f\n" if $V;
+	           my $src=$stref->{'Subroutines'}{$f}{'Source'};
+	           my $nspaces= 64 - $stref->{'Indents'} - length($f);# -length($src) -2;
+	           print ' ' x $stref->{'Indents'},$f,' ' x $nspaces,$src,"\n";
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	if ( defined $srcref ) {
 		my %child_include_count=();
@@ -945,7 +949,9 @@ sub parse_subroutine_calls {
 					   }
 					}
 #					print "Processing SUBROUTINE $name\n" if $V;
+                    $stref->{'Indents'}+=4;
 					$stref = parse_fortran_src( $name, $stref );
+					$stref->{'Indents'}-=4;
 #					$stref->{'Subroutines'}{$name}{'Status'}=2;
                     print "Postprocessing INCLUDES for $name\n" if $V;
                     for my $inc ( keys %{ $stref->{'Subroutines'}{$name}{'Includes'} } ) {
@@ -2122,7 +2128,7 @@ sub split_long_line {
 #		}
 		push @chunks, substr( $line, 0, $ll - $idx, '' );
         print "CHUNKS:\n",join("\n",@chunks),"\n" if $V;
-        print "REST:\n",$line,"\n";
+        print "REST:\n",$line,"\n" if $V;
 		&split_long_line( $line, @chunks );
 	}
 	else {
