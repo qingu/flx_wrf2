@@ -1,0 +1,18 @@
+# Compile:
+
+gfortran-4.6 -c test_Cxx_in_F.f
+#gcc -c testC.c
+g++ -c testCxx.cc
+#gfortran-4.6 -o test testF.o testC.o
+gfortran-4.6 -o test test_Cxx_in_F.o testCxx.o -lstdc++
+
+#Note: If there is use of C/C++ standard libraries you may have to include the following linking arguments: -lc or -lstdc++
+
+# Run: ./test
+#
+# ii=  2 ff=     9.0567
+# ii=  4
+# ii=  4 jj=  3 kk=  4
+# From doubleIJK: Example of a character string
+# ii=  8 jj=  6 kk=  8
+# Example of a character string
