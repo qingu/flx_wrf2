@@ -6,8 +6,9 @@ use strict;
 - Create intermediate directories for converted files
 - Determine if a subroutine argument is I, O or I/O
 - Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should.
-- Add a comment on lines with goto/continue that are break/break target
-- test the noop approach
+- Refactor FUNCTIONS!!
+- copy noop.f into the source tree if NOOP
+- add a flag to swich NOOP on/off, use proper option parsing
 =cut
 
 =pod
@@ -90,7 +91,7 @@ Status: for programs, subroutines, functions and includes
     0: after find_subroutines_and_includes() 
     1: after read_fortran_src()
     2: after parse_fortran_src()
-    3: after create_subroutine_source()
+    3: after create_subroutine_source_from_block()
 After building this structure, what we need is to go through it an revert it so it becomes index => information
 
 とにかく, コード　は:
@@ -454,7 +455,7 @@ sub refactor_blocks {
 	}
 
 	for my $name (@blocks) {
-		$stref = create_subroutine_source( $name, $f, $stref );
+		$stref = create_subroutine_source_from_block( $name, $f, $stref );
 
 		# Now we must parse this source
 		$stref = get_var_decls( $name, $stref );
@@ -514,6 +515,13 @@ sub refactor_blocks {
 
 # -----------------------------------------------------------------------------
 
+#* BeginDo: just remove the label
+#* EndDo: replace label CONTINUE by END DO
+#* Break: keep as is; add a comment to identify it as a break
+#* Goto: Do nothing        
+#* GotoTarget: Do nothing
+#* NoopBreakTarget: replace CONTINUE with "call noop"       
+#* BreakTarget: Do nothing  
 sub create_refactored_source {
 	( my $stref, my $f, my $annlines ) = @_;
 	print "CREATING FINAL $f CODE\n" if $V;
@@ -535,15 +543,16 @@ sub create_refactored_source {
 			if ( $stref->{'Subroutines'}{$f}{'Gotos'}
 				{ $tags{'EndDo'}{'Label'} } )
 			{
-
 				# this is an end do which serves as a goto target
 				$is_goto_target = 1;
 			}
 			my $count = $tags{'EndDo'}{'Count'};
-			if ( $line =~ /^\d+\s+continue/ ) {
+			if ( $line =~ /^\s{0,4}\d+\s+continue/ ) {
 				if ( $is_goto_target == 0 ) {
 					$line = '      end do';
 					$count--;
+				} else {
+					$line=~s/continue/call noop/;
 				}
 			} elsif ( $line =~ /^\d+\s+\w/ ) {
 				if ( $is_goto_target == 0 ) {
@@ -555,7 +564,13 @@ sub create_refactored_source {
 				$count--;
 			}
 		}
-
+        if ( exists $tags{'NoopBreakTarget'} ) {
+        	$line=~s/continue/call noop/;
+        }
+        if ( exists $tags{'Break'} ) {
+            $line.='  !Break';
+        }
+        
 		if ( exists $tags{'PlaceHolders'} ) {
 			my @phs = @{ $tags{'PlaceHolders'} };
 			for my $ph (@phs) {
@@ -601,14 +616,7 @@ This is a node called 'RefactoredSubroutineCall'
 * InBlock: skip; we need to handle the blocks separately
 * BeginBlock: insert the new subroutine signature and variable declarations
 * EndBlock: insert END
-
-* BeginDo: just remove the label
-* EndDo: replace label CONTINUE by END DO
-* Break: keep as is; add a comment to identify it as a break
-* Goto: Do nothing        
-* GotoTarget: Do nothing
-* NoopBreakTarget: replace CONTINUE with "call noop"       
-* BreakTarget: Do nothing                        
+                      
 
 =cut
 
@@ -1084,7 +1092,7 @@ sub detect_blocks {
 }    # END of detect_blocks()
 
 # -----------------------------------------------------------------------------
-sub create_subroutine_source {
+sub create_subroutine_source_from_block {
 	( my $f, my $p, my $stref ) = @_;
 	print "CREATING SOURCE for $f\n" if $V;
 
@@ -1164,7 +1172,7 @@ sub create_subroutine_source {
 	#        };
 
 	return $stref;
-}    # END of create_subroutine_source()
+}    # END of create_subroutine_source_from_block()
 
 # -----------------------------------------------------------------------------
 
@@ -1577,7 +1585,7 @@ sub identify_loops_breaks {
 		};
 
 		# Goto
-		$line =~ /^\s+.*\s+goto\s+(\d+)\s*$/ && do {
+		$line =~ /^\s+.*?[\)\ ]\s*goto\s+(\d+)\s*$/ && do {
 			my $label = $1;
 			$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Goto'}{'Label'} =
 			  $label;
@@ -1969,7 +1977,8 @@ We also need a convenience function to split long lines.
 =cut
 
 sub split_long_line {
-	( my $line, my @chunks ) = @_;
+	my $line=shift;
+	my @chunks = @_;
 
 	my $nchars = 64;
 	if ( scalar(@chunks) == 0 ) {
@@ -2047,8 +2056,7 @@ sub split_long_line {
 			@split_lines = @chunks;
 		}
 		return @split_lines;
-	}
-	return ();    # make Perl::Critic happy
+	}	
 }
 
 # -----------------------------------------------------------------------------
