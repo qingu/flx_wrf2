@@ -97,19 +97,42 @@ After building this structure, what we need is to go through it an revert it so 
 とにかく, コード　は:
 
 =cut
+use Getopt::Std;
 
 use File::Find;
 use File::Copy;
 use Digest::MD5;
 our $V = 0;
+our $noop=1;
+our $call_tree_only=0;
 use Data::Dumper;
 
 &main();
 
 # -----------------------------------------------------------------------------
 sub main {
-	die "Please specifiy FORTRAN subroutine or program to refactor\n"
-	  if not @ARGV;
+	my %opts=();
+    getopts('vhCN',\%opts);
+	  
+#	  die %opts;
+	  $V=(exists $opts{'v'})?1:0;
+	  my $help=(exists $opts{'h'})?1:0;
+    if ($help) {
+    	die"
+    $0 [-hvC] <FORTRAN src>
+    -h: help
+    -v: verbose
+    -C: Only generate call tree, don't refactor or emit
+    -N: Don't replace CONTINUE by CALL NOOP
+    ";
+	   } 
+	$call_tree_only=(exists $opts{'C'})?1:0;
+	$noop=(exists $opts{'N'})?0:1;
+	die @ARGV;
+    if (not @ARGV ) {
+        die "Please specifiy FORTRAN subroutine or program to refactor\n";
+    }
+
 	my $subname = $ARGV[0];
 
 	my $stateref = {
@@ -124,7 +147,7 @@ sub main {
 
 # First we analyse the code for use of globals and blocks to be transformed into subroutines
 	$stateref = parse_fortran_src( $subname, $stateref );
-
+    if (not $call_tree_only) {
 	#	show_info($stateref);
 
 	# Refactor the source
@@ -132,6 +155,7 @@ sub main {
 
 	# Emit the refactored source
 	emit_all($stateref);
+    }
 	exit(0);
 
 }    # END of main()
@@ -551,7 +575,7 @@ sub create_refactored_source {
 				if ( $is_goto_target == 0 ) {
 					$line = '      end do';
 					$count--;
-				} else {
+				} elsif ($noop) {
 					$line=~s/continue/call noop/;
 				}
 			} elsif ( $line =~ /^\d+\s+\w/ ) {
@@ -564,7 +588,7 @@ sub create_refactored_source {
 				$count--;
 			}
 		}
-        if ( exists $tags{'NoopBreakTarget'} ) {
+        if ( $noop && exists $tags{'NoopBreakTarget'} ) {
         	$line=~s/continue/call noop/;
         }
         if ( exists $tags{'Break'} ) {
@@ -814,8 +838,10 @@ sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
 	print "PARSING SUBROUTINE CALLS in $f\n" if $V;
 	my $src     = $stref->{'Subroutines'}{$f}{'Source'};
+	if ($call_tree_only) {
 	my $nspaces = 64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
 	print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $src, "\n";
+	}
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	if ( defined $srcref ) {
 		my %child_include_count = ();
@@ -888,10 +914,13 @@ sub parse_subroutine_calls {
 					}
 
 					#					print "Processing SUBROUTINE $name\n" if $V;
-					$stref->{'Indents'} += 4;
+					if ($call_tree_only) {
+					   $stref->{'Indents'} += 4;
+					}
 					$stref = parse_fortran_src( $name, $stref );
-					$stref->{'Indents'} -= 4;
-
+					if ($call_tree_only) {
+					   $stref->{'Indents'} -= 4;
+					}
 					#					$stref->{'Subroutines'}{$name}{'Status'}=2;
 					print "Postprocessing INCLUDES for $name\n" if $V;
 					for my $inc (
