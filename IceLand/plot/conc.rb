@@ -1,4 +1,4 @@
-modules=%w{flexpart_helpers multi_rconc_w}
+modules=%w{flexpart_helpers multi_rconc_w getline}
 
 c_modules=modules.map {|m| m+".c"}
 o_modules=modules.map {|m| m+".o"}

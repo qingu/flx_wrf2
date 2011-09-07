@@ -97,48 +97,71 @@ After building this structure, what we need is to go through it an revert it so 
 とにかく, コード　は:
 
 =cut
+
 use Getopt::Std;
 
 use File::Find;
 use File::Copy;
 use Digest::MD5;
-our $V = 0;
-our $noop=1;
-our $call_tree_only=0;
+our $V              = 0;
+our $noop           = 1;
+our $call_tree_only = 0;
+our $main_tree      = 0;
+our $gen_sub        = 0;
+our $translate      = 0;
+
+our $targetdir = '../RefactoredSources';
 use Data::Dumper;
 
 &main();
 
 # -----------------------------------------------------------------------------
 sub main {
-	my %opts=();
-    getopts('vhCN',\%opts);
-	  
-#	  die %opts;
-	  $V=(exists $opts{'v'})?1:0;
-	  my $help=(exists $opts{'h'})?1:0;
-    if ($help) {
-    	die"
-    $0 [-hvC] <FORTRAN src>
+    if ( not @ARGV ) {
+        die "Please specifiy FORTRAN subroutine or program to refactor\n";
+    }
+	my %opts = ();
+	getopts( 'vhCTNbB', \%opts );
+	my $subname = $ARGV[0];
+	$subname =~ s/\.f$//;
+
+	#	  die %opts;
+	$V = ( $opts{'v'} ) ? 1 : 0;
+	my $help = ( $opts{'h'} ) ? 1 : 0;
+	if ($help) {
+		die "
+    $0 [-hvC] <toplevel subroutine name> [<(extracted) subroutine name>]
     -h: help
     -v: verbose
     -C: Only generate call tree, don't refactor or emit
+    -T: Translate <subroutine name> and dependencies to C 
     -N: Don't replace CONTINUE by CALL NOOP
+    -b: Generate SCons build script
+    -B: Build FLEXPART (implies -b)
     ";
-	   } 
-	$call_tree_only=(exists $opts{'C'})?1:0;
-	$noop=(exists $opts{'N'})?0:1;
-	die @ARGV;
-    if (not @ARGV ) {
-        die "Please specifiy FORTRAN subroutine or program to refactor\n";
-    }
+	}
 
-	my $subname = $ARGV[0];
-
+	if ( $opts{'C'} ) {
+		$call_tree_only = 1;
+		$main_tree = $ARGV[1] ? 0 : 1;
+		print "\nCall tree for $subname:\n\n" if $main_tree;
+	}
+	if ( $opts{'T'} ) {
+		if ( !@ARGV ) {
+			die "Please specify a target subroutine to translate.\n";
+		}
+		$translate = 1;
+	}
+	$noop = ( $opts{'N'} ) ? 0 : 1;
+	my $gen = ($opts{'b'}  || $opts{'B'})?1:0;
+    my $build= ($opts{'B'})?1:0;
+    
 	my $stateref = {
 		'Top'         => $subname,
 		'Includes'    => {},
 		'Subroutines' => {},
+		'BuildSources' => {}, # sources to be built, need to disinguish between C and Fortran
+		'Targets'     => {},         # targets for translation to C, make this {'BuildSources'}{'C'} 		
 		'Indents'     => 0
 	};
 
@@ -147,14 +170,32 @@ sub main {
 
 # First we analyse the code for use of globals and blocks to be transformed into subroutines
 	$stateref = parse_fortran_src( $subname, $stateref );
-    if (not $call_tree_only) {
+
 	#	show_info($stateref);
 
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 
-	# Emit the refactored source
-	emit_all($stateref);
+	if ( not $call_tree_only ) {
+		# Emit the refactored source
+		emit_all($stateref);
+	} elsif ( $call_tree_only and $ARGV[1] ) {
+		$subname = $ARGV[1];
+		$gen_sub = 1;
+		print "\nCall tree for $subname:\n\n";
+		$stateref = parse_fortran_src( $subname, $stateref );
+	}
+	if ($translate == 1 ) {
+		$translate=2;
+		$subname  = $ARGV[1];
+		print "\nTranslating $subname to C\n";		
+		$gen_sub  = 1;
+		$stateref = parse_fortran_src( $subname, $stateref );
+		&translate_to_C($stateref);
+	}
+    create_build_script($stateref);
+    if ($build) {
+    	build_flexpart();
     }
 	exit(0);
 
@@ -542,10 +583,10 @@ sub refactor_blocks {
 #* BeginDo: just remove the label
 #* EndDo: replace label CONTINUE by END DO
 #* Break: keep as is; add a comment to identify it as a break
-#* Goto: Do nothing        
+#* Goto: Do nothing
 #* GotoTarget: Do nothing
-#* NoopBreakTarget: replace CONTINUE with "call noop"       
-#* BreakTarget: Do nothing  
+#* NoopBreakTarget: replace CONTINUE with "call noop"
+#* BreakTarget: Do nothing
 sub create_refactored_source {
 	( my $stref, my $f, my $annlines ) = @_;
 	print "CREATING FINAL $f CODE\n" if $V;
@@ -567,6 +608,7 @@ sub create_refactored_source {
 			if ( $stref->{'Subroutines'}{$f}{'Gotos'}
 				{ $tags{'EndDo'}{'Label'} } )
 			{
+
 				# this is an end do which serves as a goto target
 				$is_goto_target = 1;
 			}
@@ -576,7 +618,7 @@ sub create_refactored_source {
 					$line = '      end do';
 					$count--;
 				} elsif ($noop) {
-					$line=~s/continue/call noop/;
+					$line =~ s/continue/call noop/;
 				}
 			} elsif ( $line =~ /^\d+\s+\w/ ) {
 				if ( $is_goto_target == 0 ) {
@@ -588,13 +630,13 @@ sub create_refactored_source {
 				$count--;
 			}
 		}
-        if ( $noop && exists $tags{'NoopBreakTarget'} ) {
-        	$line=~s/continue/call noop/;
-        }
-        if ( exists $tags{'Break'} ) {
-            $line.='  !Break';
-        }
-        
+		if ( $noop && exists $tags{'NoopBreakTarget'} ) {
+			$line =~ s/continue/call noop/;
+		}
+		if ( exists $tags{'Break'} ) {
+			$line .= '  !Break';
+		}
+
 		if ( exists $tags{'PlaceHolders'} ) {
 			my @phs = @{ $tags{'PlaceHolders'} };
 			for my $ph (@phs) {
@@ -776,6 +818,10 @@ sub emit_refactored_subroutine {
 	my $mode = '>';
 	if ( -e "$dir/$s" ) {
 		$mode = '>>';
+	} else {
+		if (not exists $stref->{'BuildSources'}{'C'}{$s} ) {
+		  $stref->{'BuildSources'}{'F'}{$s}=1;
+		}
 	}
 	open my $SRC, $mode, "$dir/$s" or die $!;
 	if ( $mode eq '>>' ) {
@@ -791,15 +837,17 @@ sub emit_refactored_subroutine {
 # -----------------------------------------------------------------------------
 sub emit_all {
 	( my $stref ) = @_;
-	my $dir = '../RefactoredSources';
-	if ( not -e $dir ) {
-		mkdir $dir;
+	
+	if ( not -e $targetdir ) {
+		mkdir $targetdir;
 		my @incs = glob('include*');
-		map { copy( $_, "$dir/$_" ) } @incs; # Perl::Critic wants a for-loop, drat it
-	} elsif ( not -d $dir ) {
-		die "$dir exists but is not a directory!\n";
+		map { copy( $_, "$targetdir/$_" ) }
+		  @incs;    # Perl::Critic wants a for-loop, drat it
+		  
+	} elsif ( not -d $targetdir ) {
+		die "$targetdir exists but is not a directory!\n";
 	} else {
-		my @oldsrcs = glob("$dir/*.f");
+		my @oldsrcs = glob("$targetdir/*.f");
 		map { unlink $_ } @oldsrcs;
 
 		# Check if includes have changed
@@ -812,35 +860,131 @@ sub emit_all {
 			if ( Digest::MD5->new->addfile($OLD)->hexdigest ne
 				Digest::MD5->new->addfile($NEW)->hexdigest )
 			{
-				copy( $inc, "$dir/$inc" );
+				copy( $inc, "$targetdir/$inc" );
 			}
 			close $OLD;
 			close $NEW;
 		}
 	}
 	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
-		emit_refactored_subroutine( $f, $dir, $stref );
+		emit_refactored_subroutine( $f, $targetdir, $stref );
 	}
 
 	# copy functions
 	my %funcsrcs = ();
 	for my $func ( keys %{ $stref->{'Functions'} } ) {
-		$funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } = 1;
+		if (not exists $funcsrcs{ $stref->{'Functions'}{$func}{'Source'} }) {
+		  $funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } = 1;
+		  $stref->{'BuildSources'}{'F'}{ $stref->{'Functions'}{$func}{'Source'} }=1;
+		} else {
+			$funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } ++;
+		}		
 	}
 	for my $funcsrc ( keys %funcsrcs ) {
-		copy( $funcsrc, "$dir/$funcsrc" );
+		copy( $funcsrc, "$targetdir/$funcsrc" );
 	}
+	# NOOP source
+	   if ($noop) {
+	   	copy( '../OpenCL-port/tools/noop.f' , "$targetdir/noop.c" );
+        $stref->{'BuildSources'}{'C'}{ 'noop.c' }=1;
+    }
+	
+		
 }    # END of emit_all()
+# -----------------------------------------------------------------------------
+sub translate_to_C {
+	(my $stref)=@_;
+	# At first, all we do is get the call tree and translate all sources to C with F2C_ACC
+	# The next step is to fix the bugs in F2C_ACC via post-processing (later maybe actually debug F2C_ACC)
+	chdir $targetdir;
+	print "\n", "=" x 80,"\n" if $V;
+	print "TRANSLATING TO C\n\n" if $V;
+	print `pwd` if $V;
+	foreach my $csrc (keys %{$stref->{'BuildSources'}{'C'}}) {
+	   my $cmd="f2c $csrc";
+	   print $cmd,"\n" if $V;
+	   if ($csrc eq './timemanager_particles_main_loop.f') {
+          system($cmd);
+        }
+	}
+	# A minor problem is that we need to translate all includes contained in the tree as well
+	foreach my $inc (keys %{$stref->{'BuildSources'}{'H'}}) {
+	   my $cmd="f2c -H $inc";
+       print $cmd,"\n" if $V;
+#	   system($cmd);
+	}
+} # END of translate_to_C()
+# -----------------------------------------------------------------------------
+sub create_build_script{ (my $stref)=@_;
+	# First attempt, Fortran only
+	my @gfs=('/opt/local/bin/gfortran-mp-4.6','/usr/local/bin/gfortran-4.6','/usr/bin/gfortran');
+	my $gfortran='gfortran';
+	for my $mgf (@gfs) {
+		if (-e $mgf) {
+			$gfortran=$mgf;
+			last;
+		}
+	}
+	my @fsourcelst=sort keys %{$stref->{'BuildSources'}{'F'}};
+	my $fsources=join (',',map { "'".$_."'" } @fsourcelst);
+    
+    my $csources='';    
+    if (exists $stref->{'BuildSources'}{'C'}) {
+        my @csourcelst=sort keys %{$stref->{'BuildSources'}{'C'}};
+        $csources=join (',',map { s/\.f$/.c/;"'".$_."'" } @csourcelst);        
+    }
+	my $date=localtime;
+	my $scons=<<ENDSCONS;
+# Generated build script for refactored FLEXPART source code
+# $date
 
+csources =[$csources]
+
+fsources = [$fsources]
+
+envC=Environment(CC='gcc',CPPPATH=['/Users/wim/SoC_Research/F2C-ACC/include/']); # FIXME: use ENV
+if csources:
+    envC.Library('wrfc',csources)
+
+FFLAGS  = ['-O3', '-m64', '-fconvert=little-endian', '-frecord-marker=4']
+envF=Environment(FORTRAN='$gfortran',FORTRANFLAGS=FFLAGS,FORTRANPATH=['.','/opt/local/include','/usr/local/include'])
+if csources:
+    envF.Program('flexpart_wrf',fsources,LIBS=['netcdff','wrfc','m'],LIBPATH=['.','/opt/local/lib','/usr/local/lib'])	
+else:
+    envF.Program('flexpart_wrf',fsources,LIBS=['netcdff','m'],LIBPATH=['.','/opt/local/lib','/usr/local/lib'])
+ENDSCONS
+    open my $SC,'>',"$targetdir/SConstruct.flx_wrf";
+    print $SC $scons;
+    print $scons if $V;
+    close $SC;	
+	
+} # END of create_build_script()
+# -----------------------------------------------------------------------------
+sub build_flexpart {
+	system('scons -f SConstruct.flx_wrf');
+}
 # -----------------------------------------------------------------------------
 
 sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
 	print "PARSING SUBROUTINE CALLS in $f\n" if $V;
-	my $src     = $stref->{'Subroutines'}{$f}{'Source'};
-	if ($call_tree_only) {
-	my $nspaces = 64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
-	print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $src, "\n";
+	my $src = $stref->{'Subroutines'}{$f}{'Source'};
+	if ( $translate==2 || ($call_tree_only && ( $gen_sub || $main_tree )) ) {
+		if ($translate!=2) {
+		my $nspaces = 64 - $stref->{'Indents'} - length($f); # -length($src) -2;
+		print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $src, "\n";
+		} else {
+			if (not exists $stref->{'BuildSources'}{'C'}{$src}) {
+			print "ADDING $src to C BuildSources\n" if $V;
+		  $stref->{'BuildSources'}{'C'}{$src}=1;
+			}
+		  for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
+		  	if (not exists $stref->{'BuildSources'}{'H'}{$inc}) {
+		  	print "ADDING $inc to C Header BuildSources\n" if $V;
+		  	$stref->{'BuildSources'}{'H'}{$inc}=1;
+		  	}
+		  }
+		}
 	}
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	if ( defined $srcref ) {
@@ -890,7 +1034,8 @@ sub parse_subroutine_calls {
 				  ->[$index]{'SubroutineCall'}{'Args'} = \@argvars;
 				$stref->{'Subroutines'}{$f}{'Info'}
 				  ->[$index]{'SubroutineCall'}{'Name'} = $name;
-				if ( $stref->{'Subroutines'}{$name}{'Status'} < 2 ) {
+				if ( $stref->{'Subroutines'}{$name}{'Status'} < 2 or $gen_sub )
+				{
 					print "\tCALL $name\n" if $V;
 
 					# Propagating down includes
@@ -914,13 +1059,14 @@ sub parse_subroutine_calls {
 					}
 
 					#					print "Processing SUBROUTINE $name\n" if $V;
-					if ($call_tree_only) {
-					   $stref->{'Indents'} += 4;
+					if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
+						$stref->{'Indents'} += 4;
 					}
 					$stref = parse_fortran_src( $name, $stref );
-					if ($call_tree_only) {
-					   $stref->{'Indents'} -= 4;
+					if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
+						$stref->{'Indents'} -= 4;
 					}
+
 					#					$stref->{'Subroutines'}{$name}{'Status'}=2;
 					print "Postprocessing INCLUDES for $name\n" if $V;
 					for my $inc (
@@ -1176,8 +1322,11 @@ sub create_subroutine_source_from_block {
 	$stref->{'Subroutines'}{$f}{'Program'}   = 0;
 	$stref->{'Subroutines'}{$f}{'StringConsts'} =
 	  $stref->{'Subroutines'}{$p}{'StringConsts'};
-	$stref->{'Subroutines'}{$f}{'Source'} =
-	  $stref->{'Subroutines'}{$p}{'Source'};
+	  my $extract_sub_src=$stref->{'Subroutines'}{$p}{'Source'};
+	  $extract_sub_src=~s/\.f$//;
+	  $extract_sub_src.="_$f.f";
+	$stref->{'Subroutines'}{$f}{'Source'} = $extract_sub_src;
+	  	  
 	if ($V) {
 		@lines = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
 		@info  = @{ $stref->{'Subroutines'}{$f}{'Info'} };
@@ -2006,7 +2155,7 @@ We also need a convenience function to split long lines.
 =cut
 
 sub split_long_line {
-	my $line=shift;
+	my $line   = shift;
 	my @chunks = @_;
 
 	my $nchars = 64;
@@ -2085,7 +2234,7 @@ sub split_long_line {
 			@split_lines = @chunks;
 		}
 		return @split_lines;
-	}	
+	}
 }
 
 # -----------------------------------------------------------------------------

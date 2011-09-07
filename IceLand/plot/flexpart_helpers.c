@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include "getline.h"
 #include "flexpart_helpers.h" /* dimensions of flexpart output */
-
 void read_write(FILE *in, FILE *out, int nlines ){
 int i;
 float data, err;

@@ -19,7 +19,7 @@ ___                        i3    Index of species in file SPECIES
 20110522 060000
 ________ ______            i8,1x,i6 Beginning date and time of release
 
-20110522 120000
+20110522 180000
 ________ ______            i8,1x,i6 Ending date and time of release
 
  -17.36 
