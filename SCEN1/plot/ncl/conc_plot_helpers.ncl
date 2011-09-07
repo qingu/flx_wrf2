@@ -57,7 +57,7 @@ begin
 
   
    ; Add map resources
-    res@mpDataBaseVersion     = "HighRes"          ; Default is LowRes
+   ;WV res@mpDataBaseVersion     = "HighRes"          ; Default is LowRes
     res@mpOutlineDrawOrder    = "PostDraw"           ; Draw map outlines last
     res@mpGridAndLimbOn       = False                ; Turn off lat/lon lines
     res@pmTickMarkDisplayMode = "Always"             ; Turn on map tickmarks

@@ -1,0 +1,7 @@
+ruby make_inlist.rb
+scons
+./flexpart2bin 
+./ddep2bin 
+./wdep2bin 
+ncl ncl/maxconc.ncl 2>&1 >/dev/null
+ncl ncl/plot_conc.ncl

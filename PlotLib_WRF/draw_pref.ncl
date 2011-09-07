@@ -45,8 +45,8 @@ end
 procedure draw_pref_on_plot(wks,plot)
 begin
   
-  shp1 = "/home/saji/AizuWeather/ShapeFiles/CHGIS/jp_grid_ken_pgn.shp"
-  shp2 = "/home/saji/AizuWeather/ShapeFiles/JGS/fks_adm_area.shp"
+  shp1 = "/Users/wim/SoC_Research/FLEXPART/AizuWeather/ShapeFiles/CHGIS/jp_grid_ken_pgn.shp"
+  shp2 = "/Users/wim/SoC_Research/FLEXPART/AizuWeather/ShapeFiles/JGS/fks_adm_area.shp"
   if str_upper(plot@resolution) .eq. "PREFECTURES"
     fshp = fopen_read(shp1)
   else
@@ -63,8 +63,8 @@ end
 
 procedure draw_pref_on_plot_v2(wks,plot)
 begin
-  shp1 = "/home/saji/AizuWeather/ShapeFiles/CHGIS/jp_grid_ken_pgn.shp"
-  shp2 = "/home/saji/AizuWeather/ShapeFiles/JGS/fks_adm_area.shp"
+  shp1 = "/Users/wim/SoC_Research/FLEXPART/AizuWeather/ShapeFiles/CHGIS/jp_grid_ken_pgn.shp"
+  shp2 = "/Users/wim/SoC_Research/FLEXPART/AizuWeather/ShapeFiles/JGS/fks_adm_area.shp"
   if isatt(plot,"resolution") .and. \
       str_upper(plot@resolution) .eq. "PREFECTURES"
     fshp = fopen_read(shp1)

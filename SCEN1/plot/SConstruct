@@ -1,0 +1,26 @@
+# Proof of concept SConstruct for integrating C++ into FORTRAN
+
+csources_conc=Split("""
+getline.c
+flexpart_helpers.c
+multi_rconc_w.c
+""")
+
+csources_ddep=Split("""
+getline.c
+flexpart_helpers.c
+multi_rddep_w.c
+""")
+
+csources_wdep=Split("""
+getline.c
+flexpart_helpers.c
+multi_rwdep_w.c
+""")
+
+envC=Environment(CC='gcc');
+
+envC.Program('flexpart2bin',csources_conc)
+envC.Program('ddep2bin',csources_ddep)
+envC.Program('wdep2bin',csources_wdep)
+

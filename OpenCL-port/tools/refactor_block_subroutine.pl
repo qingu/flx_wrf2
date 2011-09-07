@@ -136,7 +136,7 @@ sub main {
     -C: Only generate call tree, don't refactor or emit
     -T: Translate <subroutine name> and dependencies to C 
     -N: Don't replace CONTINUE by CALL NOOP
-    -b: Generate SCons build script
+    -b: Generate SCons build script, currently ignored 
     -B: Build FLEXPART (implies -b)
     ";
 	}
@@ -902,16 +902,14 @@ sub translate_to_C {
 	print `pwd` if $V;
 	foreach my $csrc (keys %{$stref->{'BuildSources'}{'C'}}) {
 	   my $cmd="f2c $csrc";
-	   print $cmd,"\n" if $V;
-	   if ($csrc eq './timemanager_particles_main_loop.f') {
-          system($cmd);
-        }
+	   print $cmd,"\n" if $V;	   
+       system($cmd);        
 	}
 	# A minor problem is that we need to translate all includes contained in the tree as well
 	foreach my $inc (keys %{$stref->{'BuildSources'}{'H'}}) {
-	   my $cmd="f2c -H $inc";
+	   my $cmd="f2c $inc -H";
        print $cmd,"\n" if $V;
-#	   system($cmd);
+	   system($cmd);
 	}
 } # END of translate_to_C()
 # -----------------------------------------------------------------------------
