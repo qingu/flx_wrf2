@@ -7,8 +7,6 @@ use strict;
 - Determine if a subroutine argument is I, O or I/O
 - Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should.
 - Refactor FUNCTIONS!!
-- copy noop.f into the source tree if NOOP
-- add a flag to swich NOOP on/off, use proper option parsing
 =cut
 
 =pod
@@ -175,7 +173,8 @@ sub main {
 
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
-
+    $stateref = refactor_includes($stateref);
+    
 	if ( not $call_tree_only ) {
 		# Emit the refactored source
 		emit_all($stateref);
@@ -246,13 +245,6 @@ sub parse_fortran_src {
 		 # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
 		$stref = get_commons_params_from_includes( $f, $stref );
 	}
-
-	#	for my $i ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
-	#		if ( $stref->{'Includes'}{$i}{'Type'} eq 'Common' ) {
-	#			$stref->{'Subroutines'}{$f}{'HasCommons'} = 1;
-	#			last;
-	#		}
-	#	}
 
 	return $stref;
 
@@ -442,16 +434,9 @@ sub refactor_globals {
 				}
 			}
 
-			#                my @orig_args=@{$tags{'SubroutineCall'}{'Args'}};
 			my $args_ref = ordered_union( $orig_args, \@globals );
-
-			#                if (@globals && @orig_args) {unshift @globals,''}
-			#                my $global_args_str = join(',',@globals);
-			#                my $orig_args_str = join(',',@orig_args);
 			my $args_str = join( ',', @{$args_ref} );
 			$line =~ s/call\s.*$//;
-
-   #                my $rline = "call $name($orig_args_str $global_args_str)\n";
 			my $rline = "call $name($args_str)\n";
 			push @{$rlines}, [ $line . $rline, $tags_lref ];
 			$skip = 1;
@@ -460,17 +445,10 @@ sub refactor_globals {
 			my $rline = $line;
 			for my $lvar ( keys %conflicting_locals ) {
 				if ( $rline =~ /\b$lvar\b/ ) {
-
 #                   print  "REPLACING $lvar with $conflicting_locals{$lvar} in $f LINE '$line'\n";
 					$rline =~ s/\b$lvar\b/$conflicting_locals{$lvar}/g;
-
-					#                     print "NEW LINE: '$rline'\n";
 				}
 			}
-
-#                if ($rline ne $line) {
-#                   print STDERR "WARNING: renamed conflicting locals in $f, LINE $rline\n";
-#                }
 			push @{$rlines}, [ $rline, $tags_lref ];
 			$skip = 1;
 		}
@@ -589,7 +567,7 @@ sub refactor_blocks {
 #* BreakTarget: Do nothing
 sub create_refactored_source {
 	( my $stref, my $f, my $annlines ) = @_;
-	print "CREATING FINAL $f CODE\n" if $V;
+	print "CREATING FINAL $f CODE\n" if $V;	
 	my $rlines      = [];
 	my @extra_lines = ();
 	for my $annline ( @{$annlines} ) {
@@ -808,7 +786,86 @@ sub refactor_all_subroutines {
 
 	return $stref;
 }    # END of refactor_all_subroutines()
+# -----------------------------------------------------------------------------
+# In fact, "preconditioning" might be the better term
+sub refactor_includes {
+    ( my $stref ) = @_;
 
+    for my $f ( keys %{ $stref->{'Includes'} } ) {
+    	print "\nINCLUDE $f\n";    	
+        if ($stref->{'Includes'}{$f}{'Type'} eq 'Common' ) {
+            refactor_include( $f, $stref );
+        }        
+    }
+    return $stref;	
+}
+# -----------------------------------------------------------------------------
+sub refactor_include {
+    ( my $f, my $stref ) = @_;
+    local $V=1;
+    if ($V) {
+        print "\n\n";
+        print "#" x 80, "\n";
+        print "Refactoring $f\n";
+        print "#" x 80, "\n";
+    }
+print Dumper($stref->{'Includes'}{$f});
+    my @lines = @{ $stref->{'Includes'}{$f}{'Lines'} };
+    my @info =
+      defined $stref->{'Includes'}{$f}{'Info'}
+      ? @{ $stref->{'Includes'}{$f}{'Info'} }
+      : ();
+    my $annlines = [];
+    for my $line (@lines) {
+        my $tags = shift @info;
+        push @{$annlines}, [ $line, $tags ];
+    }
+
+    my $rlines = [];
+    for my $annline ( @{$annlines} ) {
+        my $line      = $annline->[0] || '';
+        my $tags_lref = $annline->[1];
+        my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
+        print '*** ' . join( ',', keys(%tags) ) . "\n" if $V;
+        print '*** ' . $line . "\n" if $V;
+        my $skip = 0;
+        if (exists $tags{'Common'}  ) {
+            $skip = 1;
+        }
+               
+    
+    if ($skip==0) {    
+    
+        if ( not exists $tags{'Comments'} ) {
+            print $line, "\n" if $V;
+            my @split_lines = split_long_line($line);
+            for my $sline (@split_lines) {
+                push @{ $stref->{'Includes'}{$f}{'RefactoredCode'} }, $sline;
+            }
+        } else {
+            push @{ $stref->{'Includes'}{$f}{'RefactoredCode'} }, $line;
+        }
+    }
+    }
+    
+    return $stref;
+	
+}
+# -----------------------------------------------------------------------------
+sub emit_refactored_include {
+    ( my $f, my $dir, my $stref ) = @_;
+    my $srcref = $stref->{'Includes'}{$f}{'RefactoredCode'};
+    if (defined $srcref) {
+	    print "INFO: emitting refactored code for include $f\n" if $V;
+	    my $mode = '>';
+	    open my $SRC, $mode, "$dir/$f" or die $!;
+	    for my $line ( @{$srcref} ) {
+	        print $SRC "$line\n";
+	        print "$line\n" if $V;
+	    }
+	    close $SRC;	
+    }
+}
 # -----------------------------------------------------------------------------
 sub emit_refactored_subroutine {
 	( my $f, my $dir, my $stref ) = @_;
@@ -869,6 +926,9 @@ sub emit_all {
 	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
 		emit_refactored_subroutine( $f, $targetdir, $stref );
 	}
+    for my $f ( keys %{ $stref->{'Includes'} } ) {
+        emit_refactored_include( $f, $targetdir, $stref );
+    }
 
 	# copy functions
 	my %funcsrcs = ();
@@ -885,7 +945,7 @@ sub emit_all {
 	}
 	# NOOP source
 	   if ($noop) {
-	   	copy( '../OpenCL-port/tools/noop.f' , "$targetdir/noop.c" );
+	   	copy( '../OpenCL-port/tools/noop.c' , "$targetdir/noop.c" );
         $stref->{'BuildSources'}{'C'}{ 'noop.c' }=1;
     }
 	
@@ -1006,7 +1066,6 @@ sub parse_subroutine_calls {
 				$stref->{'Subroutines'}{$f}{'Info'}
 				  ->[$index]{'SubroutineCall'}{'Args'} = $argstr;
 
-# auxgrid,wetgridn(ix,jy,k,nage), wetgridsigman(ix,jy,k,nage),nclassunc,itime,idt(j),uap(j),ucp(j),uzp(j), us(j),vs(j),ws(j),xtra1(j),ytra1(j),ztra1(j),cbt(j)
 				my $tvarlst = $argstr;
 				if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
 					while ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
@@ -1947,7 +2006,7 @@ sub read_fortran_src {
 					$lcprevline =~ s/__ph(\d+)__/__PH$1__/g;
 
 					#	                  warn "$lcprevline\n";
-					push @{$lines}, $lcprevline;
+					push @{$lines}, $lcprevline unless $lcprevline eq ''; # HACK
 					push @placeholders_per_line, [@phs];
 					@phs      = ();
 					$prevline = $line;
@@ -1956,7 +2015,8 @@ sub read_fortran_src {
 			}
 
 			# There can't be strings on the last line (except in a include?)
-			if ( $line ne $prevline )
+			# and substr($prevline,-length($line),length($prevline)) ne $line
+            if ( $line ne $prevline )
 			{    # Too weak, if there are comments in between it breaks!
 				my $lcprevline =
 				  ( substr( $prevline, 0, 2 ) eq 'C ' )
@@ -1964,8 +2024,14 @@ sub read_fortran_src {
 				  : lc($prevline);
 				push @{$lines}, $lcprevline;
 			}
-			my $lcline = ( substr( $line, 0, 2 ) eq 'C ' ) ? $line : lc($line);
-			push @{$lines}, $lcline;
+			
+			# HACK
+            if (length($line)!= length($prevline) and substr($prevline,-length($line),length($prevline)) eq $line ) {
+                # the last line was already appended to the previous line!              
+            } else {
+                my $lcline = ( substr( $line, 0, 2 ) eq 'C ' ) ? $line : lc($line);
+			    push @{$lines}, $lcline;
+            }
 			push @placeholders_per_line, [];
 			push @placeholders_per_line, [];
 			close $SRC;
@@ -2013,9 +2079,9 @@ sub read_fortran_src {
 
 			}
 		}    # if OK
-	}    # if Status==0
+	}    # if Status==0
 
-#    die Dumper($stref->{$sub_or_incl}{'xymeter_to_ll_wrf'}) if $f=~/map_proj_wrf.f/;
+#    die Dumper($stref->{$sub_or_incl}{'includehanna'}) if $f=~/includehanna/;
 	return $stref;
 }    # END of read_fortran_src()
 
