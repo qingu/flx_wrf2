@@ -173,6 +173,7 @@ sub main {
 
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
+		
     $stateref = refactor_includes($stateref);
     
 	if ( not $call_tree_only ) {
@@ -793,7 +794,7 @@ sub refactor_includes {
 
     for my $f ( keys %{ $stref->{'Includes'} } ) {
     	print "\nINCLUDE $f\n";    	
-        if ($stref->{'Includes'}{$f}{'Type'} eq 'Common' ) {
+        if ($stref->{'Includes'}{$f}{'Type'} eq 'Common' or $stref->{'Includes'}{$f}{'Type'} eq 'Parameter') {
             refactor_include( $f, $stref );
         }        
     }
@@ -2006,7 +2007,7 @@ sub read_fortran_src {
 					$lcprevline =~ s/__ph(\d+)__/__PH$1__/g;
 
 					#	                  warn "$lcprevline\n";
-					push @{$lines}, $lcprevline unless $lcprevline eq ''; # HACK
+					push @{$lines}, $lcprevline;# unless $lcprevline eq ''; # HACK
 					push @placeholders_per_line, [@phs];
 					@phs      = ();
 					$prevline = $line;
@@ -2025,8 +2026,8 @@ sub read_fortran_src {
 				push @{$lines}, $lcprevline;
 			}
 			
-			# HACK
-            if (length($line)!= length($prevline) and substr($prevline,-length($line),length($prevline)) eq $line ) {
+			# HACK! FIXME!
+            if ($f=~/^include/ and length($line)!= length($prevline) and substr($prevline,-length($line),length($prevline)) eq $line ) {
                 # the last line was already appended to the previous line!              
             } else {
                 my $lcline = ( substr( $line, 0, 2 ) eq 'C ' ) ? $line : lc($line);
