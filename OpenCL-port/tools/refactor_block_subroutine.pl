@@ -259,9 +259,13 @@ sub refactor_globals {
 	( my $stref, my $f, my $annlines ) = @_;
 	my $rlines = [];
 	my @globs  = ();
+	# Quick and dirty way to get the Kinds of all arguments
+	my %maybe_args = ();
 	for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
 		@globs = ( @globs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } );
+		%maybe_args=(%maybe_args,%{ $stref->{'Includes'}{$inc}{'Vars'}  });
 	}
+	%maybe_args=(%{ $stref->{'Subroutines'}{$f}{'Vars'} },%maybe_args);	
 	my %globals            = map { $_ => 1 } @globs;
 	my %args               = ();
 	my %conflicting_locals = ();
@@ -298,21 +302,25 @@ sub refactor_globals {
 			my $args_ref =
 			  ordered_union( $tags{'Signature'}{'Args'}, \@exglobs );
 			my $args_str = join( ',', @{$args_ref} );
-
-			#                  die $args_str if $f =~/particles_main/;
 			my $rline = '';
 			if ( $stref->{'Subroutines'}{$f}{'Program'} ) {
 				$rline = '      program ' . $name;
 			} else {
 				$rline = '      subroutine ' . $name . '(' . $args_str . ')';
 			}
-
-			#                my $rline =
-			#                    '      subroutine '
-			#                  . $name . '('
-			#                  . join( ',', ( @orig_args, @exglobs ) ) . ')';
 			$tags{'Refactored'} = 1;
 			push @${rlines}, [ $rline, $tags_lref ];
+			
+			for my $arg ( @{$args_ref} ) {
+				if (exists  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg} ) {
+				    my $iodir = $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg};
+				    my $kind=$maybe_args{$arg}{'Kind'};
+				    my $comment ="C      $arg:\t$iodir, $kind"; 
+				    push @${rlines}, [ $comment, {'Comment'=>1} ];
+				} else {
+					warn "NO IO info for $arg in $f\n";
+				}
+			}
 			$skip = 1;
 		}
 
@@ -512,7 +520,7 @@ sub refactor_blocks {
 		$stref = parse_includes( $name, $stref );
 		$stref = parse_subroutine_calls( $name, $stref );
 		$stref = identify_globals_used_in_subroutine( $name, $stref );
-
+        $stref =determine_argument_io_direction($name,$stref);
 		# Now we're ready to refactor this source
 		$stref = refactor_subroutine( $name, $stref );    # shiver!
 	}
@@ -705,65 +713,6 @@ sub refactor_subroutine {
 		or $stref->{'Subroutines'}{$f}{'RefactoredCode'} == [] )
 	{
 		$stref = create_refactored_source( $stref, $f, $rlines );
-
-#    $annlines = $rlines;
-#    $rlines   = [];
-#    my @extra_lines=();
-#    for my $annline ( @{$annlines} ) {
-#        my $line      = $annline->[0] || ''; # FIXME: why would line be undefined?
-#        my $tags_lref = $annline->[1] || {};
-#        my %tags      = %{$tags_lref};
-## BeginDo: just remove the label
-		#        if (exists $tags{'BeginDo'}) {
-		#        	$line=~s/do\s+\d+\s+/do /;
-		#        }
-## EndDo: replace label CONTINUE by END DO; if no continue, remove label & add end do on next line
-#        if (exists $tags{'EndDo'}) {
-#        	my $is_goto_target=0;
-#        	if ($stref->{'Subroutines'}{$f}{'Gotos'}{$tags{'EndDo'}{'Label'}}) {
-#        		# this is an end do which serves as a goto target
-#        		$is_goto_target=1;
-#        	}
-#        	my $count =$tags{'EndDo'}{'Count'};
-#        	if ($line=~/^\d+\s+continue/) {
-#        		if ($is_goto_target==0) {
-#                $line='      end do';
-#                $count--;
-#        		}
-#        	} elsif ($line=~/^\d+\s+\w/) {
-#        		if ($is_goto_target==0) {
-#        		$line=~s/^\d+//;
-#        		}
-#        	}
-#            while($count>0) {
-#            	push @extra_lines,'      end do';
-#            	$count--;
-#            }
-#        }
-#
-#        if (exists $tags{'PlaceHolders'}) {
-#            my @phs=@{$tags{'PlaceHolders'}};
-#            for my $ph (@phs) {
-#                my $str=$stref->{'Subroutines'}{$f}{'StringConsts'}{$ph};
-#                $line=~s/$ph/$str/;
-#            }
-#        }
-#        if ( not exists $tags{'Comments'} ) {
-#            print $line,"\n" if $V;
-#            my @split_lines = split_long_line($line);
-#            for my $sline (@split_lines) {
-#                push @{ $stref->{'Subroutines'}{$f}{'RefactoredCode'} }, $sline;
-#            }
-#            if (@extra_lines) {
-#                for my $extra_line (@extra_lines) {
-#                	push @{ $stref->{'Subroutines'}{$f}{'RefactoredCode'} }, $extra_line;
-#                }
-#                @extra_lines=();
-#            }
-#        } else {
-#            push @{ $stref->{'Subroutines'}{$f}{'RefactoredCode'} }, $line;
-#        }
-#    }
 	}
 
 #    print STDERR "REFACTORED $f\n";
@@ -987,8 +936,146 @@ sub translate_to_C {
 		print $cmd, "\n" if $V;
 		system($cmd);
 	}
+	my $i=0;
+	foreach my $csrc ( keys %{ $stref->{'BuildSources'}{'C'} } ) {
+	   postprocess_C($stref,$csrc,$i);	
+       system('gcc -c -Wall -I$GPU_HOME/include tmp'.$i.'.c');
+       $i++;
+	}	
+	
 }    # END of translate_to_C()
-
+# -----------------------------------------------------------------------------
+sub postprocess_C {
+    (my $stref, my $csrc,my $i) = @_;
+    my $sub='';
+    my %params=();
+    my %vars=();
+    my %labels=();
+    # We need to check if this particular label is a Break
+    # So we need a list of all labels per subroutine.
+    my $isBreak = sub  {
+        (my $label)=@_;
+        return ( $labels{$label} eq 'BreakTarget' || $labels{$label} eq 'NoopBreakTarget');    
+    };
+    
+    my $isNoop =sub {
+    (my $label)=@_;
+        return ( $labels{$label} eq 'NoopBreakTarget');
+    };
+    
+    open my $CSRC,'<',$csrc;
+    open my $PPCSRC,'>','tmp'.$i.'.c'; # FIXME
+    while (my $line =<$CSRC>) {
+        $line=~/^\s*void\s+(\w+)_\s+\(.*?\)\s+\{/ && do {
+            $sub= $1;
+            
+            for my $i ( keys %{ $stref->{'Subroutines'}{$sub}{'Includes'} } ) {
+                if ( $stref->{'Includes'}{$i}{'Type'} eq 'Parameter' ) {
+                   %params = (%params,%{ $stref->{'Includes'}{$i}{'Parameters'} });
+                 }
+            }
+            %vars=%{ $stref->{'Subroutines'}{$sub}{'Vars'} };
+            %labels=%{ $stref->{'Subroutines'}{$sub}{'Gotos'} };
+        };
+        $line=~/F2C\-ACC\:\ Type\ not\ recognized\./ && do {
+            my @chunks=split(/\,/,$line);
+            for my $chunk (@chunks) {
+                $chunk =~/F2C\-ACC\:\ Type\ not\ recognized\.\ \*?(\w+)/ && do {
+                    my $var=$1;                
+                    my $ftype=$vars{$var}{'Type'};
+                    my $vtype=toCType($ftype);
+                    $chunk=~s/F2C\-ACC\:\ Type\ not\ recognized\./$vtype/;
+                };        
+            }
+            $line=join(',',@chunks);
+        };
+       next if $line=~/^\s*extern\s+void\s+noop/;
+       if ($line=~/^\s*extern\s+\w+\s+(\w+)_\(/) {
+           my $inc=$1;
+           my $hfile=$inc.'.h';
+           
+           if (not -e $hfile) {
+               $line=~s/^\s*extern\s+//; 
+               open my $INC,'>',$hfile;
+               my $shield=$hfile;
+               $shield=~s/\./_/;
+               $shield='_'.uc($shield).'_';
+               print $INC '#ifndef '.$shield."\n";
+               print $INC '#define '.$shield."\n";
+               print $INC $line;
+               print $INC '#endif //'.$shield."\n";
+               close $INC;
+           }
+           print $PPCSRC '#include "'.$hfile.'"'."\n";
+           next;        
+       }
+       
+        $line=~/^\s+extern\s+\w+\s+\w+[;,]/ && do {        
+            $line=~s|^|\/\/|;
+        }; # because parameters are macros, not variables
+     
+    #*  float float and similar need to be removed
+        $line=~/float\s+(float|sngl)/ && do {
+            $line=~s|^|\/\/|;
+        };
+        
+        $line=~/int\s+(int)/ && do {
+            $line=~s|^|\/\/|;
+        };
+        
+        $line=~/(short|int)\s+(int2|short)/ && do {
+            $line=~s|^|\/\/|;
+        };
+        
+        $line=~/(long|int)\s+(int8|long)/ && do {
+            $line=~s|^|\/\/|;
+        };
+        
+        $line=~s/int\(/(int)(/g; # int is a FORTRAN primitive converting float to int
+        $line=~s/(int2|short)\(/(int)(/g; # int is a FORTRAN primitive converting float to int
+        $line=~s/(int8|long)\(/(long)(/g; # int is a FORTRAN primitive converting float to int
+        $line=~s/float\(/(float)(/g; # float is a FORTRAN primitive converting int to float
+        $line=~s/(dfloat|dble)\(/(double)(/g; # dble is a FORTRAN primitive converting int to float
+        $line=~s/sngl\(/(/g; # sngl is a FORTRAN primitive converting double to float
+        $line=~/goto\ C__(\d+):/ && do {
+            my $label=$1;
+            if ($isBreak->($label)) {
+                $_=$line;
+                eval("s/goto\\ C__$label:/break/");
+                $line=$_;
+            } else {
+                $line=~s/C__(\d+)\:/C__$1/;
+            }
+        };
+    #    s/goto\ C__37:/break/; # must have a list of all gotos that are breaks
+        $line=~/^\s+C__(\d+)/ && do {
+            my $label=$1;
+            if ($isNoop->($label)) {
+                $line=~s|^|\/\/|;
+            }
+        };
+        print $PPCSRC $line;
+    }
+    close $CSRC;
+    close $PPCSRC;  
+} # END of postprocess_C()
+# -----------------------------------------------------------------------------
+sub toCType { (my $ftype)=@_;
+    my %corr= (
+            'logical' => 'int',
+            'integer' => 'int',
+            'real' => 'float',
+            'double precision' => 'double',
+            'doubleprecision' => 'double',
+            'character' => 'char'
+            );
+    if (exists($corr{$ftype})) {
+        return $corr{$ftype};
+    } else {
+        warn "NO TYPE for $ftype\n";
+        return 'NOTYPE';
+    }
+} # END of toCType()
 # -----------------------------------------------------------------------------
 sub create_build_script {
 	( my $stref ) = @_;
@@ -1227,22 +1314,9 @@ sub identify_globals_used_in_subroutine {
 		print "COMMONS ANALYSIS in $f\n" if $V;
 		if ( not exists $stref->{'Subroutines'}{$f}{'Commons'} ) {
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
-
 				if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common' ) {
 					print "COMMONS from $inc in $f? " if $V;
-
-# WRONG: The 'Root' here is a guess, I should not rely on it!
-#	            if ($stref->{'Includes'}{$inc}{'Root'} ne $f or
-#	            ($stref->{'Includes'}{$inc}{'Root'} eq $f and $f eq $stref->{'Top'})
-#	            ) {
-#	            	print "YES\n" if $V;
 					$commons{$inc} = $stref->{'Includes'}{$inc}{'Commons'};
-
-#	            } elsif ($V) {
-#	            	print "NO:";
-#                    print  "\tRoot: ",($stref->{'Includes'}{$inc}{'Root'} eq $f)?1:0 ;
-#                    print  "\tTop: ",($f eq $stref->{'Top'})?1:0,"\n";
-#	            }
 				}
 			}
 			$stref->{'Subroutines'}{$f}{'Commons'}    = \%commons;
