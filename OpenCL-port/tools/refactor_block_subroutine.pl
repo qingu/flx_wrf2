@@ -115,9 +115,9 @@ use Data::Dumper;
 
 # -----------------------------------------------------------------------------
 sub main {
-    if ( not @ARGV ) {
-        die "Please specifiy FORTRAN subroutine or program to refactor\n";
-    }
+	if ( not @ARGV ) {
+		die "Please specifiy FORTRAN subroutine or program to refactor\n";
+	}
 	my %opts = ();
 	getopts( 'vhCTNbB', \%opts );
 	my $subname = $ARGV[0];
@@ -151,16 +151,18 @@ sub main {
 		$translate = 1;
 	}
 	$noop = ( $opts{'N'} ) ? 0 : 1;
-	my $gen = ($opts{'b'}  || $opts{'B'})?1:0;
-    my $build= ($opts{'B'})?1:0;
-    
+	my $gen = ( $opts{'b'} || $opts{'B'} ) ? 1 : 0;
+	my $build = ( $opts{'B'} ) ? 1 : 0;
+
 	my $stateref = {
-		'Top'         => $subname,
-		'Includes'    => {},
-		'Subroutines' => {},
-		'BuildSources' => {}, # sources to be built, need to disinguish between C and Fortran
-		'Targets'     => {},         # targets for translation to C, make this {'BuildSources'}{'C'} 		
-		'Indents'     => 0
+		'Top'          => $subname,
+		'Includes'     => {},
+		'Subroutines'  => {},
+		'BuildSources' => {}
+		,    # sources to be built, need to disinguish between C and Fortran
+		'Targets' => {}
+		,    # targets for translation to C, make this {'BuildSources'}{'C'}
+		'Indents' => 0
 	};
 
 	# Find all subroutines in the source code tree
@@ -173,10 +175,11 @@ sub main {
 
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
-		
-    $stateref = refactor_includes($stateref);
-    
+
+	$stateref = refactor_includes($stateref);
+
 	if ( not $call_tree_only ) {
+
 		# Emit the refactored source
 		emit_all($stateref);
 	} elsif ( $call_tree_only and $ARGV[1] ) {
@@ -185,18 +188,18 @@ sub main {
 		print "\nCall tree for $subname:\n\n";
 		$stateref = parse_fortran_src( $subname, $stateref );
 	}
-	if ($translate == 1 ) {
-		$translate=2;
-		$subname  = $ARGV[1];
-		print "\nTranslating $subname to C\n";		
-		$gen_sub  = 1;
+	if ( $translate == 1 ) {
+		$translate = 2;
+		$subname   = $ARGV[1];
+		print "\nTranslating $subname to C\n";
+		$gen_sub = 1;
 		$stateref = parse_fortran_src( $subname, $stateref );
 		&translate_to_C($stateref);
 	}
-    create_build_script($stateref);
-    if ($build) {
-    	build_flexpart();
-    }
+	create_build_script($stateref);
+	if ($build) {
+		build_flexpart();
+	}
 	exit(0);
 
 }    # END of main()
@@ -233,7 +236,7 @@ sub parse_fortran_src {
 
 		$stref = parse_subroutine_calls( $f, $stref );
 		$stref = identify_globals_used_in_subroutine( $f, $stref );
-
+        $stref =determine_argument_io_direction($f,$stref);
 # 5. Split the source based on the block markers
 # As there could be several blocks (later), use a hash per block
 # This could happen in any file except includes; but include processing never comes here
@@ -446,6 +449,7 @@ sub refactor_globals {
 			my $rline = $line;
 			for my $lvar ( keys %conflicting_locals ) {
 				if ( $rline =~ /\b$lvar\b/ ) {
+
 #                   print  "REPLACING $lvar with $conflicting_locals{$lvar} in $f LINE '$line'\n";
 					$rline =~ s/\b$lvar\b/$conflicting_locals{$lvar}/g;
 				}
@@ -568,7 +572,7 @@ sub refactor_blocks {
 #* BreakTarget: Do nothing
 sub create_refactored_source {
 	( my $stref, my $f, my $annlines ) = @_;
-	print "CREATING FINAL $f CODE\n" if $V;	
+	print "CREATING FINAL $f CODE\n" if $V;
 	my $rlines      = [];
 	my @extra_lines = ();
 	for my $annline ( @{$annlines} ) {
@@ -787,86 +791,92 @@ sub refactor_all_subroutines {
 
 	return $stref;
 }    # END of refactor_all_subroutines()
+
 # -----------------------------------------------------------------------------
 # In fact, "preconditioning" might be the better term
 sub refactor_includes {
-    ( my $stref ) = @_;
+	( my $stref ) = @_;
 
-    for my $f ( keys %{ $stref->{'Includes'} } ) {
-    	print "\nINCLUDE $f\n";    	
-        if ($stref->{'Includes'}{$f}{'Type'} eq 'Common' or $stref->{'Includes'}{$f}{'Type'} eq 'Parameter') {
-            refactor_include( $f, $stref );
-        }        
-    }
-    return $stref;	
+	for my $f ( keys %{ $stref->{'Includes'} } ) {
+		print "\nINCLUDE $f\n";
+		if (   $stref->{'Includes'}{$f}{'Type'} eq 'Common'
+			or $stref->{'Includes'}{$f}{'Type'} eq 'Parameter' )
+		{
+			refactor_include( $f, $stref );
+		}
+	}
+	return $stref;
 }
+
 # -----------------------------------------------------------------------------
 sub refactor_include {
-    ( my $f, my $stref ) = @_;
-    local $V=1;
-    if ($V) {
-        print "\n\n";
-        print "#" x 80, "\n";
-        print "Refactoring $f\n";
-        print "#" x 80, "\n";
-    }
-print Dumper($stref->{'Includes'}{$f});
-    my @lines = @{ $stref->{'Includes'}{$f}{'Lines'} };
-    my @info =
-      defined $stref->{'Includes'}{$f}{'Info'}
-      ? @{ $stref->{'Includes'}{$f}{'Info'} }
-      : ();
-    my $annlines = [];
-    for my $line (@lines) {
-        my $tags = shift @info;
-        push @{$annlines}, [ $line, $tags ];
-    }
-
-    my $rlines = [];
-    for my $annline ( @{$annlines} ) {
-        my $line      = $annline->[0] || '';
-        my $tags_lref = $annline->[1];
-        my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
-        print '*** ' . join( ',', keys(%tags) ) . "\n" if $V;
-        print '*** ' . $line . "\n" if $V;
-        my $skip = 0;
-        if (exists $tags{'Common'}  ) {
-            $skip = 1;
-        }
-               
-    
-    if ($skip==0) {    
-    
-        if ( not exists $tags{'Comments'} ) {
-            print $line, "\n" if $V;
-            my @split_lines = split_long_line($line);
-            for my $sline (@split_lines) {
-                push @{ $stref->{'Includes'}{$f}{'RefactoredCode'} }, $sline;
-            }
-        } else {
-            push @{ $stref->{'Includes'}{$f}{'RefactoredCode'} }, $line;
-        }
-    }
-    }
-    
-    return $stref;
+	( my $f, my $stref ) = @_;
 	
+	if ($V) {
+		print "\n\n";
+		print "#" x 80, "\n";
+		print "Refactoring $f\n";
+		print "#" x 80, "\n";
+	}
+#	print Dumper( $stref->{'Includes'}{$f} );
+	my @lines = @{ $stref->{'Includes'}{$f}{'Lines'} };
+	my @info =
+	  defined $stref->{'Includes'}{$f}{'Info'}
+	  ? @{ $stref->{'Includes'}{$f}{'Info'} }
+	  : ();
+	my $annlines = [];
+	for my $line (@lines) {
+		my $tags = shift @info;
+		push @{$annlines}, [ $line, $tags ];
+	}
+
+	my $rlines = [];
+	for my $annline ( @{$annlines} ) {
+		my $line      = $annline->[0] || '';
+		my $tags_lref = $annline->[1];
+		my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
+		print '*** ' . join( ',', keys(%tags) ) . "\n" if $V;
+		print '*** ' . $line . "\n" if $V;
+		my $skip = 0;
+		if ( exists $tags{'Common'} ) {
+			$skip = 1;
+		}
+
+		if ( $skip == 0 ) {
+
+			if ( not exists $tags{'Comments'} ) {
+				print $line, "\n" if $V;
+				my @split_lines = split_long_line($line);
+				for my $sline (@split_lines) {
+					push @{ $stref->{'Includes'}{$f}{'RefactoredCode'} },
+					  $sline;
+				}
+			} else {
+				push @{ $stref->{'Includes'}{$f}{'RefactoredCode'} }, $line;
+			}
+		}
+	}
+
+	return $stref;
+
 }
+
 # -----------------------------------------------------------------------------
 sub emit_refactored_include {
-    ( my $f, my $dir, my $stref ) = @_;
-    my $srcref = $stref->{'Includes'}{$f}{'RefactoredCode'};
-    if (defined $srcref) {
-	    print "INFO: emitting refactored code for include $f\n" if $V;
-	    my $mode = '>';
-	    open my $SRC, $mode, "$dir/$f" or die $!;
-	    for my $line ( @{$srcref} ) {
-	        print $SRC "$line\n";
-	        print "$line\n" if $V;
-	    }
-	    close $SRC;	
-    }
+	( my $f, my $dir, my $stref ) = @_;
+	my $srcref = $stref->{'Includes'}{$f}{'RefactoredCode'};
+	if ( defined $srcref ) {
+		print "INFO: emitting refactored code for include $f\n" if $V;
+		my $mode = '>';
+		open my $SRC, $mode, "$dir/$f" or die $!;
+		for my $line ( @{$srcref} ) {
+			print $SRC "$line\n";
+			print "$line\n" if $V;
+		}
+		close $SRC;
+	}
 }
+
 # -----------------------------------------------------------------------------
 sub emit_refactored_subroutine {
 	( my $f, my $dir, my $stref ) = @_;
@@ -877,8 +887,9 @@ sub emit_refactored_subroutine {
 	if ( -e "$dir/$s" ) {
 		$mode = '>>';
 	} else {
-		if (not exists $stref->{'BuildSources'}{'C'}{$s} ) {
-		  $stref->{'BuildSources'}{'F'}{$s}=1;
+		if ( not exists $stref->{'BuildSources'}{'C'}{$s} ) {
+			$stref->{'BuildSources'}{'F'}{$s} = 1;
+			$stref->{'BuildSources'}{'F'}{'Subs'}{$f} = 1;
 		}
 	}
 	open my $SRC, $mode, "$dir/$s" or die $!;
@@ -895,13 +906,13 @@ sub emit_refactored_subroutine {
 # -----------------------------------------------------------------------------
 sub emit_all {
 	( my $stref ) = @_;
-	
+
 	if ( not -e $targetdir ) {
 		mkdir $targetdir;
 		my @incs = glob('include*');
 		map { copy( $_, "$targetdir/$_" ) }
 		  @incs;    # Perl::Critic wants a for-loop, drat it
-		  
+
 	} elsif ( not -d $targetdir ) {
 		die "$targetdir exists but is not a directory!\n";
 	} else {
@@ -927,73 +938,83 @@ sub emit_all {
 	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
 		emit_refactored_subroutine( $f, $targetdir, $stref );
 	}
-    for my $f ( keys %{ $stref->{'Includes'} } ) {
-        emit_refactored_include( $f, $targetdir, $stref );
-    }
+	for my $f ( keys %{ $stref->{'Includes'} } ) {
+		emit_refactored_include( $f, $targetdir, $stref );
+	}
 
 	# copy functions
 	my %funcsrcs = ();
 	for my $func ( keys %{ $stref->{'Functions'} } ) {
-		if (not exists $funcsrcs{ $stref->{'Functions'}{$func}{'Source'} }) {
-		  $funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } = 1;
-		  $stref->{'BuildSources'}{'F'}{ $stref->{'Functions'}{$func}{'Source'} }=1;
+		if ( not exists $funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } ) {
+			$funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } = 1;
+			$stref->{'BuildSources'}{'F'}
+			  { $stref->{'Functions'}{$func}{'Source'} } = 1;
 		} else {
-			$funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } ++;
-		}		
+			$funcsrcs{ $stref->{'Functions'}{$func}{'Source'} }++;
+		}
 	}
 	for my $funcsrc ( keys %funcsrcs ) {
 		copy( $funcsrc, "$targetdir/$funcsrc" );
 	}
+
 	# NOOP source
-	   if ($noop) {
-	   	copy( '../OpenCL-port/tools/noop.c' , "$targetdir/noop.c" );
-        $stref->{'BuildSources'}{'C'}{ 'noop.c' }=1;
-    }
-	
-		
+	if ($noop) {
+		copy( '../OpenCL-port/tools/noop.c', "$targetdir/noop.c" );
+		$stref->{'BuildSources'}{'C'}{'noop.c'} = 1;
+	}
+
 }    # END of emit_all()
+
 # -----------------------------------------------------------------------------
 sub translate_to_C {
-	(my $stref)=@_;
-	# At first, all we do is get the call tree and translate all sources to C with F2C_ACC
-	# The next step is to fix the bugs in F2C_ACC via post-processing (later maybe actually debug F2C_ACC)
+	( my $stref ) = @_;
+
+# At first, all we do is get the call tree and translate all sources to C with F2C_ACC
+# The next step is to fix the bugs in F2C_ACC via post-processing (later maybe actually debug F2C_ACC)
 	chdir $targetdir;
-	print "\n", "=" x 80,"\n" if $V;
+	print "\n", "=" x 80, "\n" if $V;
 	print "TRANSLATING TO C\n\n" if $V;
-	print `pwd` if $V;
-	foreach my $csrc (keys %{$stref->{'BuildSources'}{'C'}}) {
-	   my $cmd="f2c $csrc";
-	   print $cmd,"\n" if $V;	   
-       system($cmd);        
+	print `pwd`                  if $V;
+	foreach my $csrc ( keys %{ $stref->{'BuildSources'}{'C'} } ) {
+		my $cmd = "f2c $csrc";
+		print $cmd, "\n" if $V;
+		system($cmd);
 	}
-	# A minor problem is that we need to translate all includes contained in the tree as well
-	foreach my $inc (keys %{$stref->{'BuildSources'}{'H'}}) {
-	   my $cmd="f2c $inc -H";
-       print $cmd,"\n" if $V;
-	   system($cmd);
+
+# A minor problem is that we need to translate all includes contained in the tree as well
+	foreach my $inc ( keys %{ $stref->{'BuildSources'}{'H'} } ) {
+		my $cmd = "f2c $inc -H";
+		print $cmd, "\n" if $V;
+		system($cmd);
 	}
-} # END of translate_to_C()
+}    # END of translate_to_C()
+
 # -----------------------------------------------------------------------------
-sub create_build_script{ (my $stref)=@_;
+sub create_build_script {
+	( my $stref ) = @_;
+
 	# First attempt, Fortran only
-	my @gfs=('/opt/local/bin/gfortran-mp-4.6','/usr/local/bin/gfortran-4.6','/usr/bin/gfortran');
-	my $gfortran='gfortran';
+	my @gfs = (
+		'/opt/local/bin/gfortran-mp-4.6',
+		'/usr/local/bin/gfortran-4.6', '/usr/bin/gfortran'
+	);
+	my $gfortran = 'gfortran';
 	for my $mgf (@gfs) {
-		if (-e $mgf) {
-			$gfortran=$mgf;
+		if ( -e $mgf ) {
+			$gfortran = $mgf;
 			last;
 		}
 	}
-	my @fsourcelst=sort keys %{$stref->{'BuildSources'}{'F'}};
-	my $fsources=join (',',map { "'".$_."'" } @fsourcelst);
-    
-    my $csources='';    
-    if (exists $stref->{'BuildSources'}{'C'}) {
-        my @csourcelst=sort keys %{$stref->{'BuildSources'}{'C'}};
-        $csources=join (',',map { s/\.f$/.c/;"'".$_."'" } @csourcelst);        
-    }
-	my $date=localtime;
-	my $scons=<<ENDSCONS;
+	my @fsourcelst = sort keys %{ $stref->{'BuildSources'}{'F'} };
+	my $fsources = join( ',', map { "'" . $_ . "'" } @fsourcelst );
+
+	my $csources = '';
+	if ( exists $stref->{'BuildSources'}{'C'} ) {
+		my @csourcelst = sort keys %{ $stref->{'BuildSources'}{'C'} };
+		$csources = join( ',', map { s/\.f$/.c/; "'" . $_ . "'" } @csourcelst );
+	}
+	my $date  = localtime;
+	my $scons = <<ENDSCONS;
 # Generated build script for refactored FLEXPART source code
 # $date
 
@@ -1012,37 +1033,42 @@ if csources:
 else:
     envF.Program('flexpart_wrf',fsources,LIBS=['netcdff','m'],LIBPATH=['.','/opt/local/lib','/usr/local/lib'])
 ENDSCONS
-    open my $SC,'>',"$targetdir/SConstruct.flx_wrf";
-    print $SC $scons;
-    print $scons if $V;
-    close $SC;	
-	
-} # END of create_build_script()
+	open my $SC, '>', "$targetdir/SConstruct.flx_wrf";
+	print $SC $scons;
+	print $scons if $V;
+	close $SC;
+
+}    # END of create_build_script()
+
 # -----------------------------------------------------------------------------
 sub build_flexpart {
 	system('scons -f SConstruct.flx_wrf');
 }
+
 # -----------------------------------------------------------------------------
 
 sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
 	print "PARSING SUBROUTINE CALLS in $f\n" if $V;
 	my $src = $stref->{'Subroutines'}{$f}{'Source'};
-	if ( $translate==2 || ($call_tree_only && ( $gen_sub || $main_tree )) ) {
-		if ($translate!=2) {
-		my $nspaces = 64 - $stref->{'Indents'} - length($f); # -length($src) -2;
-		print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $src, "\n";
+	if ( $translate == 2 || ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
+	{
+		if ( $translate != 2 ) {
+			my $nspaces =
+			  64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
+			print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $src, "\n";
 		} else {
-			if (not exists $stref->{'BuildSources'}{'C'}{$src}) {
-			print "ADDING $src to C BuildSources\n" if $V;
-		  $stref->{'BuildSources'}{'C'}{$src}=1;
+			if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
+				print "ADDING $src to C BuildSources\n" if $V;
+				$stref->{'BuildSources'}{'C'}{$src} = 1;
+				$stref->{'BuildSources'}{'C'}{'Subs'}{$f} = 1;
 			}
-		  for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
-		  	if (not exists $stref->{'BuildSources'}{'H'}{$inc}) {
-		  	print "ADDING $inc to C Header BuildSources\n" if $V;
-		  	$stref->{'BuildSources'}{'H'}{$inc}=1;
-		  	}
-		  }
+			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
+				if ( not exists $stref->{'BuildSources'}{'H'}{$inc} ) {
+					print "ADDING $inc to C Header BuildSources\n" if $V;
+					$stref->{'BuildSources'}{'H'}{$inc} = 1;
+				}
+			}
 		}
 	}
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
@@ -1065,8 +1091,7 @@ sub parse_subroutine_calls {
 				}
 				$called_subs{$name} = $name;
 				$stref->{'Subroutines'}{$f}{'Info'}
-				  ->[$index]{'SubroutineCall'}{'Args'} = $argstr;
-
+				  ->[$index]{'SubroutineCall'}{'Args'} = $argstr;                
 				my $tvarlst = $argstr;
 				if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
 					while ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
@@ -1157,7 +1182,7 @@ sub parse_subroutine_calls {
 				}
 			}
 		}
-
+        $stref->{'Subroutines'}{$f}{'CalledSubs'}=\%called_subs;
 		for my $name ( keys %called_subs ) {
 			my $root_inc = '';
 			for my $inc (@child_is_root) {
@@ -1263,6 +1288,7 @@ sub identify_globals_used_in_subroutine {
 					  ->[$index]{'Signature'}{'Args'} = \@args;
 					$stref->{'Subroutines'}{$f}{'Info'}
 					  ->[$index]{'Signature'}{'Name'} = $name;
+					$stref->{'Subroutines'}{$f}{'Args'} = \@args;
 				}
 				if ( $first && $line =~ /^\s+program\s+(\w+)\s*$/ ) {
 					my $name = $1;
@@ -1279,7 +1305,6 @@ sub identify_globals_used_in_subroutine {
 				#	            }
 				my @chunks = split( /\W+/, $line );
 				for my $mvar (@chunks) {
-
 #				next if $mvar =~/\b(?:if|then|do|goto|integer|real|call|\d+)\b/; # is slower!
 # if a var on a line is declared locally, it is obviously not a global!
 					if ( exists $tvars{$mvar}
@@ -1306,6 +1331,118 @@ sub identify_globals_used_in_subroutine {
 	return $stref;
 }    # END of identify_globals_used_in_subroutine()
 
+# -----------------------------------------------------------------------------
+# To determine if a subroutine argument is I, O or IO:
+# if it appears only on the LHS of an '=' => O
+# if does not appear on the LHS of an '=' => I
+# otherwise => IO
+# So start by setting them all to 'I'
+# so, look for '=' and split in LHS/RHS
+ 
+ 
+sub determine_argument_io_direction {
+	( my $f, my $stref ) = @_;
+	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+	print "DETERMINE IO DIR FOR SUB $f\n";
+    my @exglobs = ();
+    for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
+        @exglobs = (
+            @exglobs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
+        );
+    }
+    my $args_ref = union( $stref->{'Subroutines'}{$f}{'Args'}, \@exglobs );
+    
+    my %args = map { $_ => 'U' } @{ $args_ref };
+    
+    # Now, we need to get the values for args used in called subs
+    # So we need a list of called subs.
+    for my $cs (keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'} }) {
+    	print "CALLED SUB: $cs\n";
+    	for my $cs_arg (keys %{ $stref->{'Subroutines'}{$cs}{'RefactoredArgs'} }) {
+    		print "\tCSARG: $cs_arg\n";
+    		if (exists $args{$cs_arg} and $stref->{'Subroutines'}{$cs}{'RefactoredArgs'}{$cs_arg} ne 'U' ) {
+    			print "\t\tINHERIT ARG IO for $cs_arg from $cs\n"; 
+    			$args{$cs_arg}= $stref->{'Subroutines'}{$cs}{'RefactoredArgs'}{$cs_arg};
+    		}
+    	}    	
+    }
+    # Then for each of these, we go through the args.
+    # If an arg has a non-'U' value, we overwrite it.	
+	
+	if ( defined $srcref ) {
+		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+			my $line = $srcref->[$index];
+			if ( $line =~ /^C\s+/ ) {
+				next;
+			}
+                # Skip the declarations
+                if ( $line =~
+/(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
+                  )
+                {
+                    next;
+                }
+			
+			if ( $line =~ /\s+(\w+)(?:\([^=]*\))?\s*=\s*(.+?)\s*$/ and $line!~/^\s*do\s+.+\s*=/) { # Assignment, but not a loop. This is weak! 
+			
+				 my $var=$1;
+				 my $rhs=$2;
+				 if (exists $args{$var} ) {
+                    
+				    if( $args{$var} eq 'U') {
+				    	print "LINE: $line\n";
+					   print "ARG $var: 'O'\n";
+					   $args{$var}='O';
+				    } elsif ($args{$var} eq 'I') {
+				    	print "LINE: $line\n";
+                        print "ARG $var: 'IO'\n";
+                        $args{$var}='IO';
+				    }
+				 }
+				 if ($line=~/^\s*if/) {				 	
+				    (my $cond,my $rest) = split(/\s+(\w+)(?:\([^=]*\))?\s*=\s*/,$line);				    
+#				    print "COND: $cond\n";
+#				    print "REST: $rest\n";
+                    find_vars($cond,\%args, \&set_io_dir);
+				 } 
+#				 print "RHS: $rhs\n";
+                find_vars($rhs,\%args, \&set_io_dir);	 
+
+			} else { # not an assignment, do as before
+				print "LINE: $line\n";
+				find_vars($line,\%args, \&set_io_dir);			 
+			}
+		}
+	}
+	$stref->{'Subroutines'}{$f}{'RefactoredArgs'}=\%args;
+#	die Dumper($stref->{'Subroutines'}{$f}{'RefactoredArgs'}) if $f=~/timemanager/;
+	return $stref;
+} # determine_argument_io_direction()
+# -----------------------------------------------------------------------------
+sub set_io_dir {
+                        (my $mvar, my $args_ref)=@_;
+                            if( $args_ref->{$mvar} eq 'O') {                      
+                                print "FOUND IO ARG $mvar\n" if $V;
+                                $args_ref->{$mvar}='IO';
+                            } elsif ($args_ref->{$mvar} eq 'U') {
+                                print "FOUND I ARG $mvar\n" if $V;
+                                $args_ref->{$mvar}='I';                           
+                            }              
+                            return $args_ref;                       
+	
+}
+# -----------------------------------------------------------------------------
+sub find_vars {
+	(my $line, my $args_ref, my $subref)=@_;
+	my %args=%{$args_ref};
+                my @chunks = split( /\W+/, $line );
+                for my $mvar (@chunks) {
+                    if ( exists $args{$mvar} ) {
+                    	$args_ref=$subref->($mvar,$args_ref)
+                    }
+                }
+    return $args_ref;                
+} # END of find_vars()
 # -----------------------------------------------------------------------------
 sub detect_blocks {
 	( my $s, my $stref ) = @_;
@@ -1380,11 +1517,11 @@ sub create_subroutine_source_from_block {
 	$stref->{'Subroutines'}{$f}{'Program'}   = 0;
 	$stref->{'Subroutines'}{$f}{'StringConsts'} =
 	  $stref->{'Subroutines'}{$p}{'StringConsts'};
-	  my $extract_sub_src=$stref->{'Subroutines'}{$p}{'Source'};
-	  $extract_sub_src=~s/\.f$//;
-	  $extract_sub_src.="_$f.f";
+	my $extract_sub_src = $stref->{'Subroutines'}{$p}{'Source'};
+	$extract_sub_src =~ s/\.f$//;
+	$extract_sub_src .= "_$f.f";
 	$stref->{'Subroutines'}{$f}{'Source'} = $extract_sub_src;
-	  	  
+
 	if ($V) {
 		@lines = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
 		@info  = @{ $stref->{'Subroutines'}{$f}{'Info'} };
@@ -1799,7 +1936,9 @@ sub identify_loops_breaks {
 
 	my %do_loops = ();
 	my %gotos    = ();
-	my $nest     = 0;
+
+	#	my %labels=();
+	my $nest = 0;
 	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 		my $line = $srcref->[$index];
 		next if $line =~ /^C\s+/;
@@ -1867,6 +2006,7 @@ sub identify_loops_breaks {
 				}
 				$stref->{'Subroutines'}{$f}{'Info'}
 				  ->[$index]{$target}{'Label'} = $label;
+				$stref->{'Subroutines'}{$f}{'Gotos'}{$label} = $target;
 				delete $gotos{$label};
 
 			}
@@ -2007,7 +2147,8 @@ sub read_fortran_src {
 					$lcprevline =~ s/__ph(\d+)__/__PH$1__/g;
 
 					#	                  warn "$lcprevline\n";
-					push @{$lines}, $lcprevline;# unless $lcprevline eq ''; # HACK
+					push @{$lines},
+					  $lcprevline;    # unless $lcprevline eq ''; # HACK
 					push @placeholders_per_line, [@phs];
 					@phs      = ();
 					$prevline = $line;
@@ -2017,7 +2158,7 @@ sub read_fortran_src {
 
 			# There can't be strings on the last line (except in a include?)
 			# and substr($prevline,-length($line),length($prevline)) ne $line
-            if ( $line ne $prevline )
+			if ( $line ne $prevline )
 			{    # Too weak, if there are comments in between it breaks!
 				my $lcprevline =
 				  ( substr( $prevline, 0, 2 ) eq 'C ' )
@@ -2025,14 +2166,20 @@ sub read_fortran_src {
 				  : lc($prevline);
 				push @{$lines}, $lcprevline;
 			}
-			
+
 			# HACK! FIXME!
-            if ($f=~/^include/ and length($line)!= length($prevline) and substr($prevline,-length($line),length($prevline)) eq $line ) {
-                # the last line was already appended to the previous line!              
-            } else {
-                my $lcline = ( substr( $line, 0, 2 ) eq 'C ' ) ? $line : lc($line);
-			    push @{$lines}, $lcline;
-            }
+			if (    $f =~ /^include/
+				and length($line) != length($prevline)
+				and substr( $prevline, -length($line), length($prevline) ) eq
+				$line )
+			{
+
+				# the last line was already appended to the previous line!
+			} else {
+				my $lcline =
+				  ( substr( $line, 0, 2 ) eq 'C ' ) ? $line : lc($line);
+				push @{$lines}, $lcline;
+			}
 			push @placeholders_per_line, [];
 			push @placeholders_per_line, [];
 			close $SRC;
@@ -2082,7 +2229,7 @@ sub read_fortran_src {
 		}    # if OK
 	}    # if Status==0
 
-#    die Dumper($stref->{$sub_or_incl}{'includehanna'}) if $f=~/includehanna/;
+  #    die Dumper($stref->{$sub_or_incl}{'includehanna'}) if $f=~/includehanna/;
 	return $stref;
 }    # END of read_fortran_src()
 
