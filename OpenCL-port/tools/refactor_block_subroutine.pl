@@ -173,8 +173,6 @@ sub main {
 # First we analyse the code for use of globals and blocks to be transformed into subroutines
 	$stateref = parse_fortran_src( $subname, $stateref );
 
-	#	show_info($stateref);
-
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 
@@ -196,6 +194,7 @@ sub main {
 		print "\nTranslating $subname to C\n";
 		$gen_sub = 1;
 		$stateref = parse_fortran_src( $subname, $stateref );
+		$stateref = refactor_C_targets($stateref);
 		&translate_to_C($stateref);
 	}
 	create_build_script($stateref);
@@ -260,17 +259,21 @@ sub parse_fortran_src {
 sub refactor_globals {
 	
 	( my $stref, my $f, my $annlines ) = @_;
-	print "REFACTORING GLOBALS in $f\n";
+	print "REFACTORING GLOBALS in $f\n" if $V;
 	my $rlines = [];
 	my @globs  = ();
 	my $s=$stref->{'Subroutines'}{$f}{'Source'};
 	my $is_C_target=exists $stref->{'BuildSources'}{'C'}{$s}?1:0;
-	die Dumper( $stref->{'BuildSources'}{'C'} ) if $translate==2 and $f=~/initialize/;
+		
 	# Quick and dirty way to get the Kinds of all arguments
 	my %maybe_args = ();
 	for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
+		if (defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc}) {
 		@globs = ( @globs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } );
+		}
+		if (defined $stref->{'Includes'}{$inc}{'Vars'}) {
 		%maybe_args=(%maybe_args,%{ $stref->{'Includes'}{$inc}{'Vars'}  });
+		}
 	}
 	%maybe_args=(%{ $stref->{'Subroutines'}{$f}{'Vars'} },%maybe_args);	
 	my %globals            = map { $_ => 1 } @globs;
@@ -301,9 +304,11 @@ sub refactor_globals {
 					print "INFO: $f is root for $inc\n" if $V;
 					next;
 				}
+				if (defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc} ) {
 				@exglobs = (
 					@exglobs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
 				);
+				}
 			}
 			print join( ',', @exglobs ), "\n" if $V;
 			my $args_ref =
@@ -424,9 +429,8 @@ sub refactor_globals {
 			my @nvars=();
 			for my $var (@vars) {
 				if (exists $stref->{'Functions'}{$var} and $is_C_target) {
-					print "WARNING: variable $var in $f is a function!\n";
-					next;
-				}
+					print "WARNING: $var in $f is a function!\n";					
+				} else {
 				if ( exists $globals{$var} and not exists $args{$var} ) {
 					print STDERR
 "WARNING: local $var in $f ($stref->{'Subroutines'}{$f}{'Source'}) conflicts with global of same name, will be renamed to $var\_LOCAL\n";
@@ -441,13 +445,16 @@ sub refactor_globals {
 				} else {
 					push @nvars,$var;
 				}
+				}
 			}
 			$rline =~ s/,\s*$//;
-			# NEW code
-			my $spaces=$line;
-			$spaces=~s/[^\s].*$//;
+			if ($line!~/\(.*?\)/) { # FIXME: can't handle arrays yet!
+            # NEW code
+            my $spaces=$line;
+            $spaces=~s/[^\s].*$//;
 			$rline=$spaces.$stref->{'Subroutines'}{$f}{'Vars'}{$vars[0]}{'Type'}.' '.join(',',@nvars)."\n";
-#			die $line."\n".$reconstructed_line if $reconstructed_line=~/ran3/ and $f=~/init/;
+			} 
+			
 			push @{$rlines}, [ $rline, $tags_lref ];
 			$skip = 1;
 		}
@@ -460,10 +467,12 @@ sub refactor_globals {
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$name}{'Globals'} } )
 			{
 				next if $stref->{'Includes'}{$inc}{'Root'} eq $name;
+				if (defined $stref->{'Subroutines'}{$name}{'Globals'}{$inc} ) {
 				@globals = (
 					@globals,
 					@{ $stref->{'Subroutines'}{$name}{'Globals'}{$inc} }
 				);
+				}
 			}
 			my $orig_args = [];
 			for my $arg ( @{ $tags{'SubroutineCall'}{'Args'} } ) {
@@ -543,14 +552,17 @@ sub refactor_blocks {
 
 		# Now we must parse this source
 		$stref = get_var_decls( $name, $stref );
-
-		#           $stref = detect_blocks( $name, $stref );
 		$stref = parse_includes( $name, $stref );
 		$stref = parse_subroutine_calls( $name, $stref );
 		$stref = identify_globals_used_in_subroutine( $name, $stref );
-        $stref =determine_argument_io_direction($name,$stref);
+        $stref = determine_argument_io_direction($name,$stref);
 		# Now we're ready to refactor this source
+#		if ($translate ==0 ){
 		$stref = refactor_subroutine( $name, $stref );    # shiver!
+#		} else {
+#			die;
+#		$stref = refactor_C_targets( $stref );    # shiver!
+#		}
 	}
 
 	# Now go through the lines again and create the proper call
@@ -714,7 +726,7 @@ sub refactor_subroutine {
 		print "#" x 80, "\n";
 	}
 
-	#    print STDERR "REFACTORING $f\n";
+	print "REFACTORING SUBROUTINE $f\n" if $V;
 	#print Dumper($stref->{'Subroutines'}{$f}{'Info'}) if $f eq 'llij_lc';
 	my @lines = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
 	my @info =
@@ -768,7 +780,23 @@ sub refactor_all_subroutines {
 
 	return $stref;
 }    # END of refactor_all_subroutines()
-
+#  -----------------------------------------------------------------------------
+sub refactor_C_targets {
+    ( my $stref ) = @_;
+print "\nREFACTORING C TARGETS\n";
+    #   print Dumper(keys %{ $stref->{'Subroutines'} });
+    for my $f ( keys %{ $stref->{'Subroutines'} } ) {
+    	if (exists $stref->{'BuildSources'}{'C'}{ $stref->{'Subroutines'}{$f}{'Source'} } ) {
+            $stref = refactor_subroutine( $f, $stref );
+    	}
+    }
+    return $stref;	
+}
+# -----------------------------------------------------------------------------
+sub emit_C_targets {
+	
+	NEED TO EMIT THE REFACTORED C TARGETS!
+}
 # -----------------------------------------------------------------------------
 # In fact, "preconditioning" might be the better term
 sub refactor_includes {
@@ -1022,7 +1050,8 @@ sub postprocess_C {
             my @chunks=split(/\,/,$line);
             for my $chunk (@chunks) {
                 $chunk =~/F2C\-ACC\:\ Type\ not\ recognized\.\ \*?(\w+)/ && do {
-                    my $var=$1;                
+                    my $var=$1;      
+                    $var=~s/__G//;           
                     my $ftype=$vars{$var}{'Type'};
                     my $vtype=toCType($ftype);
                     $chunk=~s/F2C\-ACC\:\ Type\ not\ recognized\./$vtype/;
@@ -1182,7 +1211,7 @@ sub build_flexpart {
 
 sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
-	print "PARSING SUBROUTINE CALLS in $f <> $sub_to_translate\n";# if $V;
+	print "PARSING SUBROUTINE CALLS in $f\n" if $V;
 	my $src = $stref->{'Subroutines'}{$f}{'Source'};
 	if ( $translate == 2 || ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
 	{
@@ -1190,15 +1219,17 @@ sub parse_subroutine_calls {
 			my $nspaces =
 			  64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
 			print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $src, "\n";
-			if ($f eq $sub_to_translate) {
-				$translate=2;
-			}
+#			if ($f eq $sub_to_translate) {
+#				print "FOUND C TARGET SUB\n";
+#				$translate=2;
+#			}
 		} # else {
 			if ($translate==2) {
 			if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
-				print "ADDING $src to C BuildSources\n";# if $V;
+				print "ADDING $src to C BuildSources\n" if $V;
 				$stref->{'BuildSources'}{'C'}{$src} = 1;
 				$stref->{'BuildSources'}{'C'}{'Subs'}{$f} = 1;
+				$stref->{'Subroutines'}{$f}{'Status'} = 4;
 			}
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
 				if ( not exists $stref->{'BuildSources'}{'H'}{$inc} ) {
@@ -1638,7 +1669,7 @@ sub create_subroutine_source_from_block {
 	$stref->{'Subroutines'}{$f}{'Lines'} = $rlines;
 
 	#        $stref->{'Subroutines'}{$f}{'Info'} =[];
-	$stref->{'Subroutines'}{$f}{'Status'}    = 3;
+	$stref->{'Subroutines'}{$f}{'Status'} = 3;
 	$stref->{'Subroutines'}{$f}{'HasBlocks'} = 0;
 	$stref->{'Subroutines'}{$f}{'Program'}   = 0;
 	$stref->{'Subroutines'}{$f}{'StringConsts'} =
