@@ -55,7 +55,7 @@ postprocess_C($stref,$csrc);
 system('gcc -c -Wall -I$GPU_HOME/include  tmp.c');
 
 sub postprocess_C {
-	(my $stref, my $csrc) = @_;
+	(my $stref, my $csrc,my $i) = @_;
 	my $sub='';
 	my %params=();
 	my %vars=();
@@ -73,7 +73,7 @@ sub postprocess_C {
 	};
 	
 	open my $CSRC,'<',$csrc;
-	open my $PPCSRC,'>','tmp.c'; # FIXME
+	open my $PPCSRC,'>','tmp'.$i.'.c'; # FIXME
 	while (my $line =<$CSRC>) {
 	    $line=~/^\s*void\s+(\w+)_\s+\(.*?\)\s+\{/ && do {
 	        $sub= $1;
