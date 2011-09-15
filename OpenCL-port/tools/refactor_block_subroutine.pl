@@ -195,6 +195,7 @@ sub main {
 		$gen_sub = 1;
 		$stateref = parse_fortran_src( $subname, $stateref );
 		$stateref = refactor_C_targets($stateref);
+		emit_C_targets($stateref);
 		&translate_to_C($stateref);
 	}
 	create_build_script($stateref);
@@ -794,8 +795,13 @@ print "\nREFACTORING C TARGETS\n";
 }
 # -----------------------------------------------------------------------------
 sub emit_C_targets {
-	
-	NEED TO EMIT THE REFACTORED C TARGETS!
+	( my $stref ) = @_;
+    print "\nEMITTING C TARGETS\n";	
+	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
+		if (exists $stref->{'BuildSources'}{'C'}{ $stref->{'Subroutines'}{$f}{'Source'} } ) {
+            emit_refactored_subroutine( $f, $targetdir, $stref );
+		}
+    }	
 }
 # -----------------------------------------------------------------------------
 # In fact, "preconditioning" might be the better term
@@ -895,7 +901,7 @@ sub emit_refactored_subroutine {
 	} else {
 		if ( not exists $stref->{'BuildSources'}{'C'}{$s} ) {
 			$stref->{'BuildSources'}{'F'}{$s} = 1;
-			$stref->{'BuildSources'}{'F'}{'Subs'}{$f} = 1;
+#			$stref->{'BuildSources'}{'F'}{'Subs'}{$f} = 1;
 		}
 	}
 	open my $SRC, $mode, "$dir/$s" or die $!;
@@ -981,7 +987,7 @@ sub translate_to_C {
 	print "\n", "=" x 80, "\n" if $V;
 	print "TRANSLATING TO C\n\n" if $V;
 	print `pwd`                  if $V;
-	foreach my $csrc ( keys %{ $stref->{'BuildSources'}{'C'} } ) {
+	foreach my $csrc ( keys %{ $stref->{'BuildSources'}{'C'} } ) {		
 		my $cmd = "f2c $csrc";
 		print $cmd, "\n" if $V;
 		system($cmd);
@@ -1228,7 +1234,7 @@ sub parse_subroutine_calls {
 			if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
 				print "ADDING $src to C BuildSources\n" if $V;
 				$stref->{'BuildSources'}{'C'}{$src} = 1;
-				$stref->{'BuildSources'}{'C'}{'Subs'}{$f} = 1;
+#				$stref->{'BuildSources'}{'C'}{'Subs'}{$f} = 1;
 				$stref->{'Subroutines'}{$f}{'Status'} = 4;
 			}
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
