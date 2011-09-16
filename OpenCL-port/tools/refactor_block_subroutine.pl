@@ -4,10 +4,11 @@ use strict;
 
 =TODOs
 - Create intermediate directories for converted files
-- Determine if a subroutine argument is I, O or I/O
-- Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should.
+- Determine if a subroutine argument is I, O or I/O => OK
+- Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should. => OK
 - Refactor FUNCTIONS!! and translate to C and emit headers as well
-- Declarations from F2C_ACC are broken, emit our own
+- Declarations from F2C-ACC are broken, emit our own => OK
+- But F2C-ACC's function calls are wrong too! They use the non-pointer vars where they should use the pointers! Big problem...
 =cut
 
 =pod
@@ -658,11 +659,12 @@ sub create_refactored_source {
 				$count--;
 			}
 		}
-		if ( $noop && exists $tags{'NoopBreakTarget'} ) {
+		if ( $noop && (exists $tags{'NoopBreakTarget'} || exists $tags{'NoopTarget'})) {
 			$line =~ s/continue/call noop/;
 		}
 		if ( exists $tags{'Break'} ) {
 			$line .= '  !Break';
+			# $line=~s/goto\s+(\d+)/call break($1)/;
 		}
 
 		if ( exists $tags{'PlaceHolders'} ) {
@@ -1012,9 +1014,12 @@ sub translate_to_C {
 # -----------------------------------------------------------------------------
 sub postprocess_C {
     (my $stref, my $csrc,my $i) = @_;
+    print "POSTPROC $csrc\n";
     my $sub='';
+    my $argstr='';
     my %params=();
     my %vars=();
+    my %argvars=();
     my %labels=();
     # We need to check if this particular label is a Break
     # So we need a list of all labels per subroutine.
@@ -1034,8 +1039,17 @@ sub postprocess_C {
     open my $PPCSRC,'>','tmp'.$i.'.c'; # FIXME
     my $skip=0;
     while (my $line =<$CSRC>) {
-        $line=~/^\s*void\s+(\w+)_\s+\(.*?\)\s+\{/ && do {
+        $line=~/^\s*void\s+(\w+)_\s+\(\s*(.*?)\s*\)\s+\{/ && do {
             $sub= $1;
+            $argstr = $2;
+            
+            my @args=split(/\s*\,\s*/,$argstr);
+            
+            %argvars = map {
+            	s/^\w+\s+\*?//;
+            	s/^F2C-ACC.*?\.\s+\*?//;
+            	$_ => 1;            	
+            } @args;            
             
             for my $i ( keys %{ $stref->{'Subroutines'}{$sub}{'Includes'} } ) {
                 if ( $stref->{'Includes'}{$i}{'Type'} eq 'Parameter' ) {
@@ -1047,8 +1061,22 @@ sub postprocess_C {
             if (exists $stref->{'Subroutines'}{$sub}{'Gotos'}) {
             %labels=%{ $stref->{'Subroutines'}{$sub}{'Gotos'} };
             }
+                my $decl=$line;
+                $decl=~s/\{.*$/;/;
+                my $hfile="$sub.h";
+               open my $INC,'>',$hfile;
+               my $shield=$hfile;
+               $shield=~s/\./_/;
+               $shield='_'.uc($shield).'_';
+               print $INC '#ifndef '.$shield."\n";
+               print $INC '#define '.$shield."\n";
+               print $INC $decl,"\n";
+               print $INC '#endif //'.$shield."\n";
+               close $INC;
+            
             $skip=1;
         };
+        
         $line=~/F2C\-ACC\:\ Type\ not\ recognized\./ && do {
             my @chunks=split(/\,/,$line);
             for my $chunk (@chunks) {
@@ -1076,26 +1104,27 @@ sub postprocess_C {
         };
        next if $line=~/^\s*extern\s+void\s+noop/;
        if ($skip==0) {
-       if ($line=~/^\s*extern\s+\w+\s+(\w+)_\(/) {
+        if ($line=~/^\s*extern\s+\w+\s+(\w+)_\(/) {
            my $inc=$1;
            my $hfile=$inc.'.h';
            
            if (not -e $hfile) {
                $line=~s/^\s*extern\s+//; 
-               open my $INC,'>',$hfile;
-               my $shield=$hfile;
-               $shield=~s/\./_/;
-               $shield='_'.uc($shield).'_';
-               print $INC '#ifndef '.$shield."\n";
-               print $INC '#define '.$shield."\n";
-               print $INC $line;
-               print $INC '#endif //'.$shield."\n";
-               close $INC;
+#               open my $INC,'>',$hfile;
+#               my $shield=$hfile;
+#               $shield=~s/\./_/;
+#               $shield='_'.uc($shield).'_';
+#               print $INC '#ifndef '.$shield."\n";
+#               print $INC '#define '.$shield."\n";
+#               print $INC $line;
+#               print $INC '#endif //'.$shield."\n";
+#               close $INC;
            }
            print $PPCSRC '#include "'.$hfile.'"'."\n";
            next;        
        }
-       
+
+            
         $line=~/^\s+extern\s+\w+\s+\w+[;,]/ && do {        
             $line=~s|^|\/\/|;
         }; # because parameters are macros, not variables
@@ -1146,8 +1175,29 @@ sub postprocess_C {
                 $line=~s|^|\/\/|;
             }
         };
+        
+        $line=~/^\s*(\w+)_\(\s*([\,\w\(\)]+)\s*\);/ && do {
+        	
+        	# We need to replace the arguments with the correct ones.
+        	my $calledsub=$1;
+        	my $argstr=$2; 
+        	my @args=split(/\s*\,\s*/,$argstr);
+        	for my $arg (@args) {
+        		$arg=~s/[\(\)]//g;
+#        		print $arg,"\n";
+        		if (exists $argvars{$arg.'__G'}) {
+        			$arg.='__G';
+        		}
+        	}
+        	my $nargstr=join(',',@args);
+        	chomp $line;
+        	$line=~s/\(.*//;
+        	$line.='('.$nargstr.');'."\n";
+#        	die $line if $calledsub=~/interpol/;
+        };
+        
        } else {
-       	$skip=0;
+       	    $skip=0;
        }
        # VERY AD-HOC: get rid of write() statements
        $line=~/^\s*write\(/ && do {
@@ -2138,7 +2188,7 @@ sub identify_loops_breaks {
 			$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Goto'}{'Label'} =
 			  $label;
 			$stref->{'Subroutines'}{$f}{'Gotos'}{$label} = 1;
-			@{ $gotos{$label} } = ( $index, $nest );
+			push @{ $gotos{$label} } , [ $index, $nest ];
 			next;
 		};
 
@@ -2161,22 +2211,33 @@ sub identify_loops_breaks {
 				}
 			} elsif ( exists $gotos{$label} ) {
 				my $target = 'GotoTarget';
-				if ( $nest <= $gotos{$label}[1] ) { # What if there are several gotos point to one label?					
-					if ($is_cont) {
-						$target = 'NoopBreakTarget';
-						$stref->{'Subroutines'}{$f}{'Info'}
-						  ->[ $gotos{$label}[0] ]{'Break'}{'Label'} = $label;
-					} else {
-						$target = 'BreakTarget';
-						$stref->{'Subroutines'}{$f}{'Info'}
-						  ->[ $gotos{$label}[0] ]{'Break'}{'Label'} = $label;
-
-#                    	print STDERR "WARNING: $f: Found BREAK target not NOOP for label $label\n";
-					}
-				} else {
-					print STDERR
+				for my $pair (@{$gotos{$label} }) {
+					(my $tindex, my $tnest)=@{$pair};
+					$target = 'GotoTarget';
+					if ( $nest <= $tnest ) { # What if there are several gotos point to one label?
+						if ($tnest>0) {					
+							if ($is_cont) {
+								$target = 'NoopBreakTarget';
+								$stref->{'Subroutines'}{$f}{'Info'}
+								  ->[ $tindex ]{'Break'}{'Label'} = $label;
+							} else {
+								$target = 'BreakTarget';
+								$stref->{'Subroutines'}{$f}{'Info'}
+								  ->[ $tindex  ]{'Break'}{'Label'} = $label;
+		
+		#                    	print STDERR "WARNING: $f: Found BREAK target not NOOP for label $label\n";
+							}
+						} else {
+							if ($is_cont) {
+                                $target = 'NoopTarget';
+						  }
+#							print "WARNING: goto $label ($tindex) is not in loop ($f)\n" if $translate==2; 
+						}					
+				    } else {
+					   print STDERR
 "WARNING: $f: Found GOTO target not BREAK for label $label: wrong nesting $nest<>$gotos{$label}[1]\n";
-				}
+				    }
+			 }
 				$stref->{'Subroutines'}{$f}{'Info'}
 				  ->[$index]{$target}{'Label'} = $label;
 				$stref->{'Subroutines'}{$f}{'Gotos'}{$label} = $target;
