@@ -6,7 +6,8 @@ use strict;
 - Create intermediate directories for converted files
 - Determine if a subroutine argument is I, O or I/O
 - Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should.
-- Refactor FUNCTIONS!!
+- Refactor FUNCTIONS!! and translate to C and emit headers as well
+- Declarations from F2C_ACC are broken, emit our own
 =cut
 
 =pod
@@ -290,11 +291,7 @@ sub refactor_globals {
 
 		if ( exists $tags{'Signature'} ) {
 			my $name = $tags{'Signature'}{'Name'};
-
-			#                @orig_args = @{ $tags{'Signature'}{'Args'} };
 			%args = map { $_ => 1 } @{ $tags{'Signature'}{'Args'} };
-
-#                print STDERR "ARGS for $f: ",join(',',keys %args),"\n" if $f=~/particles_/;
 			my @exglobs = ();
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
 				print "INFO: INC $inc in $f\n" if $V;
@@ -306,12 +303,16 @@ sub refactor_globals {
 					next;
 				}
 				if (defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc} ) {
+					for my $var ( @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } ) {
+						if (not exists $stref->{'Subroutines'}{$f}{'Vars'}{$var}){
+						$stref->{'Subroutines'}{$f}{'Vars'}{$var}=$stref->{'Includes'}{$inc}{'Vars'}{$var};
+						}
+					}
 				@exglobs = (
 					@exglobs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
 				);
 				}
-			}
-			print join( ',', @exglobs ), "\n" if $V;
+			}			
 			my $args_ref =
 			  ordered_union( $tags{'Signature'}{'Args'}, \@exglobs );
 			my $args_str = join( ',', @{$args_ref} );
@@ -323,7 +324,7 @@ sub refactor_globals {
 			}
 			$tags{'Refactored'} = 1;
 			push @${rlines}, [ $rline, $tags_lref ];
-			
+			# IO direction information
 			for my $arg ( @{$args_ref} ) {
 				if (exists  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg} ) {
 				    my $iodir = $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg};
@@ -430,7 +431,8 @@ sub refactor_globals {
 			my @nvars=();
 			for my $var (@vars) {
 				if (exists $stref->{'Functions'}{$var} and $is_C_target) {
-					print "WARNING: $var in $f is a function!\n";					
+					print "WARNING: $var in $f is a function!\n";
+					$stref->{'Subroutines'}{$f}{'CalledFunctions'}{$var}=1;					
 				} else {
 				if ( exists $globals{$var} and not exists $args{$var} ) {
 					print STDERR
@@ -450,18 +452,16 @@ sub refactor_globals {
 			}
 			$rline =~ s/,\s*$//;
 			if ($line!~/\(.*?\)/) { # FIXME: can't handle arrays yet!
-            # NEW code
-            my $spaces=$line;
-            $spaces=~s/[^\s].*$//;
-			$rline=$spaces.$stref->{'Subroutines'}{$f}{'Vars'}{$vars[0]}{'Type'}.' '.join(',',@nvars)."\n";
+                # NEW code
+                my $spaces=$line;
+                $spaces=~s/[^\s].*$//;
+			    $rline=$spaces.$stref->{'Subroutines'}{$f}{'Vars'}{$vars[0]}{'Type'}.' '.join(',',@nvars)."\n";			    
 			} 
 			
 			push @{$rlines}, [ $rline, $tags_lref ];
 			$skip = 1;
 		}
 		if ( exists $tags{'SubroutineCall'} ) {
-
-			#               print "SUBCALL: $line\n";
 			# simply tag the common vars onto the arguments
 			my $name    = $tags{'SubroutineCall'}{'Name'};
 			my @globals = ();
@@ -558,12 +558,7 @@ sub refactor_blocks {
 		$stref = identify_globals_used_in_subroutine( $name, $stref );
         $stref = determine_argument_io_direction($name,$stref);
 		# Now we're ready to refactor this source
-#		if ($translate ==0 ){
 		$stref = refactor_subroutine( $name, $stref );    # shiver!
-#		} else {
-#			die;
-#		$stref = refactor_C_targets( $stref );    # shiver!
-#		}
 	}
 
 	# Now go through the lines again and create the proper call
@@ -624,6 +619,7 @@ sub create_refactored_source {
 	print "CREATING FINAL $f CODE\n" if $V;
 	my $rlines      = [];
 	my @extra_lines = ();
+	$stref->{'Subroutines'}{$f}{'RefactoredCode'} =[];
 	for my $annline ( @{$annlines} ) {
 		my $line = $annline->[0] || '';    # FIXME: why would line be undefined?
 		my $tags_lref = $annline->[1] || {};
@@ -751,13 +747,13 @@ sub refactor_subroutine {
 	}    # HasBlocks
 
 	if ( not exists $stref->{'Subroutines'}{$f}{'RefactoredCode'}
-		or $stref->{'Subroutines'}{$f}{'RefactoredCode'} == [] )
-	{
+		or $stref->{'Subroutines'}{$f}{'RefactoredCode'} == [] or exists $stref->{'BuildSources'}{'C'}{ $stref->{'Subroutines'}{$f}{'Source'} } )
+	{		
 		$stref = create_refactored_source( $stref, $f, $rlines );
 	}
 
-#    print STDERR "REFACTORED $f\n";
-#    print STDERR Dumper($stref->{'Subroutines'}{$f}{'RefactoredCode'}) if $f eq 'particles_main_loop';
+#   print STDERR "REFACTORED $f\n";
+#    die Dumper($stref->{'Subroutines'}{$f}{'RefactoredCode'}) if $f eq 'hanna_short' and $translate==2;
 	return $stref;
 }    # END of refactor_subroutine()
 
@@ -799,7 +795,7 @@ sub emit_C_targets {
     print "\nEMITTING C TARGETS\n";	
 	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
 		if (exists $stref->{'BuildSources'}{'C'}{ $stref->{'Subroutines'}{$f}{'Source'} } ) {
-            emit_refactored_subroutine( $f, $targetdir, $stref );
+            emit_refactored_subroutine( $f, $targetdir, $stref,1 );
 		}
     }	
 }
@@ -891,22 +887,23 @@ sub emit_refactored_include {
 
 # -----------------------------------------------------------------------------
 sub emit_refactored_subroutine {
-	( my $f, my $dir, my $stref ) = @_;
+	( my $f, my $dir, my $stref, my $overwrite ) = @_;
 	my $srcref = $stref->{'Subroutines'}{$f}{'RefactoredCode'};
 	my $s      = $stref->{'Subroutines'}{$f}{'Source'};
 	print "INFO: emitting refactored code for $f in $s\n" if $V;
 	my $mode = '>';
-	if ( -e "$dir/$s" ) {
+	if ( -e "$dir/$s" and not $overwrite) {
 		$mode = '>>';
 	} else {
-		if ( not exists $stref->{'BuildSources'}{'C'}{$s} ) {
+		if ( not exists $stref->{'BuildSources'}{'C'}{$s}
+		and not exists $stref->{'BuildSources'}{'F'}{$s} 
+		) {
 			$stref->{'BuildSources'}{'F'}{$s} = 1;
-#			$stref->{'BuildSources'}{'F'}{'Subs'}{$f} = 1;
 		}
 	}
 	open my $SRC, $mode, "$dir/$s" or die $!;
 	if ( $mode eq '>>' ) {
-		print $SRC "\n*** SUBROUTINE $f ***\n";
+		print $SRC "\nC *** SUBROUTINE $f ***\n";
 	}
 	for my $line ( @{$srcref} ) {
 		print $SRC "$line\n";
@@ -948,7 +945,7 @@ sub emit_all {
 		}
 	}
 	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
-		emit_refactored_subroutine( $f, $targetdir, $stref );
+		emit_refactored_subroutine( $f, $targetdir, $stref,0 );
 	}
 	for my $f ( keys %{ $stref->{'Includes'} } ) {
 		emit_refactored_include( $f, $targetdir, $stref );
@@ -1030,9 +1027,9 @@ sub postprocess_C {
     (my $label)=@_;
         return ( $labels{$label} eq 'NoopBreakTarget');
     };
+        
+#    my %functions = %{ $stref->{'Functions'} };
     
-    
-    my %functions = %{ $stref->{'Functions'} };
     open my $CSRC,'<',$csrc;
     open my $PPCSRC,'>','tmp'.$i.'.c'; # FIXME
     my $skip=0;
@@ -1045,7 +1042,7 @@ sub postprocess_C {
                    %params = (%params,%{ $stref->{'Includes'}{$i}{'Parameters'} });
                  }
             }
-            %vars=%{ $stref->{'Subroutines'}{$sub}{'Vars'} };
+            %vars=%{ $stref->{'Subroutines'}{$sub}{'Vars'} };            
             %labels=();
             if (exists $stref->{'Subroutines'}{$sub}{'Gotos'}) {
             %labels=%{ $stref->{'Subroutines'}{$sub}{'Gotos'} };
@@ -1057,13 +1054,25 @@ sub postprocess_C {
             for my $chunk (@chunks) {
                 $chunk =~/F2C\-ACC\:\ Type\ not\ recognized\.\ \*?(\w+)/ && do {
                     my $var=$1;      
-                    $var=~s/__G//;           
+                    $var=~s/__G//;   
+                    if (exists $vars{$var} and $vars{$var}{'Type'}) {         
                     my $ftype=$vars{$var}{'Type'};
                     my $vtype=toCType($ftype);
                     $chunk=~s/F2C\-ACC\:\ Type\ not\ recognized\./$vtype/;
+                    } else {
+                    	die "No entry for $var in $sub\n".Dumper(%vars);
+                    }
                 };        
             }
             $line=join(',',@chunks);            
+        };
+        $line=~/F2C\-ACC\:\ xUnOp\ not\ supported\./ && do { # FIXME: we assume the unitary operation is .not.
+            my @chunks=split(/\,/,$line);
+            for my $chunk (@chunks) {
+                $chunk =~s/F2C\-ACC\:\ xUnOp\ not\ supported\./\!/;
+            }
+            $line=join(',',@chunks);            
+        	
         };
        next if $line=~/^\s*extern\s+void\s+noop/;
        if ($skip==0) {
@@ -1096,7 +1105,7 @@ sub postprocess_C {
             $line=~s|^|\/\/|;
         };
         
-        $line=~/int\s+(int)/ && do {
+        $line=~/int\s+(int|mod)/ && do {
             $line=~s|^|\/\/|;
         };
         
@@ -1106,8 +1115,13 @@ sub postprocess_C {
         
         $line=~/(long|int)\s+(int8|long)/ && do {
             $line=~s|^|\/\/|;
-        };
-        
+        };        
+        if ( $line=~/^\s*(?:\w+\s+)?\w+\s+(\w+);/) { # FIXME: only works for types consisting of single strings, e.g. double precision will NOT match!
+        	my $mf=$1;
+        	if (exists  $stref->{'Subroutines'}{$sub}{'CalledFunctions'}{$mf}) {        	        
+        	 $line=~s|^|\/\/|;
+        	}
+        }
         $line=~s/int\(/(int)(/g; # int is a FORTRAN primitive converting float to int
         $line=~s/(int2|short)\(/(int)(/g; # int is a FORTRAN primitive converting float to int
         $line=~s/(int8|long)\(/(long)(/g; # int is a FORTRAN primitive converting float to int
@@ -1135,6 +1149,15 @@ sub postprocess_C {
        } else {
        	$skip=0;
        }
+       # VERY AD-HOC: get rid of write() statements
+       $line=~/^\s*write\(/ && do {
+       	$line=~s|^|\/\/|;
+       };
+       # fix % on float
+       # This is a pain: need to get the types of the operands and figure out the cases:
+       # int float, float int, float float
+       # FIXME: we assume float, float
+       $line=~s/\s+([\w\(\)]+)\s+\%\s+([\w\(\)]+)/ mod($1,$2)/;
         print $PPCSRC $line;
     }
     close $CSRC;
@@ -1225,16 +1248,11 @@ sub parse_subroutine_calls {
 			my $nspaces =
 			  64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
 			print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $src, "\n";
-#			if ($f eq $sub_to_translate) {
-#				print "FOUND C TARGET SUB\n";
-#				$translate=2;
-#			}
 		} # else {
 			if ($translate==2) {
 			if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
 				print "ADDING $src to C BuildSources\n" if $V;
 				$stref->{'BuildSources'}{'C'}{$src} = 1;
-#				$stref->{'BuildSources'}{'C'}{'Subs'}{$f} = 1;
 				$stref->{'Subroutines'}{$f}{'Status'} = 4;
 			}
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
@@ -1252,13 +1270,9 @@ sub parse_subroutine_calls {
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $line = $srcref->[$index];
 			next if $line =~ /^C\s+/;
-
-			#			warn "$line\n" if $f eq 'readwind';
 			if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )
 			{
 				my $name = $1;
-
-				#				warn "\tCALLING $name\n";
 				my $argstr = $2 || '';
 				if ( $argstr =~ /^\s*$/ ) {
 					$argstr = '';
@@ -1386,8 +1400,6 @@ sub parse_subroutine_calls {
 			}
 		}
 	}
-
-	#	die if $f eq 'readwind';
 	return $stref;
 }    # END of parse_subroutine_calls()
 
@@ -1825,12 +1837,9 @@ sub get_var_decls {
 					  ->[$index]{'ExGlobVarDecls'} = {};
 				}
 			}
-
 		}
-
 		$stref->{$sub_or_incl}{$f}{'Vars'} = \%vars;
-	}
-
+	}	
 	return $stref;
 }    # END of get_var_decls()
 
@@ -2092,6 +2101,7 @@ sub separate_blocks {
 }    # END of separate_blocks()
 
 # -----------------------------------------------------------------------------
+# FIXME: "error: break statement not within loop or switch"
 sub identify_loops_breaks {
 	( my $f, my $stref ) = @_;
 
@@ -2151,7 +2161,7 @@ sub identify_loops_breaks {
 				}
 			} elsif ( exists $gotos{$label} ) {
 				my $target = 'GotoTarget';
-				if ( $nest <= $gotos{$label}[1] ) {
+				if ( $nest <= $gotos{$label}[1] ) { # What if there are several gotos point to one label?					
 					if ($is_cont) {
 						$target = 'NoopBreakTarget';
 						$stref->{'Subroutines'}{$f}{'Info'}
