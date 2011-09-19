@@ -9,6 +9,7 @@ use strict;
 - Refactor FUNCTIONS!! and translate to C and emit headers as well
 - Declarations from F2C-ACC are broken, emit our own => OK
 - But F2C-ACC's function calls are wrong too! They use the non-pointer vars where they should use the pointers! Big problem...
+- Put F2C-ACC into our tree, if the license allows it.
 =cut
 
 =pod
@@ -1002,16 +1003,26 @@ sub translate_to_C {
 	print "\nPOSTPROCESSING C CODE\n\n";
 	foreach my $csrc ( keys %{ $stref->{'BuildSources'}{'C'} } ) {
 		$csrc=~s/\.f/\.c/;
-	   postprocess_C($stref,$csrc,$i);	
-	   # Test the generated code
-	   my $cmd='gcc -c -Wall -I$GPU_HOME/include tmp'.$i.'.c';
+	   postprocess_C($stref,$csrc,$i);
+	   $i++;
+	}
+	 # Test the generated code	
+	foreach my $ii ( 0 .. $i-1 ) {	  
+	   my $cmd='gcc -c -Wall -I$GPU_HOME/include tmp'.$ii.'.c';
 	   print $cmd,"\n";
-       system $cmd;
-       $i++;
+       system $cmd;       
 	}	
 	
 }    # END of translate_to_C()
 # -----------------------------------------------------------------------------
+# We need a separate pass I think to get the C function signatures
+# Then we need to change all array accesses used as arguments to pointers:
+# a[i] => a+i
+# Every arg in C must be a pointer (FORTRAN uses pass-by-ref)
+# So any arg in a call that is not a pointer is wrong
+# We can assume that if the arg is say v and v__G exists, then
+# it should be v__G
+# vdepo[FTNREF1D(i,1)] => vdepo+FTNREF1D(i,1)
 sub postprocess_C {
     (my $stref, my $csrc,my $i) = @_;
     print "POSTPROC $csrc\n";
@@ -1039,6 +1050,7 @@ sub postprocess_C {
     open my $PPCSRC,'>','tmp'.$i.'.c'; # FIXME
     my $skip=0;
     while (my $line =<$CSRC>) {
+    	my $decl='';
         $line=~/^\s*void\s+(\w+)_\s+\(\s*(.*?)\s*\)\s+\{/ && do {
             $sub= $1;
             $argstr = $2;
@@ -1061,19 +1073,7 @@ sub postprocess_C {
             if (exists $stref->{'Subroutines'}{$sub}{'Gotos'}) {
             %labels=%{ $stref->{'Subroutines'}{$sub}{'Gotos'} };
             }
-                my $decl=$line;
-                $decl=~s/\{.*$/;/;
-                my $hfile="$sub.h";
-               open my $INC,'>',$hfile;
-               my $shield=$hfile;
-               $shield=~s/\./_/;
-               $shield='_'.uc($shield).'_';
-               print $INC '#ifndef '.$shield."\n";
-               print $INC '#define '.$shield."\n";
-               print $INC $decl,"\n";
-               print $INC '#endif //'.$shield."\n";
-               close $INC;
-            
+            $decl=$line;            
             $skip=1;
         };
         
@@ -1094,6 +1094,20 @@ sub postprocess_C {
             }
             $line=join(',',@chunks);            
         };
+        if ($decl ne '') {
+        	$decl=$line;
+                $decl=~s/\{.*$/;/;
+                my $hfile="$sub.h";
+               open my $INC,'>',$hfile;
+               my $shield=$hfile;
+               $shield=~s/\./_/;
+               $shield='_'.uc($shield).'_';
+               print $INC '#ifndef '.$shield."\n";
+               print $INC '#define '.$shield."\n";
+               print $INC $decl,"\n";
+               print $INC '#endif //'.$shield."\n";
+               close $INC;        	
+        }
         $line=~/F2C\-ACC\:\ xUnOp\ not\ supported\./ && do { # FIXME: we assume the unitary operation is .not.
             my @chunks=split(/\,/,$line);
             for my $chunk (@chunks) {
@@ -1175,25 +1189,37 @@ sub postprocess_C {
                 $line=~s|^|\/\/|;
             }
         };
-        
-        $line=~/^\s*(\w+)_\(\s*([\,\w\(\)]+)\s*\);/ && do {
+        # Subroutine call
+        $line!~/\#define/ && $line=~s/\s([\+\-\*\/\%])\s/$1/g; # super ad-hoc!
+        $line=~/(?:^|\{\s)\s*(\w+)_\(\s([\+\*\,\w\(\)\[\]]+)\s\);/ && do {
         	
         	# We need to replace the arguments with the correct ones.
         	my $calledsub=$1;
         	my $argstr=$2; 
-        	my @args=split(/\s*\,\s*/,$argstr);
+        	my @args=split(/\s*\,\s*/,$argstr); # FIXME: this will split things like v1,indzindicator[FTNREF1D(i,1)],v3         	
         	for my $arg (@args) {
-        		$arg=~s/[\(\)]//g;
+#        		my $targ=$arg;
+        		if ($arg=~/^\((\w+)\)$/) {
+        			$arg=$1;
+        		}
+#        		$targ=~s/[\(\)]//g;
+        		$arg=~s/\[/+/g;
+        		$arg=~s/\]//g;
 #        		print $arg,"\n";
         		if (exists $argvars{$arg.'__G'}) {
         			$arg.='__G';
+        		} elsif (exists $vars{$arg} and $vars{$arg}{'Kind'} ne 'Array') {
+        			$arg='&'.$arg;
         		}
         	}
         	my $nargstr=join(',',@args);
         	chomp $line;
+        	$line=~/^\s+if/ && do {
+        		$line=~s/^.*?\{//;
+        	};
         	$line=~s/\(.*//;
         	$line.='('.$nargstr.');'."\n";
-#        	die $line if $calledsub=~/interpol/;
+#        	die $line if $calledsub=~/initialize/;
         };
         
        } else {
@@ -1207,7 +1233,7 @@ sub postprocess_C {
        # This is a pain: need to get the types of the operands and figure out the cases:
        # int float, float int, float float
        # FIXME: we assume float, float
-       $line=~s/\s+([\w\(\)]+)\s+\%\s+([\w\(\)]+)/ mod($1,$2)/;
+       $line=~s/\s+([\w\(\)]+)\s*\%\s*([\w\(\)]+)/ mod($1,$2)/;
         print $PPCSRC $line;
     }
     close $CSRC;
