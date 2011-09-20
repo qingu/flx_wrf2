@@ -1,0 +1,378 @@
+	/* This is an initialized obstack */
+
+static struct {char *l; void *p; char c[1348];} csm_data = {
+	&(csm_data.c[1348]),
+	0,
+"\0\
+accdo\0\
+parallel\0\
+unroll\0\
+vector\0\
+aligned\0\
+smsbarrier\0\
+smsreduce\0\
+begin\0\
+nonperiodic\0\
+periodic\0\
+end\0\
+go\0\
+to\0\
+goto\0\
+smsexchange\0\
+smsignore\0\
+smsinsert\0\
+accregion\0\
+smsmessage\0\
+default\0\
+smsremove\0\
+smsdistribute\0\
+smstransfer\0\
+unstructured\0\
+private\0\
+public\0\
+allocatable\0\
+allocate\0\
+stat=\0\
+.and.\0\
+if\0\
+assign\0\
+dimension\0\
+external\0\
+intent\0\
+intrinsic\0\
+optional\0\
+parameter\0\
+pointer\0\
+save\0\
+target\0\
+backspace\0\
+blockdata\0\
+call\0\
+case\0\
+kind=\0\
+len=\0\
+err=\0\
+iostat=\0\
+status=\0\
+unit=\0\
+close\0\
+common\0\
+null\0\
+access=\0\
+action=\0\
+blank=\0\
+delim=\0\
+file=\0\
+form=\0\
+pad=\0\
+position=\0\
+recl=\0\
+contains\0\
+continue\0\
+cycle\0\
+data\0\
+deallocate\0\
+type\0\
+smsparallel\0\
+else\0\
+then\0\
+elseif\0\
+elsewhere\0\
+block\0\
+endblock\0\
+endblockdata\0\
+do\0\
+enddo\0\
+forall\0\
+endforall\0\
+function\0\
+endfunction\0\
+endif\0\
+interface\0\
+endinterface\0\
+module\0\
+endmodule\0\
+program\0\
+endprogram\0\
+select\0\
+endselect\0\
+subroutine\0\
+endsubroutine\0\
+endtype\0\
+where\0\
+endwhere\0\
+file\0\
+endfile\0\
+entry\0\
+result\0\
+.eqv.\0\
+.neqv.\0\
+equivalence\0\
+exit\0\
+format\0\
+assignment\0\
+operator\0\
+implicit\0\
+none\0\
+direct=\0\
+exist=\0\
+formatted=\0\
+name=\0\
+named=\0\
+nextrec=\0\
+number=\0\
+opened=\0\
+read=\0\
+readwrite=\0\
+sequential=\0\
+unformatted=\0\
+write=\0\
+inquire\0\
+iolength=\0\
+in\0\
+out\0\
+inout\0\
+advance=\0\
+end=\0\
+eor=\0\
+fmt=\0\
+nml=\0\
+rec=\0\
+size=\0\
+.false.\0\
+.true.\0\
+while\0\
+procedure\0\
+smsexit\0\
+namelist\0\
+.not.\0\
+nullify\0\
+open\0\
+.or.\0\
+pause\0\
+elemental\0\
+pure\0\
+recursive\0\
+print\0\
+sequence\0\
+read\0\
+.eq.\0\
+.ge.\0\
+.gt.\0\
+.le.\0\
+.lt.\0\
+.ne.\0\
+return\0\
+rewind\0\
+selectcase\0\
+smsserial\0\
+stop\0\
+byte\0\
+character\0\
+complex\0\
+double\0\
+precision\0\
+doubleprecision\0\
+integer\0\
+logical\0\
+real\0\
+sse\0\
+only\0\
+write"};
+
+struct obstack csm_obstack =
+	obstack_known_chunk(&csm_data,
+	&(csm_data.c[1348]), &(csm_data.c[1348]), &(csm_data.c[1348]),
+	4096, 1);
+
+	/* This is an initialized obstack */
+
+static struct {char **l; void *p; char *c[176];} csm_indx = {
+	&(csm_indx.c[176]),
+	0,{
+	&(csm_data.c[0]),
+	&(csm_data.c[1]),
+	&(csm_data.c[7]),
+	&(csm_data.c[16]),
+	&(csm_data.c[23]),
+	&(csm_data.c[30]),
+	&(csm_data.c[38]),
+	&(csm_data.c[49]),
+	&(csm_data.c[59]),
+	&(csm_data.c[65]),
+	&(csm_data.c[77]),
+	&(csm_data.c[86]),
+	&(csm_data.c[90]),
+	&(csm_data.c[93]),
+	&(csm_data.c[96]),
+	&(csm_data.c[101]),
+	&(csm_data.c[113]),
+	&(csm_data.c[123]),
+	&(csm_data.c[133]),
+	&(csm_data.c[143]),
+	&(csm_data.c[154]),
+	&(csm_data.c[162]),
+	&(csm_data.c[172]),
+	&(csm_data.c[186]),
+	&(csm_data.c[198]),
+	&(csm_data.c[211]),
+	&(csm_data.c[219]),
+	&(csm_data.c[226]),
+	&(csm_data.c[238]),
+	&(csm_data.c[247]),
+	&(csm_data.c[253]),
+	&(csm_data.c[259]),
+	&(csm_data.c[262]),
+	&(csm_data.c[269]),
+	&(csm_data.c[279]),
+	&(csm_data.c[288]),
+	&(csm_data.c[295]),
+	&(csm_data.c[305]),
+	&(csm_data.c[314]),
+	&(csm_data.c[324]),
+	&(csm_data.c[332]),
+	&(csm_data.c[337]),
+	&(csm_data.c[344]),
+	&(csm_data.c[354]),
+	&(csm_data.c[364]),
+	&(csm_data.c[369]),
+	&(csm_data.c[374]),
+	&(csm_data.c[380]),
+	&(csm_data.c[385]),
+	&(csm_data.c[390]),
+	&(csm_data.c[398]),
+	&(csm_data.c[406]),
+	&(csm_data.c[412]),
+	&(csm_data.c[418]),
+	&(csm_data.c[425]),
+	&(csm_data.c[430]),
+	&(csm_data.c[438]),
+	&(csm_data.c[446]),
+	&(csm_data.c[453]),
+	&(csm_data.c[460]),
+	&(csm_data.c[466]),
+	&(csm_data.c[472]),
+	&(csm_data.c[477]),
+	&(csm_data.c[487]),
+	&(csm_data.c[493]),
+	&(csm_data.c[502]),
+	&(csm_data.c[511]),
+	&(csm_data.c[517]),
+	&(csm_data.c[522]),
+	&(csm_data.c[533]),
+	&(csm_data.c[538]),
+	&(csm_data.c[550]),
+	&(csm_data.c[555]),
+	&(csm_data.c[560]),
+	&(csm_data.c[567]),
+	&(csm_data.c[577]),
+	&(csm_data.c[583]),
+	&(csm_data.c[592]),
+	&(csm_data.c[605]),
+	&(csm_data.c[608]),
+	&(csm_data.c[614]),
+	&(csm_data.c[621]),
+	&(csm_data.c[631]),
+	&(csm_data.c[640]),
+	&(csm_data.c[652]),
+	&(csm_data.c[658]),
+	&(csm_data.c[668]),
+	&(csm_data.c[681]),
+	&(csm_data.c[688]),
+	&(csm_data.c[698]),
+	&(csm_data.c[706]),
+	&(csm_data.c[717]),
+	&(csm_data.c[724]),
+	&(csm_data.c[734]),
+	&(csm_data.c[745]),
+	&(csm_data.c[759]),
+	&(csm_data.c[767]),
+	&(csm_data.c[773]),
+	&(csm_data.c[782]),
+	&(csm_data.c[787]),
+	&(csm_data.c[795]),
+	&(csm_data.c[801]),
+	&(csm_data.c[808]),
+	&(csm_data.c[814]),
+	&(csm_data.c[821]),
+	&(csm_data.c[833]),
+	&(csm_data.c[838]),
+	&(csm_data.c[845]),
+	&(csm_data.c[856]),
+	&(csm_data.c[865]),
+	&(csm_data.c[874]),
+	&(csm_data.c[879]),
+	&(csm_data.c[887]),
+	&(csm_data.c[894]),
+	&(csm_data.c[905]),
+	&(csm_data.c[911]),
+	&(csm_data.c[918]),
+	&(csm_data.c[927]),
+	&(csm_data.c[935]),
+	&(csm_data.c[943]),
+	&(csm_data.c[949]),
+	&(csm_data.c[960]),
+	&(csm_data.c[972]),
+	&(csm_data.c[985]),
+	&(csm_data.c[992]),
+	&(csm_data.c[1000]),
+	&(csm_data.c[1010]),
+	&(csm_data.c[1013]),
+	&(csm_data.c[1017]),
+	&(csm_data.c[1023]),
+	&(csm_data.c[1032]),
+	&(csm_data.c[1037]),
+	&(csm_data.c[1042]),
+	&(csm_data.c[1047]),
+	&(csm_data.c[1052]),
+	&(csm_data.c[1057]),
+	&(csm_data.c[1063]),
+	&(csm_data.c[1071]),
+	&(csm_data.c[1078]),
+	&(csm_data.c[1084]),
+	&(csm_data.c[1094]),
+	&(csm_data.c[1102]),
+	&(csm_data.c[1111]),
+	&(csm_data.c[1117]),
+	&(csm_data.c[1125]),
+	&(csm_data.c[1130]),
+	&(csm_data.c[1135]),
+	&(csm_data.c[1141]),
+	&(csm_data.c[1151]),
+	&(csm_data.c[1156]),
+	&(csm_data.c[1166]),
+	&(csm_data.c[1172]),
+	&(csm_data.c[1181]),
+	&(csm_data.c[1186]),
+	&(csm_data.c[1191]),
+	&(csm_data.c[1196]),
+	&(csm_data.c[1201]),
+	&(csm_data.c[1206]),
+	&(csm_data.c[1211]),
+	&(csm_data.c[1216]),
+	&(csm_data.c[1223]),
+	&(csm_data.c[1230]),
+	&(csm_data.c[1241]),
+	&(csm_data.c[1251]),
+	&(csm_data.c[1256]),
+	&(csm_data.c[1261]),
+	&(csm_data.c[1271]),
+	&(csm_data.c[1279]),
+	&(csm_data.c[1286]),
+	&(csm_data.c[1296]),
+	&(csm_data.c[1312]),
+	&(csm_data.c[1320]),
+	&(csm_data.c[1328]),
+	&(csm_data.c[1333]),
+	&(csm_data.c[1337]),
+	&(csm_data.c[1342])}};
+
+struct csmalign {char ___x; char *___d;};
+static struct obstack csm_indx_obstk =
+	obstack_known_chunk(&csm_indx, &(csm_indx.c[0]),
+	&(csm_indx.c[176]), &(csm_indx.c[176]), 4096,
+	((PTR_INT_TYPE) ((char *) &((struct csmalign *) 0)->___d - (char *) 0)));
+
+char **strng = csm_indx.c;
+int numstr = 176;
+

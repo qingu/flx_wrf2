@@ -1,0 +1,15 @@
+#define xEOS		3
+#define xScon		23
+#define xIcon		24
+#define xIdent		25
+#define xBcon		75
+#define xOcon		76
+#define xZcon		77
+#define xHcon		100
+#define xDop		111
+#define xFcon		115
+#define xPcon		156
+#define xXcon		157
+#define xImpl		160
+#define xDcon		231
+#define xRcon		232

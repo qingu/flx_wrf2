@@ -1023,6 +1023,9 @@ sub translate_to_C {
 # We can assume that if the arg is say v and v__G exists, then
 # it should be v__G
 # vdepo[FTNREF1D(i,1)] => vdepo+FTNREF1D(i,1)
+#
+# Next, we need to figure out which arguments can remain non-pointer scalars
+
 sub postprocess_C {
     (my $stref, my $csrc,my $i) = @_;
     print "POSTPROC $csrc\n";

@@ -1,0 +1,15 @@
+This directory provides a Makefile that can be modified to build CUDA or C
+source using the F2C-ACC compiler.  To use this makefile, you may need to 
+modify the paths for $GPU_HOME, $CUDA and $CUDALIBS.
+
+You will also need to download and install the m4 support library from the 
+GNU website: http://www.gnu.org/software/m4/.
+
+The CUDA compiler and support libraries are available from the NVIDIA web site.
+http://www.nvidia.com/object/tesla_software.html
+
+To generate CUDA, enter:
+  F2C-ACC --Generate=CUDA --Free loop.cu
+
+To generate C enter:
+  F2C-ACC --Generate=C --Free loop.o
