@@ -988,7 +988,7 @@ sub translate_to_C {
 	print "TRANSLATING TO C\n\n" if $V;
 	print `pwd`                  if $V;
 	foreach my $csrc ( keys %{ $stref->{'BuildSources'}{'C'} } ) {		
-		my $cmd = "f2c $csrc";
+		my $cmd = "../OpenCL-port/tools/f2c $csrc";
 		print $cmd, "\n" if $V;
 		system($cmd);
 	}
@@ -1025,6 +1025,11 @@ sub translate_to_C {
 # vdepo[FTNREF1D(i,1)] => vdepo+FTNREF1D(i,1)
 #
 # Next, we need to figure out which arguments can remain non-pointer scalars
+# That means:
+# - parse the C function signature
+# - find corresponding arguments in the FORTRAN signature
+# - if they are Input Scalar, don't make them pointers
+# - in that case, comment out the corresponding "int v = *v__G;" line
 
 sub postprocess_C {
     (my $stref, my $csrc,my $i) = @_;
@@ -1035,6 +1040,7 @@ sub postprocess_C {
     my %vars=();
     my %argvars=();
     my %labels=();
+    my %input_scalars=();
     # We need to check if this particular label is a Break
     # So we need a list of all labels per subroutine.
     my $isBreak = sub  {
@@ -1052,7 +1058,8 @@ sub postprocess_C {
     open my $CSRC,'<',$csrc;
     open my $PPCSRC,'>','tmp'.$i.'.c'; # FIXME
     my $skip=0;
-    while (my $line =<$CSRC>) {
+   
+    while (my $line =<$CSRC>) {    	
     	my $decl='';
         $line=~/^\s*void\s+(\w+)_\s+\(\s*(.*?)\s*\)\s+\{/ && do {
             $sub= $1;
@@ -1064,22 +1071,68 @@ sub postprocess_C {
             	s/^\w+\s+\*?//;
             	s/^F2C-ACC.*?\.\s+\*?//;
             	$_ => 1;            	
-            } @args;            
+            } @args;                                    
             
             for my $i ( keys %{ $stref->{'Subroutines'}{$sub}{'Includes'} } ) {
                 if ( $stref->{'Includes'}{$i}{'Type'} eq 'Parameter' ) {
                    %params = (%params,%{ $stref->{'Includes'}{$i}{'Parameters'} });
                  }
             }
-            %vars=%{ $stref->{'Subroutines'}{$sub}{'Vars'} };            
+            %vars=%{ $stref->{'Subroutines'}{$sub}{'Vars'} };           
+            for my $arg (@args) {            	
+                $arg=~s/^\w+\s+\*//;
+                $arg=~s/^F2C-ACC.*?\.\s+\*?//;
+                    my $var=$arg;      
+                    $var=~s/__G//;   
+                    if (exists $vars{$var} and $vars{$var}{'Type'}) {         
+                    my $ftype=$vars{$var}{'Type'};
+                    my $ctype=toCType($ftype);
+                    my $iodir=$stref->{'Subroutines'}{$sub}{'RefactoredArgs'}{$var};
+                    my $kind=$vars{$var}{'Kind'};
+#                    print "ARG $var\n" if ( $iodir eq 'In' and $kind eq 'Scalar');
+                    if ( $iodir eq 'In' and $kind eq 'Scalar') {
+                    	$arg="$ctype $var";
+                    } else {
+                    	$arg="$ctype *$arg";
+                    }
+                    } else {
+                        die "No entry for $var in $sub\n".Dumper(%vars);
+                    }                    
+            }
+            $line="\t void ${sub}_( ".join(',',@args)." ){\n";             
+            
+             
             %labels=();
             if (exists $stref->{'Subroutines'}{$sub}{'Gotos'}) {
             %labels=%{ $stref->{'Subroutines'}{$sub}{'Gotos'} };
             }
-            $decl=$line;            
+            $decl=$line;
+                                        $decl=~s/\{.*$/;/;
+                my $hfile="$sub.h";
+               open my $INC,'>',$hfile;
+               my $shield=$hfile;
+               $shield=~s/\./_/;
+               $shield='_'.uc($shield).'_';
+               print $INC '#ifndef '.$shield."\n";
+               print $INC '#define '.$shield."\n";
+               print $INC $decl,"\n";
+               print $INC '#endif //'.$shield."\n";
+               close $INC;          
+                        
             $skip=1;
         };
         
+        $line=~/(\w+)=\*(\w+)__G;/ && do {
+        	if ($1 eq $2){
+        	   my $var=$1;        	   
+               my $iodir=$stref->{'Subroutines'}{$sub}{'RefactoredArgs'}{$var};
+               my $kind=$vars{$var}{'Kind'};
+               if ( $iodir eq 'In' and $kind eq 'Scalar') {
+                	$line=~s|^|\/\/|;
+                	$input_scalars{$var.'__G'}=$var
+               }        	   
+        	}
+        };
         $line=~/F2C\-ACC\:\ Type\ not\ recognized\./ && do {
             my @chunks=split(/\,/,$line);
             for my $chunk (@chunks) {
@@ -1097,20 +1150,20 @@ sub postprocess_C {
             }
             $line=join(',',@chunks);            
         };
-        if ($decl ne '') {
-        	$decl=$line;
-                $decl=~s/\{.*$/;/;
-                my $hfile="$sub.h";
-               open my $INC,'>',$hfile;
-               my $shield=$hfile;
-               $shield=~s/\./_/;
-               $shield='_'.uc($shield).'_';
-               print $INC '#ifndef '.$shield."\n";
-               print $INC '#define '.$shield."\n";
-               print $INC $decl,"\n";
-               print $INC '#endif //'.$shield."\n";
-               close $INC;        	
-        }
+#        if ($decl ne '') {
+#        	$decl=$line;
+#                $decl=~s/\{.*$/;/;
+#                my $hfile="$sub.h";
+#               open my $INC,'>',$hfile;
+#               my $shield=$hfile;
+#               $shield=~s/\./_/;
+#               $shield='_'.uc($shield).'_';
+#               print $INC '#ifndef '.$shield."\n";
+#               print $INC '#define '.$shield."\n";
+#               print $INC $decl,"\n";
+#               print $INC '#endif //'.$shield."\n";
+#               close $INC;        	
+#        }
         $line=~/F2C\-ACC\:\ xUnOp\ not\ supported\./ && do { # FIXME: we assume the unitary operation is .not.
             my @chunks=split(/\,/,$line);
             for my $chunk (@chunks) {
@@ -1209,8 +1262,18 @@ sub postprocess_C {
         		$arg=~s/\[/+/g;
         		$arg=~s/\]//g;
 #        		print $arg,"\n";
-        		if (exists $argvars{$arg.'__G'}) {
+        		if (exists $argvars{$arg.'__G'}) { 
+        			# this is an argument variable
+        			# if the called function argument type is Input Scalar
+        			# and the argument variable is in %input_scalars
+        			# then don't add __G        			
+        			# Still not good: the arg for the called sub must be positional! So we must get the signature and count the position ... 
+        			# which means we need to parse the source first.
+        			my $is_input_scalar= ( $stref->{'Subroutines'}{$calledsub}{'Vars'}{$arg}{'Kind'} eq 'Scalar' ) &&( $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$arg} eq 'In');
+        			print " SUBCALL $calledsub: $arg: $is_input_scalar:" . $stref->{'Subroutines'}{$calledsub}{'Vars'}{$arg}{'Kind'} .','. $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$arg}."\n";
+        			if (not (exists $input_scalars{$arg.'__G'} and $is_input_scalar)) {
         			$arg.='__G';
+        			}
         		} elsif (exists $vars{$arg} and $vars{$arg}{'Kind'} ne 'Array') {
         			$arg='&'.$arg;
         		}
