@@ -317,6 +317,7 @@ sub refactor_globals {
 			}			
 			my $args_ref =
 			  ordered_union( $tags{'Signature'}{'Args'}, \@exglobs );
+			  $stref->{'Subroutines'}{$f}{'RefactoredArgList'} = $args_ref;
 			my $args_str = join( ',', @{$args_ref} );
 			my $rline = '';
 			if ( $stref->{'Subroutines'}{$f}{'Program'} ) {
@@ -1252,8 +1253,11 @@ sub postprocess_C {
         	# We need to replace the arguments with the correct ones.
         	my $calledsub=$1;
         	my $argstr=$2; 
-        	my @args=split(/\s*\,\s*/,$argstr); # FIXME: this will split things like v1,indzindicator[FTNREF1D(i,1)],v3         	
+        	my @args=split(/\s*\,\s*/,$argstr); # FIXME: this will split things like v1,indzindicator[FTNREF1D(i,1)],v3       
+        	my $ii=0;
+        	my $called_sub_args=$stref->{'Subroutines'}{$sub}{'RefactoredArgList'};  	
         	for my $arg (@args) {
+        		my $called_sub_arg=$called_sub_args->[$ii];
 #        		my $targ=$arg;
         		if ($arg=~/^\((\w+)\)$/) {
         			$arg=$1;
@@ -1269,8 +1273,8 @@ sub postprocess_C {
         			# then don't add __G        			
         			# Still not good: the arg for the called sub must be positional! So we must get the signature and count the position ... 
         			# which means we need to parse the source first.
-        			my $is_input_scalar= ( $stref->{'Subroutines'}{$calledsub}{'Vars'}{$arg}{'Kind'} eq 'Scalar' ) &&( $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$arg} eq 'In');
-        			print " SUBCALL $calledsub: $arg: $is_input_scalar:" . $stref->{'Subroutines'}{$calledsub}{'Vars'}{$arg}{'Kind'} .','. $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$arg}."\n";
+        			my $is_input_scalar= ( $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} eq 'Scalar' ) &&( $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg} eq 'In');
+        			print " SUBCALL $calledsub: $arg: $is_input_scalar:" . $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} .','. $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg}."\n";
         			if (not (exists $input_scalars{$arg.'__G'} and $is_input_scalar)) {
         			$arg.='__G';
         			}
