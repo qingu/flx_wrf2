@@ -1005,11 +1005,12 @@ sub translate_to_C {
 	foreach my $csrc ( keys %{ $stref->{'BuildSources'}{'C'} } ) {
 		$csrc=~s/\.f/\.c/;
 	   postprocess_C($stref,$csrc,$i);
+#	   die if $csrc=~/hanna\./;
 	   $i++;
 	}
 	 # Test the generated code	
 	foreach my $ii ( 0 .. $i-1 ) {	  
-	   my $cmd='gcc -c -Wall -I$GPU_HOME/include tmp'.$ii.'.c';
+	   my $cmd='gcc -c -I$GPU_HOME/include tmp'.$ii.'.c';
 	   print $cmd,"\n";
        system $cmd;       
 	}	
@@ -1248,23 +1249,42 @@ sub postprocess_C {
         };
         # Subroutine call
         $line!~/\#define/ && $line=~s/\s([\+\-\*\/\%])\s/$1/g; # super ad-hoc!
-        $line=~/(?:^|\{\s)\s*(\w+)_\(\s([\+\*\,\w\(\)\[\]]+)\s\);/ && do {
+        $line=~/(^|^.*?\{\s)\s*(\w+)_\(\s([\+\*\,\w\(\)\[\]]+)\s\);/ && do {
         	
         	# We need to replace the arguments with the correct ones.
-        	my $calledsub=$1;
-        	my $argstr=$2; 
+        	my $maybe_if=$1;
+        	my $calledsub=$2;
+        	my $argstr=$3; 
         	my @args=split(/\s*\,\s*/,$argstr); # FIXME: this will split things like v1,indzindicator[FTNREF1D(i,1)],v3       
         	my $ii=0;
-        	my $called_sub_args=$stref->{'Subroutines'}{$sub}{'RefactoredArgList'};  	
-        	for my $arg (@args) {
-        		my $called_sub_arg=$called_sub_args->[$ii];
+        	my $called_sub_args=$stref->{'Subroutines'}{$calledsub}{'RefactoredArgList'};
+        	my @nargs=();  	
+        	for my $jj (1..scalar @{$called_sub_args}) {
+        		my $arg=shift @args;
+        		my $called_sub_arg=$called_sub_args->[$ii]; $ii++;
+        		print "CALLED SUB $calledsub ARG: $called_sub_arg\n";
 #        		my $targ=$arg;
         		if ($arg=~/^\((\w+)\)$/) {
         			$arg=$1;
         		}
 #        		$targ=~s/[\(\)]//g;
-        		$arg=~s/\[/+/g;
-        		$arg=~s/\]//g;
+                if ($arg=~/(\w+)\[/){
+                	my $var=$1;
+                	# What is the type of $var?
+                    my $ftype=$vars{$var}{'Type'};
+                    my $ctype=toCType($ftype);
+                	  my $cptype=$ctype.'*';
+        		  $arg=~s/\[/+($cptype)(/g;
+        		  while ($arg!~/\]/){
+        			 my $targ= shift @args;
+        			 print "TARG: $targ\t";
+        			 $arg.=','. $targ;
+        			 print $arg,"\n";	
+        		  }
+        		$arg=~s/\]/)/g;
+#        		die $arg;
+                }
+        		
 #        		print $arg,"\n";
         		if (exists $argvars{$arg.'__G'}) { 
         			# this is an argument variable
@@ -1273,22 +1293,32 @@ sub postprocess_C {
         			# then don't add __G        			
         			# Still not good: the arg for the called sub must be positional! So we must get the signature and count the position ... 
         			# which means we need to parse the source first.
-        			my $is_input_scalar= ( $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} eq 'Scalar' ) &&( $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg} eq 'In');
-        			print " SUBCALL $calledsub: $arg: $is_input_scalar:" . $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} .','. $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg}."\n";
-        			if (not (exists $input_scalars{$arg.'__G'} and $is_input_scalar)) {
-        			$arg.='__G';
+        			my $is_input_scalar= ( $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} eq 'Scalar' ) &&( $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg} eq 'In')?1:0;
+        			print " SUBCALL $calledsub: $called_sub_arg: $is_input_scalar:" . $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} .','. $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg}."\n";
+        			
+        			if (not exists $input_scalars{$arg.'__G'}) {
+        				# means v__G is a pointer
+        				if (not $is_input_scalar) {
+        					# means the arg of the called sub is a pointer 
+        			         $arg.='__G';
+        				} else {
+        					# means the arg of the called sub is a scalar
+#        					$arg;
+        				}
         			}
         		} elsif (exists $vars{$arg} and $vars{$arg}{'Kind'} ne 'Array') {
         			$arg='&'.$arg;
         		}
+        		push @nargs,$arg;
         	}
-        	my $nargstr=join(',',@args);
+        	my $nargstr=join(',',@nargs);
         	chomp $line;
         	$line=~/^\s+if/ && do {
         		$line=~s/^.*?\{//;
         	};
         	$line=~s/\(.*//;
         	$line.='('.$nargstr.');'."\n";
+        	$line=$maybe_if.$line;
 #        	die $line if $calledsub=~/initialize/;
         };
         
