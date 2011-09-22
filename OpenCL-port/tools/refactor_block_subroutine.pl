@@ -1262,7 +1262,7 @@ sub postprocess_C {
         	for my $jj (1..scalar @{$called_sub_args}) {
         		my $arg=shift @args;
         		my $called_sub_arg=$called_sub_args->[$ii]; $ii++;
-        		print "CALLED SUB $calledsub ARG: $called_sub_arg\n";
+#        		print "CALLED SUB $calledsub ARG: $called_sub_arg\n";
 #        		my $targ=$arg;
         		if ($arg=~/^\((\w+)\)$/) {
         			$arg=$1;
@@ -1271,17 +1271,23 @@ sub postprocess_C {
                 if ($arg=~/(\w+)\[/){
                 	my $var=$1;
                 	# What is the type of $var?
-                    my $ftype=$vars{$var}{'Type'};
+                	my %calledsubvars=%{ $stref->{'Subroutines'}{$calledsub}{'Vars'} };
+                    my $ftype=$calledsubvars{$called_sub_arg}{'Type'};
+                    my $tftype=$vars{$var}{'Type'};
+                    if ($ftype ne $tftype) {
+                    	print "WARNING: $tftype $var ($sub) <> $ftype $called_sub_arg ($calledsub)\n";
+                    }
                     my $ctype=toCType($ftype);
                 	  my $cptype=$ctype.'*';
-        		  $arg=~s/\[/+($cptype)(/g;
+        		  $arg=~s/\[/+/g;
         		  while ($arg!~/\]/){
         			 my $targ= shift @args;
-        			 print "TARG: $targ\t";
+#        			 print "TARG: $targ\t";
         			 $arg.=','. $targ;
-        			 print $arg,"\n";	
+#        			 print $arg,"\n";	
         		  }
-        		$arg=~s/\]/)/g;
+        		$arg=~s/\]//g;
+        		$arg="($cptype)($arg)";
 #        		die $arg;
                 }
         		
@@ -1294,7 +1300,7 @@ sub postprocess_C {
         			# Still not good: the arg for the called sub must be positional! So we must get the signature and count the position ... 
         			# which means we need to parse the source first.
         			my $is_input_scalar= ( $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} eq 'Scalar' ) &&( $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg} eq 'In')?1:0;
-        			print " SUBCALL $calledsub: $called_sub_arg: $is_input_scalar:" . $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} .','. $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg}."\n";
+#        			print " SUBCALL $calledsub: $called_sub_arg: $is_input_scalar:" . $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} .','. $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg}."\n";
         			
         			if (not exists $input_scalars{$arg.'__G'}) {
         				# means v__G is a pointer
