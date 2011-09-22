@@ -973,7 +973,7 @@ sub emit_all {
 	# NOOP source
 	if ($noop) {
 		copy( '../OpenCL-port/tools/noop.c', "$targetdir/noop.c" );
-		$stref->{'BuildSources'}{'C'}{'noop.c'} = 1;
+#		$stref->{'BuildSources'}{'C'}{'noop.c'} = 1;
 	}
 
 }    # END of emit_all()
@@ -988,10 +988,14 @@ sub translate_to_C {
 	print "\n", "=" x 80, "\n" if $V;
 	print "TRANSLATING TO C\n\n" if $V;
 	print `pwd`                  if $V;
-	foreach my $csrc ( keys %{ $stref->{'BuildSources'}{'C'} } ) {		
+	foreach my $csrc ( keys %{ $stref->{'BuildSources'}{'C'} } ) {
+		if (-e $csrc) {		
 		my $cmd = "../OpenCL-port/tools/f2c $csrc";
 		print $cmd, "\n" if $V;
 		system($cmd);
+		} else {
+			print "WARNING: $csrc does not exist\n";
+		}
 	}
 
 # A minor problem is that we need to translate all includes contained in the tree as well
@@ -1010,7 +1014,7 @@ sub translate_to_C {
 	}
 	 # Test the generated code	
 	foreach my $ii ( 0 .. $i-1 ) {	  
-	   my $cmd='gcc -c -I$GPU_HOME/include tmp'.$ii.'.c';
+	   my $cmd='gcc -Wall -c -I$GPU_HOME/include tmp'.$ii.'.c';
 	   print $cmd,"\n";
        system $cmd;       
 	}	
@@ -1262,6 +1266,7 @@ sub postprocess_C {
         	for my $jj (1..scalar @{$called_sub_args}) {
         		my $arg=shift @args;
         		my $called_sub_arg=$called_sub_args->[$ii]; $ii++;
+        		my $is_input_scalar= ( $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} eq 'Scalar' ) &&( $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg} eq 'In')?1:0;
 #        		print "CALLED SUB $calledsub ARG: $called_sub_arg\n";
 #        		my $targ=$arg;
         		if ($arg=~/^\((\w+)\)$/) {
@@ -1279,15 +1284,19 @@ sub postprocess_C {
                     }
                     my $ctype=toCType($ftype);
                 	  my $cptype=$ctype.'*';
-        		  $arg=~s/\[/+/g;
+        		  
         		  while ($arg!~/\]/){
         			 my $targ= shift @args;
 #        			 print "TARG: $targ\t";
         			 $arg.=','. $targ;
 #        			 print $arg,"\n";	
         		  }
+        		  
+        		  if (not $is_input_scalar) {
+        		  $arg=~s/\[/+/g;
         		$arg=~s/\]//g;
         		$arg="($cptype)($arg)";
+        		  }
 #        		die $arg;
                 }
         		
@@ -1299,11 +1308,11 @@ sub postprocess_C {
         			# then don't add __G        			
         			# Still not good: the arg for the called sub must be positional! So we must get the signature and count the position ... 
         			# which means we need to parse the source first.
-        			my $is_input_scalar= ( $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} eq 'Scalar' ) &&( $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg} eq 'In')?1:0;
+        			
 #        			print " SUBCALL $calledsub: $called_sub_arg: $is_input_scalar:" . $stref->{'Subroutines'}{$calledsub}{'Vars'}{$called_sub_arg}{'Kind'} .','. $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{$called_sub_arg}."\n";
         			
         			if (not exists $input_scalars{$arg.'__G'}) {
-        				# means v__G is a pointer
+        				# means v__G in enclosing sub signature is a pointer
         				if (not $is_input_scalar) {
         					# means the arg of the called sub is a pointer 
         			         $arg.='__G';
@@ -1311,9 +1320,17 @@ sub postprocess_C {
         					# means the arg of the called sub is a scalar
 #        					$arg;
         				}
+        			} else {
+                        # means v in enclosing sub signature is a scalar
+	                    if (not $is_input_scalar) {
+	                     $arg='&'.$arg;
+	                    }                                                        				
         			}
         		} elsif (exists $vars{$arg} and $vars{$arg}{'Kind'} ne 'Array') {
-        			$arg='&'.$arg;
+        			# means $arg is a Scalar
+        			if (not $is_input_scalar) {
+        			 $arg='&'.$arg;
+        			}
         		}
         		push @nargs,$arg;
         	}
@@ -1324,7 +1341,8 @@ sub postprocess_C {
         	};
         	$line=~s/\(.*//;
         	$line.='('.$nargstr.');'."\n";
-        	$line=$maybe_if.$line;
+        	my $close_if=($maybe_if=~/if\s*\(/)?'}':'';
+        	$line=$maybe_if.$line.$close_if;
 #        	die $line if $calledsub=~/initialize/;
         };
         
