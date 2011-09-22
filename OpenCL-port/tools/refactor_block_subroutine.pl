@@ -8,8 +8,8 @@ use strict;
 - Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should. => OK
 - Refactor FUNCTIONS!! and translate to C and emit headers as well
 - Declarations from F2C-ACC are broken, emit our own => OK
-- But F2C-ACC's function calls are wrong too! They use the non-pointer vars where they should use the pointers! Big problem...
-- Put F2C-ACC into our tree, if the license allows it.
+- But F2C-ACC's function calls are wrong too! They use the non-pointer vars where they should use the pointers! => OK
+- Put F2C-ACC into our tree, if the license allows it. => OK
 =cut
 
 =pod
@@ -89,7 +89,7 @@ then just add the globals to the call
     }
 
 Status: for programs, subroutines, functions and includes 
-    0: after find_subroutines_and_includes() 
+    0: after find_subroutines_functions_and_includes() 
     1: after read_fortran_src()
     2: after parse_fortran_src()
     3: after create_subroutine_source_from_block()
@@ -171,16 +171,16 @@ sub main {
 	};
 
 	# Find all subroutines in the source code tree
-	$stateref = find_subroutines_and_includes($stateref);
+	$stateref = find_subroutines_functions_and_includes($stateref);
 
 # First we analyse the code for use of globals and blocks to be transformed into subroutines
 	$stateref = parse_fortran_src( $subname, $stateref );
 
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
-
 	$stateref = refactor_includes($stateref);
-
+#    $stateref = refactor_functions($stateref);
+    
 	if ( not $call_tree_only ) {
 
 		# Emit the refactored source
@@ -872,7 +872,44 @@ sub refactor_include {
 	return $stref;
 
 }
+# -----------------------------------------------------------------------------
+sub refactor_function {
+    ( my $f, my $stref ) = @_;
+    if ($V) {
+        print "\n\n";
+        print "#" x 80, "\n";
+        print "Refactoring $f\n";
+        print "#" x 80, "\n";
+    }
 
+    print "REFACTORING FUNCTION $f\n" if $V;
+    #print Dumper($stref->{'Subroutines'}{$f}{'Info'}) if $f eq 'llij_lc';
+    my @lines = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
+    my @info =
+      defined $stref->{'Functions'}{$f}{'Info'}
+      ? @{ $stref->{'Functions'}{$f}{'Info'} }
+      : ();
+    my $annlines = [];
+    for my $line (@lines) {
+        my $tags = shift @info;
+        push @{$annlines}, [ $line, $tags ];
+    }
+
+    my $rlines = $annlines;
+
+    if ( not exists $stref->{'Functions'}{$f}{'RefactoredCode'}
+        or $stref->{'Functions'}{$f}{'RefactoredCode'} == [] or exists $stref->{'BuildSources'}{'C'}{ $stref->{'Functions'}{$f}{'Source'} } )
+    {       
+        $stref = create_refactored_source( $stref, $f, $rlines );
+    }
+
+#   print STDERR "REFACTORED $f\n";
+#    die Dumper($stref->{'Functions'}{$f}{'RefactoredCode'}) ;
+    return $stref;
+
+    return $stref;
+
+} # END of refactor_function()
 # -----------------------------------------------------------------------------
 sub emit_refactored_include {
 	( my $f, my $dir, my $stref ) = @_;
@@ -2421,12 +2458,15 @@ sub read_fortran_src {
 	( my $s, my $stref ) = @_;
 
 	my $is_incl = exists $stref->{'Includes'}{$s} ? 1 : 0;
-	my $sub_or_incl = $is_incl ? 'Includes' : 'Subroutines';
+	# FIXME: handle Functions too!
+	
+	my $sub_or_func = exists $stref->{'Subroutines'}{$s} ? 'Subroutines' : 'Functions';
+	my $sub_func_incl = $is_incl ? 'Includes' : $sub_or_func;
 	my $f = $is_incl ? $s : $stref->{'Subroutines'}{$s}{'Source'};
 
-	#    warn "$s: $f,",$stref->{$sub_or_incl}{$s}{'Status'},"\n";
-	#    die "$f: $sub_or_incl $s" if $f=~/map_proj_wrf_subaa/;
-	if ( $stref->{$sub_or_incl}{$s}{'Status'} == 0 ) {
+	#    warn "$s: $f,",$stref->{$sub_func_incl}{$s}{'Status'},"\n";
+	#    die "$f: $sub_func_incl $s" if $f=~/map_proj_wrf_subaa/;
+	if ( $stref->{$sub_func_incl}{$s}{'Status'} == 0 ) {
 		my $ok = 1;
 		open my $SRC, '<', $f or do {
 			print STDERR "Can't find '$f' ($s)\n";
@@ -2575,7 +2615,7 @@ sub read_fortran_src {
 			if ($is_incl) {
 				$ok                                  = 1;
 				$name                                = $s;
-				$stref->{$sub_or_incl}{$s}{'Status'} = 1;
+				$stref->{$sub_func_incl}{$s}{'Status'} = 1;
 			}
 			my $index = 0;
 			for my $line ( @{$lines} ) {
@@ -2592,18 +2632,18 @@ sub read_fortran_src {
 					#	            	warn "\t$name\n";
 					$ok                                           = 1;
 					$index                                        = 0;
-					$stref->{$sub_or_incl}{$name}{'Status'}       = 1;
-					$stref->{$sub_or_incl}{$name}{'HasBlocks'}    = 0;
-					$stref->{$sub_or_incl}{$name}{'StringConsts'} = \%strconsts
+					$stref->{$sub_func_incl}{$name}{'Status'}       = 1;
+					$stref->{$sub_func_incl}{$name}{'HasBlocks'}    = 0;
+					$stref->{$sub_func_incl}{$name}{'StringConsts'} = \%strconsts
 					  ; # Means we have all consts in the file, not just the sub, but who cares?
 				}
 				if ( $ok == 1 ) {
-					push @{ $stref->{$sub_or_incl}{$name}{'Lines'} }, $line;
+					push @{ $stref->{$sub_func_incl}{$name}{'Lines'} }, $line;
 					if ( $line =~ /^C/ ) {
-						$stref->{$sub_or_incl}{$name}{'Info'}
+						$stref->{$sub_func_incl}{$name}{'Info'}
 						  ->[$index]{'Comments'} = {};
 					}
-					$stref->{$sub_or_incl}{$name}{'Info'}->[$index] =
+					$stref->{$sub_func_incl}{$name}{'Info'}->[$index] =
 					  { 'PlaceHolders' => $phs_ref }
 					  if @{$phs_ref};
 					$index++;
@@ -2619,7 +2659,7 @@ sub read_fortran_src {
 
 # -----------------------------------------------------------------------------
 # Find all source files in the current directory
-sub find_subroutines_and_includes {
+sub find_subroutines_functions_and_includes {
 	my $stref = shift;
 	my $dir   = '.';
 	my $ext   = '.f';
@@ -2689,7 +2729,7 @@ sub find_subroutines_and_includes {
 		close $SRC;
 	}
 	return $stref;
-}    # END of find_subroutines_and_includes()
+}    # END of find_subroutines_functions_and_includes()
 
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
