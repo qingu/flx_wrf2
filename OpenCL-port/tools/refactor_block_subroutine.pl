@@ -218,7 +218,18 @@ sub main {
 # VarDecl
 # InBlock etc
 # Includes
-
+=haskell
+-- We really need to use the State monad!
+parse_fortran_src :: String -> STRef -> STRef
+parse_fortran_src  f stref =
+    let
+        stref' = read_fortran_src f stref
+        m_incls = Hash.lookup "Includes" stref
+        is_incl = case m_incls of
+            Just incls -> Hash.member f incls
+            Nothing -> False
+        stref'' = get_var_decls f stref'
+=cut
 sub parse_fortran_src {
 	( my $f, my $stref ) = @_;
 
