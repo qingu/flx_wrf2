@@ -95,8 +95,6 @@ Status: for programs, subroutines, functions and includes
     3: after create_subroutine_source_from_block()
 After building this structure, what we need is to go through it an revert it so it becomes index => information
 
-とにかく, コード　は:
-
 =cut
 
 use Getopt::Std;
@@ -162,6 +160,7 @@ sub main {
 	my $stateref = {
 		'Top'          => $subname,
 		'Includes'     => {},
+		'Sources' => {'Subroutines' => {},'Functions'=>{}},
 		'Subroutines'  => {},
 		'BuildSources' => {}
 		,    # sources to be built, need to disinguish between C and Fortran
@@ -179,7 +178,7 @@ sub main {
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
-#    $stateref = refactor_functions($stateref);
+#    $stateref = refactor_called_functions($stateref);
     
 	if ( not $call_tree_only ) {
 
@@ -243,13 +242,13 @@ sub parse_fortran_src {
 
 	# 3. Parse includes, recursively doing 0/1/2
 	if ( not $is_incl ) {
-
+        my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';
 		#		die if $f eq 'timemanager';
-		$stref = detect_blocks( $f, $stref );
-
+		my $is_sub = ($sub_or_func eq 'Subroutines')?1:0;
+		if ($is_sub) { 
+		  $stref = detect_blocks( $f, $stref );		
 		#		die Dumper($stref->{'Subroutines'}{'llij_lc'}) if $f=~/latlon_to_ij/;
-		$stref = parse_includes( $f, $stref );
-
+		  $stref = parse_includes( $f, $stref );		
 		$stref = parse_subroutine_calls( $f, $stref );
 		$stref = identify_globals_used_in_subroutine( $f, $stref );
         $stref = determine_argument_io_direction($f,$stref);
@@ -259,8 +258,9 @@ sub parse_fortran_src {
 		if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) {
 			$stref = separate_blocks( $f, $stref );
 		}
+		}
 		$stref = identify_loops_breaks( $f, $stref );
-		$stref->{'Subroutines'}{$f}{'Status'} = 2;
+		$stref->{$sub_or_func}{$f}{'Status'} = 2;
 	} else {    # includes
 		 # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
 		$stref = get_commons_params_from_includes( $f, $stref );
@@ -444,9 +444,12 @@ sub refactor_globals {
 			my $rline = $line;
 			my @nvars=();
 			for my $var (@vars) {
-				if (exists $stref->{'Functions'}{$var} and $is_C_target) {
-					print "WARNING: $var in $f is a function!\n";
-					$stref->{'Subroutines'}{$f}{'CalledFunctions'}{$var}=1;					
+				if (exists $stref->{'Functions'}{$var} ) {
+					if ($is_C_target) {
+				    	print "WARNING: $var in $f is a function!\n";
+					   $stref->{'Subroutines'}{$f}{'CalledFunctions'}{$var}=1;
+				    }
+                    $stref->{'Functions'}{$var}{'Called'}=1;										
 				} else {
 				if ( exists $globals{$var} and not exists $args{$var} ) {
 					print STDERR
@@ -792,6 +795,18 @@ sub refactor_all_subroutines {
 
 	return $stref;
 }    # END of refactor_all_subroutines()
+# -----------------------------------------------------------------------------
+sub refactor_called_functions {
+    ( my $stref ) = @_;
+
+    for my $f ( keys %{ $stref->{'Functions'} } ) {
+        if ( defined $stref->{'Functions'}{$f}{'Called'} ) {
+            $stref = refactor_function( $f, $stref );
+        }
+    }
+    return $stref;
+}    # END of refactor_called_functions()
+
 #  -----------------------------------------------------------------------------
 sub refactor_C_targets {
     ( my $stref ) = @_;
@@ -893,9 +908,9 @@ sub refactor_function {
         print "#" x 80, "\n";
     }
 
-    print "REFACTORING FUNCTION $f\n" if $V;
-    #print Dumper($stref->{'Subroutines'}{$f}{'Info'}) if $f eq 'llij_lc';
-    my @lines = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
+    print "REFACTORING FUNCTION $f\n";
+    #print Dumper($stref->{'Functions'}{$f}{'Info'}) if $f eq 'ran3';
+    my @lines = @{ $stref->{'Functions'}{$f}{'Lines'} };
     my @info =
       defined $stref->{'Functions'}{$f}{'Info'}
       ? @{ $stref->{'Functions'}{$f}{'Info'} }
@@ -918,8 +933,6 @@ sub refactor_function {
 #    die Dumper($stref->{'Functions'}{$f}{'RefactoredCode'}) ;
     return $stref;
 
-    return $stref;
-
 } # END of refactor_function()
 # -----------------------------------------------------------------------------
 sub emit_refactored_include {
@@ -935,6 +948,42 @@ sub emit_refactored_include {
 		}
 		close $SRC;
 	}
+}
+# -----------------------------------------------------------------------------
+=info_functions
+We need to refactor all called functions in the tree.
+In principle, there's no need to refactor functions that are never called.
+So we make a list of called functions and refactor them
+
+=cut
+sub emit_refactored_function {
+    ( my $f, my $dir, my $stref ) = @_;
+    my $overwrite =0;
+    my $srcref = $stref->{'Functions'}{$f}{'RefactoredCode'};
+    my $s      = $stref->{'Functions'}{$f}{'Source'};
+    if ( defined $srcref ) {
+        print "INFO: emitting refactored code for function $f\n" if $V;
+    my $mode = '>';
+    if ( -e "$dir/$s" and not $overwrite) {
+        $mode = '>>';
+    } else {
+        if ( not exists $stref->{'BuildSources'}{'C'}{$s}
+        and not exists $stref->{'BuildSources'}{'F'}{$s} 
+        ) {
+            $stref->{'BuildSources'}{'F'}{$s} = 1;
+        }
+    }
+    open my $SRC, $mode, "$dir/$s" or die $!;
+    if ( $mode eq '>>' ) {
+        print $SRC "\nC *** SUBROUTINE $f ***\n";
+    }
+    for my $line ( @{$srcref} ) {
+        print $SRC "$line\n";
+        print "$line\n" if $V;
+    }
+    close $SRC;
+
+    }
 }
 
 # -----------------------------------------------------------------------------
@@ -1002,10 +1051,14 @@ sub emit_all {
 	for my $f ( keys %{ $stref->{'Includes'} } ) {
 		emit_refactored_include( $f, $targetdir, $stref );
 	}
-
+    for my $f ( keys %{ $stref->{'Functions'} } ) {
+    	die "# FIXME: the generated source only contains the subroutine, not the functions!";
+        emit_refactored_function( $f, $targetdir, $stref );
+    }
 	# copy functions
 	my %funcsrcs = ();
 	for my $func ( keys %{ $stref->{'Functions'} } ) {
+#		warn $func,"\n";
 		if ( not exists $funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } ) {
 			$funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } = 1;
 			$stref->{'BuildSources'}{'F'}
@@ -1014,10 +1067,10 @@ sub emit_all {
 			$funcsrcs{ $stref->{'Functions'}{$func}{'Source'} }++;
 		}
 	}
+# FIXME: this overwrites the refactored functions!
 	for my $funcsrc ( keys %funcsrcs ) {
 		copy( $funcsrc, "$targetdir/$funcsrc" );
 	}
-
 	# NOOP source
 	if ($noop) {
 		copy( '../OpenCL-port/tools/noop.c', "$targetdir/noop.c" );
@@ -2469,11 +2522,11 @@ sub read_fortran_src {
 	( my $s, my $stref ) = @_;
 
 	my $is_incl = exists $stref->{'Includes'}{$s} ? 1 : 0;
-	# FIXME: handle Functions too!
-	
+	# FIXME: handle Functions too!
+	# Unfortunately, a source can contain both subroutines and functions ...
 	my $sub_or_func = exists $stref->{'Subroutines'}{$s} ? 'Subroutines' : 'Functions';
 	my $sub_func_incl = $is_incl ? 'Includes' : $sub_or_func;
-	my $f = $is_incl ? $s : $stref->{'Subroutines'}{$s}{'Source'};
+	my $f = $is_incl ? $s : $stref->{$sub_or_func}{$s}{'Source'};
 
 	#    warn "$s: $f,",$stref->{$sub_func_incl}{$s}{'Status'},"\n";
 	#    die "$f: $sub_func_incl $s" if $f=~/map_proj_wrf_subaa/;
@@ -2484,7 +2537,7 @@ sub read_fortran_src {
 			$ok = 0;
 		};
 		if ($ok) {
-			print "READING SOURCE for $f\n" if $V;
+			print "READING SOURCE for $f ($sub_func_incl)\n" if $V;
 			local $V = 0;
 			my $lines    = [];
 			my $prevline = '';
@@ -2636,10 +2689,15 @@ sub read_fortran_src {
 # If it's a subroutine source, skip all lines before the matching subroutine signature
 #and all lines from (and including) the next non-matching subroutine signature
 				if (   $is_incl == 0
-					&& $line =~ /^\s+(?:program|subroutine)\s+(\w+)/ )
+					&& $line =~ /^\s+(program|subroutine|function)\s+(\w+)/ )
 				{
-					$name = $1;
-
+					my $keyword=$1;
+					$name = $2;					
+                    if ($keyword eq 'function') {
+                    	$sub_func_incl='Functions';
+                    } else {
+                    	$sub_func_incl='Subroutines';
+                    }
 					#	            	warn "\t$name\n";
 					$ok                                           = 1;
 					$index                                        = 0;
@@ -2664,7 +2722,7 @@ sub read_fortran_src {
 		}    # if OK
 	}    # if Status==0
 
-  #    die Dumper($stref->{$sub_or_incl}{'includehanna'}) if $f=~/includehanna/;
+#      die $sub_func_incl.Dumper($stref->{'Subroutines'}{'gasdev1'}) if $f=~/random/;
 	return $stref;
 }    # END of read_fortran_src()
 
@@ -2716,8 +2774,10 @@ sub find_subroutines_functions_and_includes {
 						  . " because source $src matches subroutine name $sub.\n";
 					}
 					$stref->{'Subroutines'}{$sub}{'Source'}  = $src;
+					$stref->{'Sources'}{'Subroutines'}{$src}{$sub}  = 1;
 					$stref->{'Subroutines'}{$sub}{'Status'}  = 0;
 					$stref->{'Subroutines'}{$sub}{'Program'} = $is_prog;
+					
 				} else {
 					print STDERR
 "WARNING: Ignoring source $src for $sub because another source, "
@@ -2732,8 +2792,9 @@ sub find_subroutines_functions_and_includes {
 				}
 			};
 			$line =~ /^\s*\w*\s+function\s+(\w+)/i && do {
-				my $func = $1;
+				my $func = lc($1);
 				$stref->{'Functions'}{$func}{'Source'} = $src;
+				$stref->{'Sources'}{'Functions'}{$src}{$func}  = 1;
 			};
 
 		}
