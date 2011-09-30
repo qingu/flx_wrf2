@@ -178,7 +178,7 @@ sub main {
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
-#    $stateref = refactor_called_functions($stateref);
+    $stateref = refactor_called_functions($stateref);
     
 	if ( not $call_tree_only ) {
 
@@ -445,11 +445,15 @@ sub refactor_globals {
 			my @nvars=();
 			for my $var (@vars) {
 				if (exists $stref->{'Functions'}{$var} ) {
+#					warn "FOUND FUNCTION $var in $f\n";
 					if ($is_C_target) {
 				    	print "WARNING: $var in $f is a function!\n";
 					   $stref->{'Subroutines'}{$f}{'CalledFunctions'}{$var}=1;
 				    }
-                    $stref->{'Functions'}{$var}{'Called'}=1;										
+                    $stref->{'Functions'}{$var}{'Called'}=1;
+                    if (not exists $stref->{'Functions'}{$var}{'Lines'}) {
+                    	$stref=read_fortran_src($var,$stref);
+                    }										
 				} else {
 				if ( exists $globals{$var} and not exists $args{$var} ) {
 					print STDERR
@@ -800,8 +804,12 @@ sub refactor_called_functions {
     ( my $stref ) = @_;
 
     for my $f ( keys %{ $stref->{'Functions'} } ) {
+#    	warn "REFACTORING FUNCTION $f? ";
         if ( defined $stref->{'Functions'}{$f}{'Called'} ) {
+#        	warn "YES\n";
             $stref = refactor_function( $f, $stref );
+        } else {
+#        	warn "NO\n";
         }
     }
     return $stref;
@@ -909,12 +917,14 @@ sub refactor_function {
     }
 
     print "REFACTORING FUNCTION $f\n";
-    #print Dumper($stref->{'Functions'}{$f}{'Info'}) if $f eq 'ran3';
+    die Dumper($stref->{'Functions'}{$f}) if $f eq 'ew';
     my @lines = @{ $stref->{'Functions'}{$f}{'Lines'} };
+    
     my @info =
       defined $stref->{'Functions'}{$f}{'Info'}
       ? @{ $stref->{'Functions'}{$f}{'Info'} }
       : ();
+      
     my $annlines = [];
     for my $line (@lines) {
         my $tags = shift @info;
@@ -2529,7 +2539,7 @@ sub read_fortran_src {
 	my $f = $is_incl ? $s : $stref->{$sub_or_func}{$s}{'Source'};
 
 	#    warn "$s: $f,",$stref->{$sub_func_incl}{$s}{'Status'},"\n";
-	#    die "$f: $sub_func_incl $s" if $f=~/map_proj_wrf_subaa/;
+#    die "$f: $sub_func_incl $s" if $f=~/ew/;
 	if ( $stref->{$sub_func_incl}{$s}{'Status'} == 0 ) {
 		my $ok = 1;
 		open my $SRC, '<', $f or do {
@@ -2684,12 +2694,16 @@ sub read_fortran_src {
 			my $index = 0;
 			for my $line ( @{$lines} ) {
 				my $phs_ref = shift @placeholders_per_line;
-
+                if (not defined $line) {
+                	$line = 'C UNDEF';
+                }       
 #	        	print STDERR '[',join(',',@{$phs_ref}),"]\n";
 # If it's a subroutine source, skip all lines before the matching subroutine signature
 #and all lines from (and including) the next non-matching subroutine signature
+
+# FIXME: weak, the return type of the function can be more than one word!
 				if (   $is_incl == 0
-					&& $line =~ /^\s+(program|subroutine|function)\s+(\w+)/ )
+					&& $line =~ /^\s+(program|subroutine|(?:\w+\s+)?function)\s+(\w+)/ )
 				{
 					my $keyword=$1;
 					$name = $2;					
@@ -2722,7 +2736,7 @@ sub read_fortran_src {
 		}    # if OK
 	}    # if Status==0
 
-#      die $sub_func_incl.Dumper($stref->{'Subroutines'}{'gasdev1'}) if $f=~/random/;
+#      die $sub_func_incl.Dumper($stref->{'Functions'}{'psih'}) if $f=~/psih/;
 	return $stref;
 }    # END of read_fortran_src()
 
@@ -2774,7 +2788,7 @@ sub find_subroutines_functions_and_includes {
 						  . " because source $src matches subroutine name $sub.\n";
 					}
 					$stref->{'Subroutines'}{$sub}{'Source'}  = $src;
-					$stref->{'Sources'}{'Subroutines'}{$src}{$sub}  = 1;
+#					$stref->{'Sources'}{'Subroutines'}{$src}{$sub}  = 1;
 					$stref->{'Subroutines'}{$sub}{'Status'}  = 0;
 					$stref->{'Subroutines'}{$sub}{'Program'} = $is_prog;
 					
@@ -2792,9 +2806,10 @@ sub find_subroutines_functions_and_includes {
 				}
 			};
 			$line =~ /^\s*\w*\s+function\s+(\w+)/i && do {
-				my $func = lc($1);
+				my $func = lc($1);				
 				$stref->{'Functions'}{$func}{'Source'} = $src;
-				$stref->{'Sources'}{'Functions'}{$src}{$func}  = 1;
+#				$stref->{'Sources'}{'Functions'}{$src}{$func}  = 1;
+				$stref->{'Functions'}{$func}{'Status'}  = 0;
 			};
 
 		}
