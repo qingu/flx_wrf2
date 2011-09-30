@@ -333,7 +333,12 @@ sub find_root_for_include {
 	}
 	} else {
 		# We reached a leaf node
-		# Check if the chain contains the $inc
+		# Now we work our way back up via the Parent
+		# The chain is identified by the name of the leaf child
+		# Check if the chain contains the $inc on the way up
+		# Note that we can check this for every inc so we need to do this only once if we're clever -- looks like the coffee is working!
+		
+		# When all leaf nodes have been processed, we should do the following:
 		# Create a list of all chains for each $inc 
 		# Now find the deepest common node.
 	}
