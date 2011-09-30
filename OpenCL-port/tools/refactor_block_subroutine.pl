@@ -177,7 +177,7 @@ sub main {
 	$stateref = find_subroutines_functions_and_includes($stateref);
 
 # First we analyse the code for use of globals and blocks to be transformed into subroutines
-	$stateref = parse_fortran_src( $subname, $stateref );
+	$stateref = parse_fortran_src_new( $subname, $stateref );
     if ( $call_tree_only ) {
  	  exit(0);
     }
@@ -286,15 +286,15 @@ sub parse_fortran_src_new {
     # Read the source and do some minimal processsing
     $stref = read_fortran_src( $f, $stref );
 
+	# 2. Parse the type declarations in the source, create a table %vars
+	$stref = get_var_decls( $f, $stref );
 
-        my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';
-        #       die if $f eq 'timemanager';
-        my $is_sub = ($sub_or_func eq 'Subroutines')?1:0;
-          $stref = detect_blocks( $f, $stref );     
-        #       die Dumper($stref->{'Subroutines'}{'llij_lc'}) if $f=~/latlon_to_ij/;
-          $stref = parse_includes( $f, $stref );        
-        $stref = parse_subroutine_calls( $f, $stref );
-        $stref->{$sub_or_func}{$f}{'Status'} = 2;
+	my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';
+	my $is_sub = ($sub_or_func eq 'Subroutines')?1:0;
+	$stref = detect_blocks( $f, $stref );     
+	$stref = parse_includes( $f, $stref );        
+	$stref = parse_subroutine_calls_new( $f, $stref );
+	$stref->{$sub_or_func}{$f}{'Status'} = 2;
 
     return $stref;
 
@@ -302,18 +302,44 @@ sub parse_fortran_src_new {
 
 # -----------------------------------------------------------------------------
 sub find_root_for_includes {
-	( my $stref) = @_;
+	( my $stref,my $f) = @_;
 # I'll look for the root for each of the includes, one at the time
 # When my mind is less fuzzy I'll write an algorithm that does all of them in one go
+	for my $inc (keys %{ $stref->{'Includes'} }) {
+		print "FINDING ROOT FOR $inc\n" if $V;
+		$stref=find_root_for_include($stref,$f,$inc);
+		
+	}
+	return $stref;	
+} # END of find_root_for_includes()
+# -----------------------------------------------------------------------------
 # What we do is simply a recursive descent until we hit the include and we log that path
 # Then we prune the paths until they differ, that's the root
 # We also need to add the include to all nodes in the divergent paths	
-	for my $inc (keys %{ $stref->{'Includes'} }) {
-		print "FINDING ROOT FOR $inc\n" if $V;
-		
+sub find_root_for_include {
+	( my $stref, my $f, my $inc) = @_;
+	my @chain=();
+	if (exists $stref->{'Subroutines'}{$f}{'CalledSubs'} and 
+			@{ $stref->{'Subroutines'}{$f}{'CalledSubs'} } ) {
+	# Find all children of $f
+	my @children = @{ $stref->{'Subroutines'}{$f}{'CalledSubs'}  };
+	# Now for each of these children, find their children until the leaf nodes are reached
+	for my $child (@children) {
+		# If we encounter $inc in one of the children, mark the chain with that include.
+		if (exists $stref->{'Subroutines'}{$f}{'Includes'}{$inc}) {
+
+		}
+		$stref=find_root_for_include($stref,$child,$inc);
 	}
-	
-} # END of find_root_for_includes()
+	} else {
+		# We reached a leaf node
+		# Check if the chain contains the $inc
+		# Create a list of all chains for each $inc 
+		# Now find the deepest common node.
+	}
+
+	return $stref;	
+}
 # -----------------------------------------------------------------------------
 sub refactor_globals {
 	
@@ -1597,6 +1623,183 @@ sub build_flexpart {
 
 # -----------------------------------------------------------------------------
 
+sub parse_subroutine_calls_new {
+	( my $f, my $stref ) = @_;
+	print "PARSING SUBROUTINE CALLS in $f\n" if $V;
+	my $src = $stref->{'Subroutines'}{$f}{'Source'};
+	if ( $translate == 2 || ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
+	{
+		if ( $translate != 2 ) {
+			my $nspaces =
+			  64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
+			  my $incls = join(',', keys %{ $stref->{'Subroutines'}{$f}{'Includes'}});
+			print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $src, "\t",$incls,"\n";
+		} # else {
+			if ($translate==2) {
+			if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
+				print "ADDING $src to C BuildSources\n" if $V;
+				$stref->{'BuildSources'}{'C'}{$src} = 1;
+				$stref->{'Subroutines'}{$f}{'Status'} = 4;
+			}
+			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
+				if ( not exists $stref->{'BuildSources'}{'H'}{$inc} ) {
+					print "ADDING $inc to C Header BuildSources\n" if $V;
+					$stref->{'BuildSources'}{'H'}{$inc} = 1;
+				}
+			}
+		}
+	}
+	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+	if ( defined $srcref ) {
+#		my %child_include_count = ();
+		my %called_subs         = ();
+		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+			my $line = $srcref->[$index];
+			next if $line =~ /^C\s+/;
+			if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )
+			{
+				my $name = $1;
+				my $argstr = $2 || '';
+				if ( $argstr =~ /^\s*$/ ) {
+					$argstr = '';
+				}
+				$called_subs{$name} = $name;
+				$stref->{'Subroutines'}{$f}{'Info'}
+				  ->[$index]{'SubroutineCall'}{'Args'} = $argstr;                
+				my $tvarlst = $argstr;
+				if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
+					while ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
+						my $chunk  = $1;
+						my $chunkr = $chunk;
+						$chunkr =~ s/,/;/g;
+						my $pos = index( $tvarlst, $chunk );
+						substr( $tvarlst, $pos, length($chunk), $chunkr );
+					}
+				}
+
+				my @tvars   = split( /\s*\,\s*/, $tvarlst );
+				my $p       = '';
+				my @argvars = ();
+				for my $var (@tvars) {
+					$var =~ s/^\s+//;
+					$var =~ s/\s+$//;
+					$var =~ s/;/,/g;
+					push @argvars, $var;
+				}
+
+				$stref->{'Subroutines'}{$f}{'Info'}
+				  ->[$index]{'SubroutineCall'}{'Args'} = \@argvars;
+				$stref->{'Subroutines'}{$f}{'Info'}
+				  ->[$index]{'SubroutineCall'}{'Name'} = $name;
+				if ( $stref->{'Subroutines'}{$name}{'Status'} < 2 or $gen_sub )
+				{
+					print "\tCALL $name\n" if $V;
+
+					# Propagating down includes
+#					for my $inc (
+#						keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } )
+#					{
+#						if (
+#							not
+#							exists $stref->{'Subroutines'}{$name}{'Includes'}
+#							{$inc} )
+#						{
+#							print "Propagating DOWN $inc from $f to $name\n"
+#							  if $V;
+#							$stref->{'Subroutines'}{$name}{'Includes'}{$inc} =
+#							  -3;
+#						} else {
+#							print
+#"NO NEED TO propagate DOWN $inc from $f to $name\n"
+#							  if $V;
+#						}
+#					}
+
+					if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
+						$stref->{'Indents'} += 4;
+					}
+					$stref = parse_fortran_src_new( $name, $stref );
+					if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
+						$stref->{'Indents'} -= 4;
+					}
+
+#					print "Postprocessing INCLUDES for $name\n" if $V;
+#					for my $inc (
+#						keys %{ $stref->{'Subroutines'}{$name}{'Includes'} } )
+#					{
+#						if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common' ) {
+#							$child_include_count{$f}{$inc}++;
+#						}
+#					}
+
+				}
+			}
+		}
+#		print "ANALYZING called subs in $f\n" if $V;
+#		my %globs         = ();
+#		my @child_is_root = ();
+#		# See if one of the children is root for any of the includes
+#		my %found_root=();
+#		for my $inc ( keys %{ $child_include_count{$f} } ) {
+#			if ($stref->{'Includes'}{$inc}{'Root'} eq $f) {
+#				$found_root{$inc}=$f;
+#			}
+#			if ( not exists $stref->{'Subroutines'}{$f}{'Includes'}{$inc} ) {
+#				if ( $child_include_count{$f}{$inc} == 1 ) {
+#					push @child_is_root, $inc;
+#				} elsif ( $child_include_count{$f}{$inc} > 1 ) {
+#					print
+#"INFO: $inc occurs in more than one child, not present in parent => make parent $f root\n"
+#					  if $V;
+#					$stref->{'Includes'}{$inc}{'Root'} = $f;
+#					print "INFO: $f is root for $inc (parent is root)\n" if $V;
+#					$found_root{$inc}=$f;
+#					$stref->{'Subroutines'}{$f}{'Includes'}{$inc} = -1;
+#				}
+#			}
+#		}
+		
+        $stref->{'Subroutines'}{$f}{'CalledSubs'}=\%called_subs;
+#		for my $name ( keys %called_subs ) {
+#			$stref->{'Subroutines'}{$name}{'Parent'}=$f;
+#			my $root_inc = '';
+#			for my $inc (@child_is_root) {
+#            if ($stref->{'Includes'}{$inc}{'Root'} eq $name) {
+#                $found_root{$inc}=$name;
+#            }
+#				
+#				if ( exists $stref->{'Subroutines'}{$name}{'Includes'}{$inc} ) {
+#					   $stref->{'Includes'}{$inc}{'Root'} = $name;
+#					   $found_root{$inc}=$name;
+#					   $root_inc = $inc;
+#					   print "INFO: $name is root for $inc (child is root)\n" if $V;
+#				}
+#			}
+#			for my $inc ( keys %{ $stref->{'Subroutines'}{$name}{'Globals'} } )
+#			{
+#				next if $inc eq $root_inc;
+#				$globs{$inc} =
+#				  union( $globs{$inc},
+#					$stref->{'Subroutines'}{$name}{'Globals'}{$inc} );
+#			}
+#		}
+#		
+#		for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
+#			print "INFO: $inc in $f\n" if $V;
+#			next unless $stref->{'Includes'}{$inc}{'Type'} eq 'Common';
+#			if ( exists $stref->{'Subroutines'}{$f}{'Globals'}{$inc} ) {
+#				$stref->{'Subroutines'}{$f}{'Globals'}{$inc} =
+#				  union( $stref->{'Subroutines'}{$f}{'Globals'}{$inc},
+#					$globs{$inc} );
+#			} else {
+#				$stref->{'Subroutines'}{$f}{'Globals'}{$inc} = $globs{$inc};
+#			}
+#		}
+	}
+	return $stref;
+}    # END of parse_subroutine_calls_new()
+# -----------------------------------------------------------------------------
+
 sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
 	print "PARSING SUBROUTINE CALLS in $f\n" if $V;
@@ -2150,8 +2353,6 @@ sub get_var_decls {
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $line = $srcref->[$index];
 
-			#			print $line,"\n";
-			#            $stref->{$sub_or_incl}{$f}{'Info'}->[$index]={};
 			if ( $line =~ /^C\s+/ ) {
 				next;
 			}
@@ -2161,7 +2362,6 @@ sub get_var_decls {
 				next;
 			}
 
-			# real surfstrn(0:nxmaxn-1,0:nymaxn-1,1,2,maxnests)
 			if ( $line =~
 /(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
 			  )
@@ -2204,7 +2404,6 @@ sub get_var_decls {
 				}
 				print "\t", join( ',', @varnames ), "\n" if $V;
 
-				#              print "$f : $sub_or_incl; $index\n" if $V;
 				$stref->{$sub_or_incl}{$f}{'Info'}->[$index]{'VarDecl'} =
 				  \@varnames;
 				if ($first) {
