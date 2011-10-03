@@ -168,8 +168,6 @@ sub main {
 		'Subroutines'  => {},
 		'BuildSources' => {}
 		,    # sources to be built, need to disinguish between C and Fortran
-		'Targets' => {}
-		,    # targets for translation to C, make this {'BuildSources'}{'C'}
 		'Indents' => 0,
 		'NId' => 0,
 		'Nodes' =>{}
@@ -187,12 +185,14 @@ sub main {
 	$stateref = parse_fortran_src_new( $subname, $stateref );
 	create_call_graph($stateref);
 	
+	# TODO: I should really store the call tree and print it out here
     if ( $call_tree_only ) {
  	  exit(0);
     }
+    
     # Find the root for each include in a proper way
     $stateref = find_root_for_includes($stateref,$subname);
-    die;# Dumper($stateref->{'Nodes'});
+    die;
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
@@ -295,9 +295,13 @@ sub parse_fortran_src_new {
     ( my $f, my $stref ) = @_;
     # Read the source and do some minimal processsing
     $stref = read_fortran_src( $f, $stref );
-
+    my $is_incl = exists $stref->{'Includes'}{$f} ? 1 : 0;
+    
 	# 2. Parse the type declarations in the source, create a table %vars
 	$stref = get_var_decls( $f, $stref );
+	
+    # 3. Parse includes, recursively doing 0/1/2
+    if ( not $is_incl ) {
 
 	my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';
 	my $is_sub = ($sub_or_func eq 'Subroutines')?1:0;
@@ -305,6 +309,10 @@ sub parse_fortran_src_new {
 	$stref = parse_includes( $f, $stref );        
 	$stref = parse_subroutine_calls_new( $f, $stref );
 	$stref->{$sub_or_func}{$f}{'Status'} = 2;
+    } else {    # includes
+         # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
+        $stref = get_commons_params_from_includes( $f, $stref );
+    }
 
     return $stref;
 
@@ -317,7 +325,7 @@ sub find_root_for_includes {
 	$stref=find_leaves($stref,0); # assumes we start at node 0 in the tree
 	for my $inc (keys %{ $stref->{'Includes'} }) {
         if ($stref->{'Includes'}{$inc}{'Type'} eq 'Common' ) {
-        	print "FINDING ROOT FOR $inc ($f)\n" ;
+#        	print "FINDING ROOT FOR $inc ($f)\n" ;
             $stref=find_root_for_include($stref,$inc,$f);   
             print "ROOT for $inc is ". $stref->{'Includes'}{$inc}{'Root'}."\n";                             		                	
 		}
@@ -342,7 +350,7 @@ sub find_root_for_include {
 		if ($nchildren==0) {
 			die "find_root_for_include(): Can't find $inc in parent or any children, something's wrong!\n";
 		} elsif ($nchildren==1) {
-			print "DESCEND into $singlechild\n";
+#			print "DESCEND into $singlechild\n";
 			find_root_for_include($stref,$inc,$singlechild);			
 		} else {
 			# head node is root
@@ -394,14 +402,13 @@ sub create_chain {
 		my $pnid=$stref->{'Nodes'}{$nid}{'Parent'};
 		my $csub=$stref->{'Nodes'}{$cnid}{'Subroutine'};
 	    my $sub=$stref->{'Nodes'}{$nid}{'Subroutine'};
-#	    print "$sub $csub\n";
         if (exists $stref->{'Subroutines'}{$sub}{'Includes'} and not exists $stref->{'Subroutines'}{$sub}{'CommonIncludes'} ) {
         	for my $inc (keys %{ $stref->{'Subroutines'}{$sub}{'Includes'} } ){
         		if ($stref->{'Includes'}{$inc}{'Type'} eq 'Common' and
         		not exists $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}
         		) { 
-        			print "MERGING $inc from P $sub\n" if $inc=~/wrf/;
-       	            $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}=1 ;
+#        			print "$sub:\tCOPYING $inc\n" if $inc=~/wrf/;
+       	            $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}=1 ;       	            
         		}
         	}
         }   
@@ -412,7 +419,7 @@ sub create_chain {
                     if (
                         not exists $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}
                     ) { 
-                        print "MERGING $inc from $csub into $sub\n" if $inc=~/wrf/;
+#                        print "$sub:\tMERGING $inc FROM $csub\n" if $inc=~/wrf/;
                         $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}=1 ;
                     }
                 }
@@ -2427,7 +2434,7 @@ sub parse_includes {
 				# Initial guess for Root				
 				$stref->{'Includes'}{$name}{'Root'}      = $f;
 				$stref->{'Includes'}{$name}{'HasBlocks'} = 0;
-				$stref = parse_fortran_src( $name, $stref );
+				$stref = parse_fortran_src_new( $name, $stref );
 			} else {
 				print $line, " already processed\n" if $V;
 			}
