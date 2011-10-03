@@ -170,19 +170,29 @@ sub main {
 		,    # sources to be built, need to disinguish between C and Fortran
 		'Targets' => {}
 		,    # targets for translation to C, make this {'BuildSources'}{'C'}
-		'Indents' => 0
+		'Indents' => 0,
+		'NId' => 0,
+		'Nodes' =>{}
 	};
 
 	# Find all subroutines in the source code tree
 	$stateref = find_subroutines_functions_and_includes($stateref);
 
 # First we analyse the code for use of globals and blocks to be transformed into subroutines
+    $stateref->{'Nodes'}{0}={
+    	'Parent'=>0,
+    	'Children'=>[],
+    	'Subroutine'=>$subname
+    };
 	$stateref = parse_fortran_src_new( $subname, $stateref );
+	create_call_graph($stateref);
+	
     if ( $call_tree_only ) {
  	  exit(0);
     }
     # Find the root for each include in a proper way
-    $stateref = find_root_for_includes($stateref);
+    $stateref = find_root_for_includes($stateref,$subname);
+    die;# Dumper($stateref->{'Nodes'});
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
@@ -217,6 +227,7 @@ sub main {
 }    # END of main()
 
 # -----------------------------------------------------------------------------
+
 # -----------------------------------------------------------------------------
 # This is the most important routine
 # It parses the FORTRAN source as discussed above
@@ -282,7 +293,6 @@ sub parse_fortran_src {
 # We don't need to parse the includes nor the functions at this stage.
 sub parse_fortran_src_new {
     ( my $f, my $stref ) = @_;
-
     # Read the source and do some minimal processsing
     $stref = read_fortran_src( $f, $stref );
 
@@ -303,37 +313,66 @@ sub parse_fortran_src_new {
 # -----------------------------------------------------------------------------
 sub find_root_for_includes {
 	( my $stref,my $f) = @_;
-# I'll look for the root for each of the includes, one at the time
-# When my mind is less fuzzy I'll write an algorithm that does all of them in one go
+	
+	$stref=find_leaves($stref,0); # assumes we start at node 0 in the tree
 	for my $inc (keys %{ $stref->{'Includes'} }) {
-		print "FINDING ROOT FOR $inc\n" if $V;
-		$stref=find_root_for_include($stref,$f,$inc);
-		
-	}
+        if ($stref->{'Includes'}{$inc}{'Type'} eq 'Common' ) {
+        	print "FINDING ROOT FOR $inc ($f)\n" ;
+            $stref=find_root_for_include($stref,$inc,$f);   
+            print "ROOT for $inc is ". $stref->{'Includes'}{$inc}{'Root'}."\n";                             		                	
+		}
+	}			
 	return $stref;	
 } # END of find_root_for_includes()
+# -----------------------------------------------------------------------------
+sub find_root_for_include {
+	( my $stref, my $inc, my $sub) = @_;	
+	if (exists $stref->{'Subroutines'}{$sub}{'Includes'}{$inc}) {
+		$stref->{'Includes'}{$inc}{'Root'} = $sub;
+	} else {
+		my $nchildren=0;
+	    my $singlechild='';
+		for my $calledsub (keys %{ $stref->{'Subroutines'}{$sub}{'CalledSubs'} }) {
+#			print "$calledsub\n";
+		    if( exists $stref->{'Subroutines'}{$calledsub}{'CommonIncludes'}{$inc} ) {
+			 $nchildren++;
+			 $singlechild=$calledsub;
+		    }	
+		}
+		if ($nchildren==0) {
+			die "find_root_for_include(): Can't find $inc in parent or any children, something's wrong!\n";
+		} elsif ($nchildren==1) {
+			print "DESCEND into $singlechild\n";
+			find_root_for_include($stref,$inc,$singlechild);			
+		} else {
+			# head node is root
+#			print "Found $nchildren children with $inc\n";
+		      $stref->{'Includes'}{$inc}{'Root'} = $sub;	
+		}
+	}
+	
+	return $stref;	
+} # END of find_root_for_include()
 # -----------------------------------------------------------------------------
 # What we do is simply a recursive descent until we hit the include and we log that path
 # Then we prune the paths until they differ, that's the root
 # We also need to add the include to all nodes in the divergent paths	
-sub find_root_for_include {
-	( my $stref, my $f, my $inc) = @_;
+sub find_leaves {
+	( my $stref, my $nid) = @_;
 	my @chain=();
-	if (exists $stref->{'Subroutines'}{$f}{'CalledSubs'} and 
-			@{ $stref->{'Subroutines'}{$f}{'CalledSubs'} } ) {
-	# Find all children of $f
-	my @children = @{ $stref->{'Subroutines'}{$f}{'CalledSubs'}  };
-	# Now for each of these children, find their children until the leaf nodes are reached
-	for my $child (@children) {
-		# If we encounter $inc in one of the children, mark the chain with that include.
-		if (exists $stref->{'Subroutines'}{$f}{'Includes'}{$inc}) {
-
-		}
-		$stref=find_root_for_include($stref,$child,$inc);
-	}
+	if (exists $stref->{'Nodes'}{$nid}{'Children'} and 
+			@{ $stref->{'Nodes'}{$nid}{'Children'} } ) {
+    	# Find all children of $nid
+    	my @children = @{ $stref->{'Nodes'}{$nid}{'Children'}  };
+    	# Now for each of these children, find their children until the leaf nodes are reached
+	   for my $child (@children) {
+		  $stref=find_leaves($stref,$child);
+	   }
 	} else {
 		# We reached a leaf node
-		# Now we work our way back up via the Parent
+#		print "Reached leaf $nid\n";
+		# Now we work our way back up via the parent using a separate recursive function
+		$stref=create_chain($stref,$nid,$nid);
 		# The chain is identified by the name of the leaf child
 		# Check if the chain contains the $inc on the way up
 		# Note that we can check this for every inc so we need to do this only once if we're clever -- looks like the coffee is working!
@@ -344,6 +383,50 @@ sub find_root_for_include {
 	}
 
 	return $stref;	
+}
+# -----------------------------------------------------------------------------
+sub create_chain {
+	(my $stref, my $nid,my $cnid)=@_;
+#	print "create_chain $nid $cnid ";
+	# In $c
+	# If there are includes with common blocks, merge them into CommonIncludes
+	
+		my $pnid=$stref->{'Nodes'}{$nid}{'Parent'};
+		my $csub=$stref->{'Nodes'}{$cnid}{'Subroutine'};
+	    my $sub=$stref->{'Nodes'}{$nid}{'Subroutine'};
+#	    print "$sub $csub\n";
+        if (exists $stref->{'Subroutines'}{$sub}{'Includes'} and not exists $stref->{'Subroutines'}{$sub}{'CommonIncludes'} ) {
+        	for my $inc (keys %{ $stref->{'Subroutines'}{$sub}{'Includes'} } ){
+        		if ($stref->{'Includes'}{$inc}{'Type'} eq 'Common' and
+        		not exists $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}
+        		) { 
+        			print "MERGING $inc from P $sub\n" if $inc=~/wrf/;
+       	            $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}=1 ;
+        		}
+        	}
+        }   
+        if ($nid!=$cnid) {
+            my $csub=$stref->{'Nodes'}{$cnid}{'Subroutine'};
+            if (exists $stref->{'Subroutines'}{$csub}{'CommonIncludes'}) {
+                for my $inc (keys %{ $stref->{'Subroutines'}{$csub}{'CommonIncludes'} } ){
+                    if (
+                        not exists $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}
+                    ) { 
+                        print "MERGING $inc from $csub into $sub\n" if $inc=~/wrf/;
+                        $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}=1 ;
+                    }
+                }
+            }
+        }           
+    if ($nid!=0) {
+        $stref=create_chain($stref,$pnid,$nid); 
+	} else {
+		# reached head node, return $stref
+#		print "Reached head node\n";
+	}
+		return $stref;
+
+	
 }
 # -----------------------------------------------------------------------------
 sub refactor_globals {
@@ -1631,6 +1714,8 @@ sub build_flexpart {
 sub parse_subroutine_calls_new {
 	( my $f, my $stref ) = @_;
 	print "PARSING SUBROUTINE CALLS in $f\n" if $V;
+	my $pnid=$stref->{'NId'};
+	
 	my $src = $stref->{'Subroutines'}{$f}{'Source'};
 	if ( $translate == 2 || ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
 	{
@@ -1664,6 +1749,16 @@ sub parse_subroutine_calls_new {
 			if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )
 			{
 				my $name = $1;
+				$stref->{'NId'}++;
+				my $nid=$stref->{'NId'};
+				push @{ $stref->{'Nodes'}{$pnid}{'Children'} }, $nid;
+                $stref->{'Nodes'}{$nid}={
+                	'Parent'=>$pnid,
+                	'Children'=>[],
+                	'Subroutine' => $name
+                };
+                
+				
 				my $argstr = $2 || '';
 				if ( $argstr =~ /^\s*$/ ) {
 					$argstr = '';
@@ -1948,7 +2043,7 @@ sub parse_subroutine_calls {
 		
         $stref->{'Subroutines'}{$f}{'CalledSubs'}=\%called_subs;
 		for my $name ( keys %called_subs ) {
-			$stref->{'Subroutines'}{$name}{'Parent'}=$f;
+#			$stref->{'Subroutines'}{$name}{'Parent'}=$f;
 			my $root_inc = '';
 			for my $inc (@child_is_root) {
             if ($stref->{'Includes'}{$inc}{'Root'} eq $name) {
@@ -3271,4 +3366,39 @@ sub ordered_union {
 	return \@us;
 }    # END of ordered_union()
 
+# -----------------------------------------------------------------------------
+ 
+sub create_call_graph {
+    (my $stref)=@_;
+    
+    open my $DOT,'>','callgraph.dot';
+    print $DOT
+    'digraph FlxWrf {
+node [shape=box];
+rankdir="LR";
+ratio="fill";
+';
+    for my $pnid (keys %{ $stref->{'Nodes'}} ){
+    	my %seen=();
+    	my $i=0;
+        for my $cnid (@{  $stref->{'Nodes'}{$pnid}{'Children'}}) {
+        	# Repeated calls to subs without children are pruned        	
+        	if ( scalar( @{  $stref->{'Nodes'}{$cnid}{'Children'}})!=0 or not exists $seen{$stref->{'Nodes'}{$cnid}{'Subroutine'}}) {
+        		my $psub=$stref->{'Nodes'}{$pnid}{'Subroutine'};
+        		my $csub=$stref->{'Nodes'}{$cnid}{'Subroutine'};        	  
+        		print $DOT "$cnid [label=\"$csub\"];\n";
+        		if ($i==0) {
+        			print $DOT "$pnid [label=\"$psub\"];\n";
+        		} 
+                print $DOT "$pnid -> $cnid ;\n";
+            }
+            $seen{$stref->{'Nodes'}{$cnid}{'Subroutine'}}++;
+            $i++;
+        }  
+        my $sub=$stref->{'Nodes'}{$pnid}{'Subroutine'};
+#        print $DOT "$pnid [label=\"$sub\"];\n";
+    }
+    print $DOT "}\n";
+    close $DOT;
+}
 # -----------------------------------------------------------------------------
