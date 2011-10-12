@@ -3,6 +3,7 @@ use warnings;
 use strict;
 
 =TODOs
+- Detect function calls inside functions!
 - Create intermediate directories for converted files
 - Determine if a subroutine argument is I, O or I/O => OK
 - Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should. => OK
@@ -192,7 +193,7 @@ sub main {
     
     # Find the root for each include in a proper way
     $stateref = find_root_for_includes($stateref,$subname);
-    die;
+#    die;
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
@@ -327,7 +328,7 @@ sub find_root_for_includes {
         if ($stref->{'Includes'}{$inc}{'Type'} eq 'Common' ) {
 #        	print "FINDING ROOT FOR $inc ($f)\n" ;
             $stref=find_root_for_include($stref,$inc,$f);   
-            print "ROOT for $inc is ". $stref->{'Includes'}{$inc}{'Root'}."\n";                             		                	
+            print "ROOT for $inc is ". $stref->{'Includes'}{$inc}{'Root'}."\n" if $V;                             		                	
 		}
 	}			
 	return $stref;	
@@ -351,6 +352,7 @@ sub find_root_for_include {
 			die "find_root_for_include(): Can't find $inc in parent or any children, something's wrong!\n";
 		} elsif ($nchildren==1) {
 #			print "DESCEND into $singlechild\n";
+            delete $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc};
 			find_root_for_include($stref,$inc,$singlechild);			
 		} else {
 			# head node is root
@@ -552,7 +554,9 @@ sub refactor_globals {
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
 				print "INC: $inc, root: $stref->{'Includes'}{$inc}{'Root'} \n"
 				  if $V;
-				if (    $stref->{'Subroutines'}{$f}{'Includes'}{$inc} < 0
+				if (    
+#				$stref->{'Subroutines'}{$f}{'Includes'}{$inc} < 0
+				exists $stref->{'Subroutines'}{$f}{'CommonIncludes'}{$inc} 
 					and $f eq $stref->{'Includes'}{$inc}{'Root'} )
 				{   # and $f ne $stref->{'Top'}) { # FIXME: not sure about this!
 					my $rline = "      include '$inc'";
@@ -602,7 +606,7 @@ sub refactor_globals {
 				}    # for
 			}
 		}
-		if ( exists $tags{'VarDecl'} ) {
+		if ( exists $tags{'VarDecl'} ) {			
 			my @vars  = @{ $tags{'VarDecl'} };			
 			my $rline = $line;
 			my @nvars=();
@@ -612,13 +616,13 @@ sub refactor_globals {
 #					warn "FOUND FUNCTION $var in $f\n";
 					if ($is_C_target) {
 				    	print "WARNING: $var in $f is a function!\n";
-					   $stref->{'Subroutines'}{$f}{'CalledFunctions'}{$var}=1;
+#					   $stref->{'Subroutines'}{$f}{'CalledFunctions'}{$var}=1;
 					   $skip_var=1;
 				    } 
-                    $stref->{'Functions'}{$var}{'Called'}=1;
-                    if (not exists $stref->{'Functions'}{$var}{'Lines'}) {
-                    	$stref=read_fortran_src($var,$stref);
-                    }										
+#                    $stref->{'Functions'}{$var}{'Called'}=1;
+#                    if (not exists $stref->{'Functions'}{$var}{'Lines'}) {
+#                    	$stref=read_fortran_src($var,$stref);
+#                    }										
 				} 
 				if (not $skip_var) {
 				if ( exists $globals{$var} and not exists $args{$var} ) {
@@ -971,12 +975,12 @@ sub refactor_called_functions {
     ( my $stref ) = @_;
 
     for my $f ( keys %{ $stref->{'Functions'} } ) {
-#    	warn "REFACTORING FUNCTION $f? ";
+    	warn "REFACTORING FUNCTION $f? ";
         if ( defined $stref->{'Functions'}{$f}{'Called'} ) {
-#        	warn "YES\n";
+        	warn "YES\n";
             $stref = refactor_function( $f, $stref );
         } else {
-#        	warn "NO\n";
+        	warn "NO\n";
         }
     }
     return $stref;
@@ -1135,6 +1139,9 @@ So we make a list of called functions and refactor them
 =cut
 sub emit_refactored_function {
     ( my $f, my $dir, my $stref ) = @_;
+    local $V=1;
+    print "EMITTING source for FUNCTION $f\n" if $V;
+#    die Dumper($stref->{'Functions'}{$f}) if $f =~/ran3/;
     my $overwrite =0;
     my $srcref = $stref->{'Functions'}{$f}{'RefactoredCode'};
     my $s      = $stref->{'Functions'}{$f}{'Source'};
@@ -1228,7 +1235,7 @@ sub emit_all {
 	for my $f ( keys %{ $stref->{'Includes'} } ) {
 		emit_refactored_include( $f, $targetdir, $stref );
 	}
-    for my $f ( keys %{ $stref->{'Functions'} } ) {
+    for my $f ( keys %{ $stref->{'Functions'} } ) {    	
 #    	die "# FIXME: the generated source only contains the subroutine, not the functions!";
         emit_refactored_function( $f, $targetdir, $stref );
     }
@@ -2490,7 +2497,7 @@ sub get_var_decls {
 				my @tvars    = split( /\s*\,\s*/, $tvarlst );
 				my $p        = '';
 				my @varnames = ();
-				for my $var (@tvars) {
+				for my $var (@tvars) {					
 					$var =~ s/^\s+//;
 					$var =~ s/\s+$//;
 					my $tvar = $var;
@@ -2506,11 +2513,20 @@ sub get_var_decls {
 					$vars{$tvar}{'Type'} = $type;
 					$var =~ s/;/,/g;
 					$vars{$tvar}{'Decl'} = "        $type $var"
-					  ; # TODO: this should maybe not be a textual representation
+					  ; # TODO: this should maybe not be a textual representation			
+                if (exists $stref->{'Functions'}{$tvar} ) {
+#                   warn "FOUND FUNCTION $var in $f\n";
+                       $stref->{'Subroutines'}{$f}{'CalledFunctions'}{$tvar}=1;
+                    $stref->{'Functions'}{$tvar}{'Called'}=1;
+                    if (not exists $stref->{'Functions'}{$tvar}{'Lines'}) {
+                        $stref=read_fortran_src($tvar,$stref);
+                    }                                       
+                }					  		  
 					push @varnames, $tvar;
 				}
 				print "\t", join( ',', @varnames ), "\n" if $V;
-
+				
+warn "VARDECL in $f: ",join(',',@varnames)."\n"; 
 				$stref->{$sub_or_incl}{$f}{'Info'}->[$index]{'VarDecl'} =
 				  \@varnames;
 				if ($first) {
@@ -3331,7 +3347,7 @@ sub split_long_line {
 		}
 		if ($split_lines[0]!~/^C/ && $split_lines[0]=~/\t/ && $split_lines[0]!~/^\s{6}/ && $split_lines[0]!~/^\t/) {
 			# problematic tab!
-			warn "PROBLEMATIC TAB in ".$split_lines[0]."\n";
+			warn "PATHOLOGICAL TAB in ".$split_lines[0]."\n";
 			my $sixspaces = ' ' x 6;
 			$split_lines[0]=~s/^\ +\t//;
 			if (length($split_lines[0])>66) {
@@ -3341,7 +3357,8 @@ sub split_long_line {
 			if (length($split_lines[0])>66) {
 				warn "LINE STILL TOO LONG: ".$split_lines[0]."\n"; 
 			}
-			$split_lines[0]=$sixspaces.$split_lines[0];
+			$split_lines[0]=$sixspaces.$split_lines[0] unless $split_lines[0]=~/^\s+\d+/;
+#			warn "<$split_lines[0]>\n";
 			 
 		}
 		return @split_lines;
