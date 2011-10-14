@@ -208,8 +208,9 @@ sub main {
     	'Subroutine'=>$subname
     };
 	$stateref = parse_fortran_src_new( $subname, $stateref );
-#	create_call_graph($stateref);
-	
+	if ($call_tree_only) {
+		create_call_graph($stateref);
+	}
 	# TODO: I should really store the call tree and print it out here
     if ( $call_tree_only ) {
  	  exit(0);
@@ -217,14 +218,18 @@ sub main {
     
     # Find the root for each include in a proper way
     $stateref = find_root_for_includes($stateref,$subname);
-#    die;
+# Now we can do proper globals handling
+# We need to walk the tree again, find the globals in rec descent.
+	$stateref= resolve_globals($subname,$stateref);
+# The remaining problem is that we did not yet factor out blocks into subroutines.
+# Now we do the reformatting, block detection etc.
+	$stateref= analyse_sources($stateref); 
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
     $stateref = refactor_called_functions($stateref);
     
 	if ( not $call_tree_only ) {
-
 		# Emit the refactored source
 		emit_all($stateref);
 	} elsif ( $call_tree_only and $ARGV[1] ) {
@@ -338,6 +343,7 @@ sub parse_fortran_src_new {
 	$stref = detect_blocks( $f, $stref );     
 	$stref = parse_includes( $f, $stref );	      
 	$stref = parse_subroutine_calls_new( $f, $stref );
+=refactored	
 	# >>> TODO: REFACTOR OUT 
 	       $stref = identify_globals_used_in_subroutine( $f, $stref );
         $stref = determine_argument_io_direction($f,$stref);
@@ -348,11 +354,12 @@ sub parse_fortran_src_new {
             $stref = separate_blocks( $f, $stref );
         }
 	# <<< TODO: REFACTOR OUT 
+=cut		
 	} else {
 		$stref = parse_function_calls( $f, $stref );
 	}
 	# >>> TODO: REFACTOR OUT
-	$stref = identify_loops_breaks( $f, $stref );
+#	$stref = identify_loops_breaks( $f, $stref );
 	# <<< TODO: REFACTOR OUT  
 	$stref->{$sub_or_func}{$f}{'Status'} = $PARSED;
     } else {    # includes
@@ -365,6 +372,33 @@ sub parse_fortran_src_new {
 
 }    # END of parse_fortran_src_new()
 
+# -----------------------------------------------------------------------------
+# Maybe I need an additional Status here
+sub analyse_sources {
+	(my $stref)=@_;
+	for my $f (keys %{ $stref->{'Subroutines'} }) {
+		if ((exists $stref->{'Subroutines'}{$f}{'Called'} &&
+				$stref->{'Subroutines'}{$f}{'Called'} == 1) or 
+				(exists $stref->{'Subroutines'}{$f}{'Program'} &&
+					$stref->{'Subroutines'}{$f}{'Program'} ==1)
+				) {
+        $stref = determine_argument_io_direction($f,$stref);
+        if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) {
+            $stref = separate_blocks( $f, $stref );
+        }
+		$stref = identify_loops_breaks( $f, $stref );
+		} else {
+		print "SKIPPING ANALYSIS for $f:".."\n";
+		}
+	}
+	for my $f (keys %{ $stref->{'Functions'} }) {
+		if (exists $stref->{'Functions'}{$f}{'Called'} &&
+				$stref->{'Functions'}{$f}{'Called'} == 1) {
+		$stref = identify_loops_breaks( $f, $stref );
+		}
+	}
+	return $stref;
+}
 # -----------------------------------------------------------------------------
 sub find_root_for_includes {
 	( my $stref,my $f) = @_;
@@ -569,7 +603,7 @@ sub refactor_globals {
 				    my $comment ="C      $ntabs$arg:\t$iodir, $kind"; 
 				    push @${rlines}, [ $comment, {'Comment'=>1} ];
 				} else {
-					warn "NO IO info for $arg in $f\n";
+#					warn "NO IO info for $arg in $f\n";
 				}
 			}
 			$skip = 1;
@@ -637,7 +671,6 @@ sub refactor_globals {
 								push @{$rlines}, [ $rline, $tags_lref ];
 							} elsif ($V) {
 								print
-"*** NO COMMONS from $inc because $f is Root\n";
 								last;
 							}
 						} elsif ($V) {
@@ -2192,6 +2225,128 @@ sub parse_subroutine_calls {
 }    # END of parse_subroutine_calls()
 
 # -----------------------------------------------------------------------------
+# Walk the tree from the top
+# For the leaf nodes, find the globals
+# On the return, 
+# - find globals in the current sub
+# - merge the globals for the just-processed sub with the current ones
+
+sub resolve_globals {
+	(my $f, my $stref)=@_;
+	if (exists $stref->{'Subroutines'}{$f}{'CalledSubs'} and scalar keys %{$stref->{'Subroutines'}{$f}{'CalledSubs'} }) {		
+		# Not a leaf node, descend 
+		my %globs=();
+#		die Dumper($stref->{'Subroutines'}{$f}{'CalledSubs'}) if $f=~/advance/;
+		for my $csub (keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'}}) {
+			$stref=resolve_globals($csub,$stref);
+			# Globals for $csub have been determined
+			$stref=identify_globals_used_in_subroutine_new($f,$stref);
+			# Merge them with globals for $f
+			for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'} }) {
+				$stref->{'Subroutines'}{$f}{'Globals'}{$inc}=ordered_union(
+					$stref->{'Subroutines'}{$f}{'Globals'}{$inc},
+					$stref->{'Subroutines'}{$csub}{'Globals'}{$inc}
+					);
+			}
+		}
+	} else {
+		# Leaf node, find globals	
+		print "SUB $f is LEAF\n";
+		$stref=identify_globals_used_in_subroutine_new($f,$stref);
+	}
+	return $stref;
+}
+
+
+sub identify_globals_used_in_subroutine_new {
+	( my $f, my $stref ) = @_;
+	warn "GLOBALS in $f\n";
+	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+	if ( defined $srcref ) {
+		my %commons = ();
+		print "COMMONS ANALYSIS in $f\n" if $V;
+		if ( not exists $stref->{'Subroutines'}{$f}{'Commons'} ) {
+			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'} } ) {
+				print "COMMONS from $inc in $f? " if $V;
+				$commons{$inc} = $stref->{'Includes'}{$inc}{'Commons'};
+			}
+			$stref->{'Subroutines'}{$f}{'Commons'}    = \%commons;
+			$stref->{'Subroutines'}{$f}{'HasCommons'} = 1;
+		} else {
+			print "already done\n" if $V;
+			%commons = %{ $stref->{'Subroutines'}{$f}{'Commons'} };
+		}
+		my $first = 1;
+		for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'} }) {
+			print "\nGLOBAL VAR ANALYSIS for $inc in $f\n" if $V;
+			my @globs = ();
+			my %tvars = %{ $commons{$inc} };
+			for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+				my $line = $srcref->[$index];
+				if ( $line =~ /^C\s+/ ) {
+					next;
+				}
+				# We shouldn't look for globals in the declarations, silly!
+				if ( $line =~
+/(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
+				  )
+				{
+					next;
+				}
+				# Determine the subroutine arguments
+				# FIXME: Not sure why this is done here?
+				if ( $first && $line =~ /^\s+subroutine\s+(\w+)\((.*)\)/ ) {
+					my $name   = $1;
+					my $argstr = $2;
+					$argstr =~ s/^\s+//;
+					$argstr =~ s/\s+$//;
+					my @args = split( /\s*,\s*/, $argstr );
+					$stref->{'Subroutines'}{$f}{'Info'}
+					  ->[$index]{'Signature'}{'Args'} = \@args;
+					$stref->{'Subroutines'}{$f}{'Info'}
+					  ->[$index]{'Signature'}{'Name'} = $name;
+					$stref->{'Subroutines'}{$f}{'Args'} = \@args;
+				}
+				# Determine the program arguments
+				# FIXME: Not sure why this is done here?
+				if ( $first && $line =~ /^\s+program\s+(\w+)\s*$/ ) {
+					my $name = $1;
+					$stref->{'Subroutines'}{$f}{'Info'}
+					  ->[$index]{'Signature'}{'Args'} = [];
+					$stref->{'Subroutines'}{$f}{'Info'}
+					  ->[$index]{'Signature'}{'Name'} = $name;
+				}
+
+				my @chunks = split( /\W+/, $line );
+				for my $mvar (@chunks) {
+#				next if $mvar =~/\b(?:if|then|do|goto|integer|real|call|\d+)\b/; # is slower!
+# if a var on a line is declared locally, it is obviously not a global!
+					if ( exists $tvars{$mvar}
+						and not $stref->{'Subroutines'}{$f}{'Vars'}{$mvar} )
+					{
+						print "FOUND global $mvar in $line\n" if $V;
+						push @globs, $mvar;
+						delete $tvars{$mvar};
+					} 
+				}
+			}    # for each line
+			if ($V) {
+				print "\nGLOBAL VARS from $inc in subroutine $f:\n\n";
+				for my $var (@globs) {
+					print "$var\n";
+				}
+				print "\n";
+			}
+			$stref->{'Subroutines'}{$f}{'Globals'}{$inc} = \@globs;
+			$first = 0;
+		}
+	}
+#	die Dumper($stref->{'Subroutines'}{$f}{'Globals'}) if $f=~/interpol_all/;
+	return $stref;
+}
+
+# -----------------------------------------------------------------------------
+
 # Identify which globals from the includes are used in the subroutine
 # FIXME: we can't really do this here because we need to identify the roots
 # for the includes first
@@ -2215,6 +2370,7 @@ sub identify_globals_used_in_subroutine {
 			print "already done\n" if $V;
 			%commons = %{ $stref->{'Subroutines'}{$f}{'Commons'} };
 		}
+		die Dumper(keys %commons)."\n<".Dumper(keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'}  }).">\n" if $f=~/advance/;
 		my $first = 1;
 		for my $inc ( keys %commons ) {
 			print "\nGLOBAL VAR ANALYSIS for $inc in $f\n" if $V;
@@ -2222,6 +2378,14 @@ sub identify_globals_used_in_subroutine {
 			  ( defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc} )
 			  ? @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
 			  : ();
+			my $propagated_globs=[];
+#			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'} }) {
+				for my $csub ($stref->{'Subroutines'}{$f}{'CalledSubs'}) {				
+					if (exists $stref->{'Subroutines'}{$csub}{'CommonIncludes'}{$inc}) {
+						$propagated_globs=ordered_union($propagated_globs,$stref->{'Subroutines'}{$csub}{'Globals'}{$inc});
+					}
+				}				
+#			}
 			my @globs = ();
 			my %tvars = %{ $commons{$inc} };
 			for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
@@ -2307,6 +2471,7 @@ sub identify_globals_used_in_subroutine {
 sub determine_argument_io_direction {
 	( my $f, my $stref ) = @_;
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+	local $V=1 if $f=~/advance/;
 	print "DETERMINE IO DIR FOR SUB $f\n" if $V;
     my @exglobs = ();
     for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
@@ -2901,7 +3066,7 @@ sub identify_loops_breaks {
 	( my $f, my $stref ) = @_;
     my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';
 	my $srcref = $stref->{$sub_or_func}{$f}{'Lines'};
-
+if (defined $srcref) {
 	my %do_loops = ();
 	my %gotos    = ();
 
@@ -3000,6 +3165,9 @@ sub identify_loops_breaks {
 			next;
 		};
 	}
+} else {
+print "NO SOURCE for $f\n";
+}
 	return $stref;
 }    # END of identify_loops_breaks()
 
