@@ -184,7 +184,7 @@ sub main {
     	'Subroutine'=>$subname
     };
 	$stateref = parse_fortran_src_new( $subname, $stateref );
-	create_call_graph($stateref);
+#	create_call_graph($stateref);
 	
 	# TODO: I should really store the call tree and print it out here
     if ( $call_tree_only ) {
@@ -292,8 +292,10 @@ sub parse_fortran_src {
 # -----------------------------------------------------------------------------
 # The NEW version only parses the source to build the call tree, nothing else
 # We don't need to parse the includes nor the functions at this stage.
+# All that should happen in a separate pass. But we do it here anyway
 sub parse_fortran_src_new {
     ( my $f, my $stref ) = @_;
+    print "PARSING $f: ";
     # Read the source and do some minimal processsing
     $stref = read_fortran_src( $f, $stref );
     my $is_incl = exists $stref->{'Includes'}{$f} ? 1 : 0;
@@ -305,17 +307,32 @@ sub parse_fortran_src_new {
     # 3. Parse includes, recursively doing 0/1/2
     if ( not $is_incl ) {
 
-	my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';
+	my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';	
+	print $sub_or_func ,"\n";
 	my $is_sub = ($sub_or_func eq 'Subroutines')?1:0;
-	if ($is_sub) {  
+	if ($is_sub) {  		
 	$stref = detect_blocks( $f, $stref );     
 	$stref = parse_includes( $f, $stref );	      
 	$stref = parse_subroutine_calls_new( $f, $stref );
+	# >>> TODO: REFACTOR OUT 
+	       $stref = identify_globals_used_in_subroutine( $f, $stref );
+        $stref = determine_argument_io_direction($f,$stref);
+# 5. Split the source based on the block markers
+# As there could be several blocks (later), use a hash per block
+# This could happen in any file except includes; but include processing never comes here
+        if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) {
+            $stref = separate_blocks( $f, $stref );
+        }
+	# <<< TODO: REFACTOR OUT 
 	} else {
 		$stref = parse_function_calls( $f, $stref );
 	}
+	# >>> TODO: REFACTOR OUT
+	$stref = identify_loops_breaks( $f, $stref );
+	# <<< TODO: REFACTOR OUT  
 	$stref->{$sub_or_func}{$f}{'Status'} = $PARSED;
     } else {    # includes
+    print "Include\n";
          # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
         $stref = get_commons_params_from_includes( $f, $stref );
     }
@@ -817,6 +834,7 @@ sub create_refactored_source {
 	my @extra_lines = ();
     my $sub_or_func = (exists $stref->{'Subroutines'}{$f})?'Subroutines':'Functions';
 	$stref->{$sub_or_func}{$f}{'RefactoredCode'} =[];
+#	die Dumper(@{$annlines} ) if $f eq 'timemanager';
 	for my $annline ( @{$annlines} ) {
 		my $line = $annline->[0] || '';    # FIXME: why would line be undefined?
 		my $tags_lref = $annline->[1] || {};
@@ -922,7 +940,7 @@ sub refactor_subroutine {
 	}
 
 	print "REFACTORING SUBROUTINE $f\n" if $V;
-	#print Dumper($stref->{'Subroutines'}{$f}{'Info'}) if $f eq 'llij_lc';
+
 	my @lines = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
 	my @info =
 	  defined $stref->{'Subroutines'}{$f}{'Info'}
@@ -951,7 +969,7 @@ sub refactor_subroutine {
 	}
 
 #   print STDERR "REFACTORED $f\n";
-#    die Dumper($stref->{'Subroutines'}{$f}{'RefactoredCode'}) if $f eq 'hanna_short' and $translate==2;
+#    die Dumper($stref->{'Subroutines'}{$f}{'RefactoredCode'}) if $f eq 'timemanager' ;
 	return $stref;
 }    # END of refactor_subroutine()
 
@@ -967,9 +985,12 @@ sub refactor_all_subroutines {
 			print STDERR "WARNING: no Status for $f\n";
 			print "WARNING: no Status for $f\n";
 		}
-		next                    if $stref->{'Subroutines'}{$f}{'Status'} == $UNREAD;
-		do {warn "Not parsed: $f\n"; next } if $stref->{'Subroutines'}{$f}{'Status'} == $READ;
-		next                    if $stref->{'Subroutines'}{$f}{'Status'} == $FROM_BLOCK;
+		next if $stref->{'Subroutines'}{$f}{'Status'} == $UNREAD;
+		do {
+#			warn "Not parsed: $f\n"; 
+			next;
+			 } if $stref->{'Subroutines'}{$f}{'Status'} == $READ;
+		next  if $stref->{'Subroutines'}{$f}{'Status'} == $FROM_BLOCK;
 		$stref = refactor_subroutine( $f, $stref );
 	}
 
@@ -985,7 +1006,7 @@ sub refactor_called_functions {
 #        	warn "YES\n";
             $stref = refactor_function( $f, $stref );
         }  else {
-        	warn "NOT REFACTORING FUNCTION $f\n";
+#        	warn "NOT REFACTORING FUNCTION $f\n";
 #        	die if $f eq 'cspanf';
         }
     }
@@ -1093,7 +1114,7 @@ sub refactor_function {
         print "#" x 80, "\n";
     }
 
-    print "REFACTORING FUNCTION $f\n";
+    print "REFACTORING FUNCTION $f\n" if $V;
 #    die Dumper($stref->{'Functions'}{$f}) if $f eq 'ew';
     my @lines = @{ $stref->{'Functions'}{$f}{'Lines'} };
     
@@ -1952,11 +1973,11 @@ sub parse_function_calls {
                     if (
                     exists $stref->{'Functions'}{$chunk} and $stref->{'Functions'}{$chunk}{'Status'}<$PARSED                     
                     ) {
-                    	warn "FOUND FUNCTION CALL $chunk in FUNCTION $f\n";
+                    	print "FOUND FUNCTION CALL $chunk in FUNCTION $f\n" if $V;
                         $stref->{'Functions'}{$chunk}{'Called'}=1;                        
                         	$stref=parse_fortran_src_new($chunk,$stref);                        
                     } elsif (exists $stref->{'Subroutines'}{$chunk} and $stref->{'Subroutines'}{$chunk}{'Status'}<$PARSED) {
-                        warn "FOUND SUBROUTINE CALL $chunk in FUNCTION $f\n";
+                        print  "FOUND SUBROUTINE CALL $chunk in FUNCTION $f\n" if $V;
                         $stref=parse_fortran_src_new($chunk,$stref);                                                
                     	
                     }
@@ -2364,7 +2385,7 @@ sub find_vars {
 } # END of find_vars()
 # -----------------------------------------------------------------------------
 sub detect_blocks {
-	( my $s, my $stref ) = @_;
+	( my $s, my $stref ) = @_;	
 	print "CHECKING BLOCKS in $s\n" if $V;
 	$stref->{'Subroutines'}{$s}{'HasBlocks'} = 0;
 	my $srcref = $stref->{'Subroutines'}{$s}{'Lines'};
@@ -2372,6 +2393,7 @@ sub detect_blocks {
 		if ( $line =~ /^C\s/i ) {
 			if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
 				$stref->{'Subroutines'}{$s}{'HasBlocks'} = 1;
+				warn "SUB $s HAS BLOCK: $1\n" if $V;
 				print "SUB $s HAS BLOCK: $1\n" if $V;
 				last;
 			}
@@ -2851,8 +2873,8 @@ sub separate_blocks {
 # FIXME: "error: break statement not within loop or switch"
 sub identify_loops_breaks {
 	( my $f, my $stref ) = @_;
-
-	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+    my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';
+	my $srcref = $stref->{$sub_or_func}{$f}{'Lines'};
 
 	my %do_loops = ();
 	my %gotos    = ();
@@ -2866,7 +2888,7 @@ sub identify_loops_breaks {
 		# BeginDo:
 		$line =~ /^\s+do\s+(\d+)\s+\w/ && do {
 			my $label = $1;
-			$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'BeginDo'}{'Label'} =
+			$stref->{$sub_or_func}{$f}{'Info'}->[$index]{'BeginDo'}{'Label'} =
 			  $label;
 			if ( not exists $do_loops{$label} ) {
 				@{ $do_loops{$label} } = ( [$index], $nest );
@@ -2882,9 +2904,9 @@ sub identify_loops_breaks {
 		# Goto
 		$line =~ /^\s+.*?[\)\ ]\s*goto\s+(\d+)\s*$/ && do {
 			my $label = $1;
-			$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Goto'}{'Label'} =
+			$stref->{$sub_or_func}{$f}{'Info'}->[$index]{'Goto'}{'Label'} =
 			  $label;
-			$stref->{'Subroutines'}{$f}{'Gotos'}{$label} = 1;
+			$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = 1;
 			push @{ $gotos{$label} } , [ $index, $nest ];
 			next;
 		};
@@ -2895,9 +2917,9 @@ sub identify_loops_breaks {
 			my $is_cont = $2 eq 'continue' ? 1 : 0;
 			if ( exists $do_loops{$label} ) {
 				if ( $nest == $do_loops{$label}[1] + 1 ) {
-					$stref->{'Subroutines'}{$f}{'Info'}
+					$stref->{$sub_or_func}{$f}{'Info'}
 					  ->[$index]{'EndDo'}{'Label'} = $label;
-					$stref->{'Subroutines'}{$f}{'Info'}
+					$stref->{$sub_or_func}{$f}{'Info'}
 					  ->[$index]{'EndDo'}{'Count'} =
 					  scalar @{ $do_loops{$label}[0] };
 					delete $do_loops{$label};
@@ -2915,11 +2937,11 @@ sub identify_loops_breaks {
 						if ($tnest>0) {					
 							if ($is_cont) {
 								$target = 'NoopBreakTarget';
-								$stref->{'Subroutines'}{$f}{'Info'}
+								$stref->{$sub_or_func}{$f}{'Info'}
 								  ->[ $tindex ]{'Break'}{'Label'} = $label;
 							} else {
 								$target = 'BreakTarget';
-								$stref->{'Subroutines'}{$f}{'Info'}
+								$stref->{$sub_or_func}{$f}{'Info'}
 								  ->[ $tindex  ]{'Break'}{'Label'} = $label;
 		
 		#                    	print STDERR "WARNING: $f: Found BREAK target not NOOP for label $label\n";
@@ -2935,9 +2957,9 @@ sub identify_loops_breaks {
 "WARNING: $f: Found GOTO target not BREAK for label $label: wrong nesting $nest<>$gotos{$label}[1]\n";
 				    }
 			 }
-				$stref->{'Subroutines'}{$f}{'Info'}
+				$stref->{$sub_or_func}{$f}{'Info'}
 				  ->[$index]{$target}{'Label'} = $label;
-				$stref->{'Subroutines'}{$f}{'Gotos'}{$label} = $target;
+				$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = $target;
 				delete $gotos{$label};
 
 			}
@@ -2948,7 +2970,7 @@ sub identify_loops_breaks {
    # Some evil code combines this end-of-do-block labels
 		$line =~ /^\s+open.*?\,\s*err\s*=\s*(\d+)\s*\)/ && do {
 			my $label = $1;
-			$stref->{'Subroutines'}{$f}{'Gotos'}{$label} = 1;
+			$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = 1;
 			next;
 		};
 	}
@@ -3390,7 +3412,7 @@ sub split_long_line {
 		}
 		if ($split_lines[0]!~/^C/ && $split_lines[0]=~/\t/ && $split_lines[0]!~/^\s{6}/ && $split_lines[0]!~/^\t/) {
 			# problematic tab!
-			warn "PATHOLOGICAL TAB in ".$split_lines[0]."\n";
+			print "WARNING: Pathological TAB in ".$split_lines[0]."\n";
 			my $sixspaces = ' ' x 6;
 			$split_lines[0]=~s/^\ +\t//;
 			if (length($split_lines[0])>66) {
@@ -3398,7 +3420,7 @@ sub split_long_line {
 			    $split_lines[0]=~s/\s+$//;
 			}
 			if (length($split_lines[0])>66) {
-				warn "LINE STILL TOO LONG: ".$split_lines[0]."\n"; 
+				print "WARNING: Line still too long: ".$split_lines[0]."\n"; 
 			}
 			$split_lines[0]=$sixspaces.$split_lines[0] unless $split_lines[0]=~/^\s+\d+/;
 #			warn "<$split_lines[0]>\n";
