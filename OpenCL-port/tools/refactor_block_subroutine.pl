@@ -3,7 +3,31 @@ use warnings;
 use strict;
 
 =TODOs
-- Detect subroutine calls inside functions! How awfull!
+- Common variable used inside a subroutine should only be elevatated to function arguments if they are used in read mode
+before being used in write mode, is that correct? No!
+Suppose f1 does this:
+x1=42
+y=x1*x1;
+x1+=y
+And f2 does:
+y=x1 OR z=f(x1)
+x1=43
+
+Because of the assignment, x1 must be an argument of f2
+Now, if f1 does not have x1 as an argument, the code
+f1()
+f2(x1)
+
+That means that regardless of what happens to those common vars, we need to add them to the arguments.
+But that then means the enclosing function needs to declare them!
+
+int x1
+f1(x1)
+f2(x1)
+
+Wich means that I need to add the missing variable declarations in the enclosing sub
+  
+
 - Create intermediate directories for converted files
 - Determine if a subroutine argument is I, O or I/O => OK
 - Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should. => OK
@@ -295,7 +319,7 @@ sub parse_fortran_src {
 # All that should happen in a separate pass. But we do it here anyway
 sub parse_fortran_src_new {
     ( my $f, my $stref ) = @_;
-    print "PARSING $f: ";
+#    print "PARSING $f\n ";
     # Read the source and do some minimal processsing
     $stref = read_fortran_src( $f, $stref );
     my $is_incl = exists $stref->{'Includes'}{$f} ? 1 : 0;
@@ -308,7 +332,7 @@ sub parse_fortran_src_new {
     if ( not $is_incl ) {
 
 	my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';	
-	print $sub_or_func ,"\n";
+#	print $sub_or_func ,"\n";
 	my $is_sub = ($sub_or_func eq 'Subroutines')?1:0;
 	if ($is_sub) {  		
 	$stref = detect_blocks( $f, $stref );     
@@ -332,7 +356,7 @@ sub parse_fortran_src_new {
 	# <<< TODO: REFACTOR OUT  
 	$stref->{$sub_or_func}{$f}{'Status'} = $PARSED;
     } else {    # includes
-    print "Include\n";
+#    print "Include\n";
          # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
         $stref = get_commons_params_from_includes( $f, $stref );
     }
@@ -483,6 +507,7 @@ sub refactor_globals {
 	my %globals            = map { $_ => 1 } @globs;
 	my %args               = ();
 	my %conflicting_locals = ();
+	my $var_decl_hook=0;
 	for my $annline ( @{$annlines} ) {
 		my $line      = $annline->[0] || '';
 		my $tags_lref = $annline->[1];
@@ -2172,6 +2197,7 @@ sub parse_subroutine_calls {
 # for the includes first
 sub identify_globals_used_in_subroutine {
 	( my $f, my $stref ) = @_;
+	warn "GLOBALS in $f\n";
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	if ( defined $srcref ) {
 		my %commons = ();
