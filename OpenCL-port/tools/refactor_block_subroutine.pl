@@ -2,47 +2,56 @@
 use warnings;
 use strict;
 
-=TODOs
-- Common variable used inside a subroutine should only be elevatated to function arguments if they are used in read mode
+=pod
+
+=begin markdown
+
+# FORTRAN Refactoring Tool
+
+## TODOs
+
+* Common variables
+
+Common variables used inside a subroutine should only be elevatated to function arguments if they are used in read mode
 before being used in write mode, is that correct? No!
 Suppose f1 does this:
-x1=42
-y=x1*x1;
-x1+=y
+
+    x1=42
+    y=x1*x1;
+    x1+=y
+
 And f2 does:
-y=x1 OR z=f(x1)
-x1=43
+
+    y=x1 OR z=f(x1)
+    x1=43
 
 Because of the assignment, x1 must be an argument of f2
 Now, if f1 does not have x1 as an argument, the code
-f1()
-f2(x1)
+
+    f1()
+    f2(x1)
 
 That means that regardless of what happens to those common vars, we need to add them to the arguments.
-But that then means the enclosing function needs to declare them!
+But that then means the enclosing function needs to declare them...
 
-int x1
-f1(x1)
-f2(x1)
+    int x1
+    f1(x1)
+    f2(x1)
 
 Wich means that I need to add the missing variable declarations in the enclosing sub
   
-
-- Create intermediate directories for converted files
-- Determine if a subroutine argument is I, O or I/O => OK
-- Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should. => OK
-- Refactor FUNCTIONS!! and translate to C and emit headers as well
-- Declarations from F2C-ACC are broken, emit our own => OK
-- But F2C-ACC's function calls are wrong too! They use the non-pointer vars where they should use the pointers! => OK
-- Put F2C-ACC into our tree, if the license allows it. => OK
+* Create intermediate directories for converted files
+*  Determine if a subroutine argument is I, O or I/O => OK
+*  Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should. => OK
+*  Refactor FUNCTIONS!! and translate to C and emit headers as well
+*  Declarations from F2C-ACC are broken, emit our own => OK
+*  But F2C-ACC's function calls are wrong too! They use the non-pointer vars where they should use the pointers! => OK
+*  Put F2C-ACC into our tree, if the license allows it. => OK
 
 The mechanism for dealing with globals is broken because I need to identify the root for each include first, in a separate pass.
 To do so, I need to walk the subroutine call tree first. In other words, an extra pass is needed.
 
-=cut
-
-=pod
-Draft Outline  
+## Draft Outline  
 
 0.2 Get rid of "common" variables, move them into function arguments 
 		This is refactoring, and there is really only one proper way to do this:
@@ -92,37 +101,45 @@ then just add the globals to the call
 - otherwise, add the index in the list of source lines to a hash of subs 
 - in fact, this can be a hash of "anythings", i.e.
  
-    $stref->{'Nodes'}{$filename}{'SubroutineCall'}{$name}={'Pos'=>[$index,...],'Globals'=>[],...};
+        $stref->{'Nodes'}{$filename}{'SubroutineCall'}{$name}={'Pos'=>[$index,...],'Globals'=>[],...};
     
     As this is a "global", I need to pass it around between calls.
 - recurse and figure out globals used. also, store the signature in the node hash
 - add the globals to the end of the signature, and emit the new code.
 - it would be nice to emit the code in a hash 
 
-    $refactored_sources{$filename}=\@lines;
+        $refactored_sources{$filename}=\@lines;
     
 - return the list of all the globals to be added to the call
 - update the call in %refactored_sources
 
-    'Subroutines' => { 
+        'Subroutines' => { 
                     $name => {
                        'Source' => $src,
                        'Lines' =>[$line],
                        'Blocks'=>{},
-                       'HasBlocks'=>0|1
-                       'Signature'=>{'Pos'=>[$index,...],'Globals'=>[],...};
-                       'VarDecls'=>
+                       'HasBlocks'=>0|1                       
+                       'Vars'=>
                        'RefactoredCode' => {},    
-                       'Status' => 0|1|2|3        
+                       'Status' => 0|1|2|3,
+                       'Info' => [ {
+                       	    'Signature' => {'Name' => ..., 'Args' => ...},
+                       	    'Include' => {'Name' => ...,}
+                       	    'ExGlobVarDecls'=> ...
+                       	    'SubroutineCall'=>{'Name' => ..., 'Args' => ...}
+                       	    'VarDecl' => [...]
+                       } ],        
                      }
-    }
+        }
 
 Status: for programs, subroutines, functions and includes 
     0: after find_subroutines_functions_and_includes() 
     1: after read_fortran_src()
-    2: after parse_fortran_src()
+    2: after parse_fortran_src_OLD()
     3: after create_subroutine_source_from_block()
 After building this structure, what we need is to go through it an revert it so it becomes index => information
+
+=end markdown
 
 =cut
 
@@ -131,13 +148,22 @@ use Getopt::Std;
 use File::Find;
 use File::Copy;
 use Digest::MD5;
+our $VER='0.2';
 our $V              = 0;
+# Instead of FORTRAN's 'continue', we insert a call to a subroutine noop() that does nothing
+# This is because F2C_ACC handles continue incorrectly
 our $noop           = 1;
 our $call_tree_only = 0;
 our $main_tree      = 0;
+# Flag used when generating a subroutine from a marked block of code 
 our $gen_sub        = 0;
-our $translate      = 0;
+# States for translation to C etc
+(our $NO,our $YES, our $GO)=(0..2);
+our $translate      = $NO;
 our $sub_to_translate='';
+# The state of each subroutine, function or include
+#   FROM_BLOCK indicates a marked block of code factored out into a subroutine
+#   C_SOURCE means that this source code will be translated to C
 (our $UNREAD, our $READ, our $PARSED, our $FROM_BLOCK, our $C_SOURCE)=(0..4);
 our $targetdir = '../RefactoredSources';
 use Data::Dumper;
@@ -145,7 +171,43 @@ use Data::Dumper;
 &main();
 
 # -----------------------------------------------------------------------------
+=pod
+
+=begin markdown
+
+## Main subroutine
+
+The `main()` subroutine performs following actions:
+
+- Argument parsing
+- `init_state()`: Initialise the global state
+- `find_subroutines_functions_and_includes()`: Find all subroutines, functions and includes (from now on, 'targets') in the source code tree. 
+    The subroutine creates an entry in the state for every target:
+
+        $stref->{$target_type}{$target_name}{'Source'}  = $target_source;
+        $stref->{$target_type}{$target_name}{'Status'}  = $UNREAD;
+        
+- `parse_fortran_src()` :
+
+    # Read the source and do some minimal processsing
+    $stref = read_fortran_src( $f, $stref );
+    # 2. Parse the type declarations in the source, create a table %vars
+    # 2.1 Get variable declarations unless the target is a function 
+    # 3. Parse Subroutines & Functions
+            $stref = detect_blocks( $f, $stref );     
+            $stref = parse_includes( $f, $stref );        
+            $stref = parse_subroutine_and_function_calls( $f, $stref );
+        Set Status to PARSED    
+    # 4. Parse Includes: parse common blocks and parameters, create $stref->{'Commons'}
+        $stref = get_commons_params_from_includes( $f, $stref );
+        
+- `find_root_for_includes()` :
+    
+=end markdown
+
+=cut
 sub main {
+	# Argument parsing
 	if ( not @ARGV ) {
 		die "Please specifiy FORTRAN subroutine or program to refactor\n";
 	}
@@ -173,7 +235,7 @@ sub main {
 	if ( $opts{'C'} ) {
 		$call_tree_only = 1;
 		$main_tree = $ARGV[1] ? 0 : 1;
-		print "\nCall tree for $subname:\n\n" if $main_tree;
+		
 	}
 	if ( $opts{'T'} ) {
 		if ( !@ARGV ) {
@@ -185,45 +247,42 @@ sub main {
 	$noop = ( $opts{'N'} ) ? 0 : 1;
 	my $gen = ( $opts{'b'} || $opts{'B'} ) ? 1 : 0;
 	my $build = ( $opts{'B'} ) ? 1 : 0;
-
-	my $stateref = {
-		'Top'          => $subname,
-		'Includes'     => {},
-		'Sources' => {'Subroutines' => {},'Functions'=>{}},
-		'Subroutines'  => {},
-		'BuildSources' => {}
-		,    # sources to be built, need to disinguish between C and Fortran
-		'Indents' => 0,
-		'NId' => 0,
-		'Nodes' =>{}
-	};
+	
+    #  Initialise the global state. 
+	my $stateref = init_state($subname);
 
 	# Find all subroutines in the source code tree
 	$stateref = find_subroutines_functions_and_includes($stateref);
 
-# First we analyse the code for use of globals and blocks to be transformed into subroutines
-    $stateref->{'Nodes'}{0}={
-    	'Parent'=>0,
-    	'Children'=>[],
-    	'Subroutine'=>$subname
-    };
-	$stateref = parse_fortran_src_new( $subname, $stateref );
-	if ($call_tree_only) {
-		create_call_graph($stateref);
-	}
+    # First we analyse the code for use of globals and blocks to be transformed into subroutines
+#    $stateref->{'Nodes'}{0}={
+#    	'Parent'=>0,
+#    	'Children'=>[],
+#    	'Subroutine'=>$subname
+#    };
+	$stateref = parse_fortran_src( $subname, $stateref );
+	
+	if ($call_tree_only and not $ARGV[1]) {
+		create_call_graph($stateref);	
 	# TODO: I should really store the call tree and print it out here
-    if ( $call_tree_only ) {
+	   print "\nCall tree for $subname:\n\n" if $main_tree;
+	    for my $entry (@{$stateref->{'CallTree'}}) {
+	    	print $entry;
+	    }    
  	  exit(0);
-    }
+    } 
     
     # Find the root for each include in a proper way
     $stateref = find_root_for_includes($stateref,$subname);
-# Now we can do proper globals handling
-# We need to walk the tree again, find the globals in rec descent.
+    
+    # Now we can do proper globals handling
+    # We need to walk the tree again, find the globals in rec descent.
 	$stateref= resolve_globals($subname,$stateref);
-# The remaining problem is that we did not yet factor out blocks into subroutines.
-# Now we do the reformatting, block detection etc.
+	
+    # The remaining problem is that we did not yet factor out blocks into subroutines.
+    # Now we do the reformatting, block detection etc.
 	$stateref= analyse_sources($stateref); 
+	
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
@@ -237,13 +296,18 @@ sub main {
 		$gen_sub = 1;
 		print "\nCall tree for $subname:\n\n";
 		$stateref = parse_fortran_src( $subname, $stateref );
+        for my $entry (@{$stateref->{'CallTree'}}) {
+            print $entry;
+        }    
+      exit(0);
+		
 	}
-	if ( $translate == 1 ) {
-		$translate = 2;
+	if ( $translate == $YES ) {
+		$translate = $GO;
 		$subname   = $sub_to_translate;
 		print "\nTranslating $subname to C\n";
 		$gen_sub = 1;
-		$stateref = parse_fortran_src( $subname, $stateref );
+		$stateref = parse_fortran_src_OLD( $subname, $stateref );
 		$stateref = refactor_C_targets($stateref);
 		emit_C_targets($stateref);
 		&translate_to_C($stateref);
@@ -258,6 +322,28 @@ sub main {
 
 # -----------------------------------------------------------------------------
 
+sub init_state { (my $subname)=@_;
+	# Nodes|Subroutines|Includes|Functions|NId|BuildSources|Indents
+	my $stateref = {
+        'Top'          => $subname,
+        'Includes'     => {},
+#        'Sources' => {'Subroutines' => {},'Functions'=>{}}, 
+        'Subroutines'  => {},
+        'BuildSources' => {}
+        ,    # sources to be built, can be C, H (header) or F (Fortran)
+        'Indents' => 0, # bit silly, purely for pretty-printing
+        'NId' => 0, # running node id for traversal
+        'Nodes' =>{ # nodes in call tree
+            0 => {
+            'Parent'=>0,
+            'Children'=>[],
+            'Subroutine'=>$subname
+            }
+        }
+    };
+    return $stateref;	
+}
+
 # -----------------------------------------------------------------------------
 # This is the most important routine
 # It parses the FORTRAN source as discussed above
@@ -266,7 +352,11 @@ sub main {
 # VarDecl
 # InBlock etc
 # Includes
-=haskell
+
+=pod
+
+=begin haskell
+
 -- We really need to use the State monad!
 parse_fortran_src :: String -> STRef -> STRef
 parse_fortran_src  f stref =
@@ -277,8 +367,12 @@ parse_fortran_src  f stref =
             Just incls -> Hash.member f incls
             Nothing -> False
         stref'' = get_var_decls f stref'
+
+=end haskell
+
 =cut
-sub parse_fortran_src {
+
+sub parse_fortran_src_OLD {
 	( my $f, my $stref ) = @_;
 
 	# Read the source and do some minimal processsing
@@ -299,7 +393,7 @@ sub parse_fortran_src {
 		#		die Dumper($stref->{'Subroutines'}{'llij_lc'}) if $f=~/latlon_to_ij/;
 		  $stref = parse_includes( $f, $stref );		
 		$stref = parse_subroutine_calls( $f, $stref );
-		$stref = identify_globals_used_in_subroutine( $f, $stref );
+		$stref = identify_globals_used_in_subroutine_OLD( $f, $stref );
         $stref = determine_argument_io_direction($f,$stref);
 # 5. Split the source based on the block markers
 # As there could be several blocks (later), use a hash per block
@@ -317,60 +411,50 @@ sub parse_fortran_src {
 
 	return $stref;
 
-}    # END of parse_fortran_src()
+}    # END of parse_fortran_src_OLD()
 # -----------------------------------------------------------------------------
-# The NEW version only parses the source to build the call tree, nothing else
+# parse_fortran_src() only parses the source to build the call tree, nothing else
 # We don't need to parse the includes nor the functions at this stage.
-# All that should happen in a separate pass. But we do it here anyway
-sub parse_fortran_src_new {
+# All that should happen in a separate pass. But we do it here anyway 
+sub parse_fortran_src {
     ( my $f, my $stref ) = @_;
 #    print "PARSING $f\n ";
-    # Read the source and do some minimal processsing
-    $stref = read_fortran_src( $f, $stref );
+    # 1. Read the source and do some minimal processsing
+    $stref = read_fortran_src( $f, $stref );    
     my $is_incl = exists $stref->{'Includes'}{$f} ? 1 : 0;
-    my $is_func = exists $stref->{'Functions'}{$f} ? 1:0;
-	# 2. Parse the type declarations in the source, create a table %vars
+    my $is_func = exists $stref->{'Functions'}{$f} ? 1:0;    
+	# 2. Parse the type declarations in the source, create a per-target table Vars and a per-line VarDecl list
+	# We don't do this in functions at the moment, because we don't need to? FIXME?
 	if (not $is_func) {
-	$stref = get_var_decls( $f, $stref );
-	}
-    # 3. Parse includes, recursively doing 0/1/2
+	   $stref = get_var_decls( $f, $stref );
+	}    
     if ( not $is_incl ) {
-
-	my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';	
-#	print $sub_or_func ,"\n";
-	my $is_sub = ($sub_or_func eq 'Subroutines')?1:0;
-	if ($is_sub) {  		
-	$stref = detect_blocks( $f, $stref );     
-	$stref = parse_includes( $f, $stref );	      
-	$stref = parse_subroutine_calls_new( $f, $stref );
-=refactored	
-	# >>> TODO: REFACTOR OUT 
-	       $stref = identify_globals_used_in_subroutine( $f, $stref );
-        $stref = determine_argument_io_direction($f,$stref);
-# 5. Split the source based on the block markers
-# As there could be several blocks (later), use a hash per block
-# This could happen in any file except includes; but include processing never comes here
-        if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) {
-            $stref = separate_blocks( $f, $stref );
-        }
-	# <<< TODO: REFACTOR OUT 
-=cut		
-	} else {
-		$stref = parse_function_calls( $f, $stref );
-	}
-	# >>> TODO: REFACTOR OUT
-#	$stref = identify_loops_breaks( $f, $stref );
-	# <<< TODO: REFACTOR OUT  
-	$stref->{$sub_or_func}{$f}{'Status'} = $PARSED;
+        my $sub_or_func = exists $stref->{'Subroutines'}{$f} ? 'Subroutines' : 'Functions';	
+        my $is_sub = ($sub_or_func eq 'Subroutines')?1:0;
+        # For subroutines, we detect blocks, parse include and parse nested subroutine calls.
+        # Note that function calls have been dealt with (as a side effect) in get_var_decls()
+#        if ($is_sub) {  		
+        # Detect the presence of a block in this target, only sets 'HasBlock'
+	       $stref = detect_blocks( $f, $stref );
+	       # Detect include statements and add to Subroutine 'Include' field
+	       $stref = parse_includes( $f, $stref );	      
+	       # Recursive descent via subroutine calls
+	       $stref = parse_subroutine_and_function_calls( $f, $stref );
+#    	} else {
+#    		# Not quite sure about this. This deals with function calls in functions
+#    		# Why can we not treat functions as a special case of subroutines?
+#	       	$stref = parse_function_calls( $f, $stref );
+#	    }
+    	$stref->{$sub_or_func}{$f}{'Status'} = $PARSED;
     } else {    # includes
+    # 3. Parse includes
 #    print "Include\n";
          # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
         $stref = get_commons_params_from_includes( $f, $stref );
+        $stref->{'Includes'}{$f}{'Status'} = $PARSED;
     }
-
     return $stref;
-
-}    # END of parse_fortran_src_new()
+}    # END of parse_fortran_src()
 
 # -----------------------------------------------------------------------------
 # Maybe I need an additional Status here
@@ -400,9 +484,28 @@ sub analyse_sources {
 	return $stref;
 }
 # -----------------------------------------------------------------------------
+# To find the root for all includes, we first find the leaves of the call tree
+# Then we find the root for each include in turn
+=pod
+
+=begin markdown
+## Handling of Common Block Variables
+
+FORTRAN's `common` blocks are a mechanism to create global variables:
+
+"The COMMON statement defines a block of main memory storage so that
+different program units can share the same data without using arguments." [F77 ref]
+
+This is problematic for translation of code to OpenCL as of course it is not possible to have
+globals across memory spaces. 
+[ Also, I personally think these globals are /evil/: for example, in FLEXPART,  
+
+
+=end markdown
+
+=cut 
 sub find_root_for_includes {
-	( my $stref,my $f) = @_;
-	
+	( my $stref,my $f) = @_;	
 	$stref=find_leaves($stref,0); # assumes we start at node 0 in the tree
 	for my $inc (keys %{ $stref->{'Includes'} }) {
         if ($stref->{'Includes'}{$inc}{'Type'} eq 'Common' ) {
@@ -439,8 +542,7 @@ sub find_root_for_include {
 #			print "Found $nchildren children with $inc\n";
 		      $stref->{'Includes'}{$inc}{'Root'} = $sub;	
 		}
-	}
-	
+	}	
 	return $stref;	
 } # END of find_root_for_include()
 # -----------------------------------------------------------------------------
@@ -450,14 +552,14 @@ sub find_root_for_include {
 sub find_leaves {
 	( my $stref, my $nid) = @_;
 	my @chain=();
-	if (exists $stref->{'Nodes'}{$nid}{'Children'} and 
-			@{ $stref->{'Nodes'}{$nid}{'Children'} } ) {
+	if (exists $stref->{'Nodes'}{$nid}{'Children'} 
+	   and @{ $stref->{'Nodes'}{$nid}{'Children'} } ) {
     	# Find all children of $nid
     	my @children = @{ $stref->{'Nodes'}{$nid}{'Children'}  };
     	# Now for each of these children, find their children until the leaf nodes are reached
-	   for my $child (@children) {
-		  $stref=find_leaves($stref,$child);
-	   }
+        for my $child (@children) {
+            $stref=find_leaves($stref,$child);
+        }
 	} else {
 		# We reached a leaf node
 #		print "Reached leaf $nid\n";
@@ -475,19 +577,21 @@ sub find_leaves {
 	return $stref;	
 }
 # -----------------------------------------------------------------------------
+# From each leaf node we follow the path back to the root of the tree
+# We combine all includes of all child nodes of a node, and the node's own includes, into CommonIncludes
+
 sub create_chain {
 	(my $stref, my $nid,my $cnid)=@_;
 #	print "create_chain $nid $cnid ";
 	# In $c
-	# If there are includes with common blocks, merge them into CommonIncludes
-	
+	# If there are includes with common blocks, merge them into CommonIncludes	
 		my $pnid=$stref->{'Nodes'}{$nid}{'Parent'};
 		my $csub=$stref->{'Nodes'}{$cnid}{'Subroutine'};
 	    my $sub=$stref->{'Nodes'}{$nid}{'Subroutine'};
         if (exists $stref->{'Subroutines'}{$sub}{'Includes'} and not exists $stref->{'Subroutines'}{$sub}{'CommonIncludes'} ) {
         	for my $inc (keys %{ $stref->{'Subroutines'}{$sub}{'Includes'} } ){
-        		if ($stref->{'Includes'}{$inc}{'Type'} eq 'Common' and
-        		not exists $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}
+        		if ($stref->{'Includes'}{$inc}{'Type'} eq 'Common' 
+        		and not exists $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}
         		) { 
 #        			print "$sub:\tCOPYING $inc\n" if $inc=~/wrf/;
        	            $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}=1 ;       	            
@@ -509,13 +613,12 @@ sub create_chain {
         }           
     if ($nid!=0) {
         $stref=create_chain($stref,$pnid,$nid); 
-	} else {
+	} 
+#	else {
 		# reached head node, return $stref
 #		print "Reached head node\n";
-	}
+#	}
 		return $stref;
-
-	
 }
 # -----------------------------------------------------------------------------
 sub refactor_globals {
@@ -826,7 +929,7 @@ sub refactor_blocks {
 		$stref = get_var_decls( $name, $stref );
 		$stref = parse_includes( $name, $stref );
 		$stref = parse_subroutine_calls( $name, $stref );
-		$stref = identify_globals_used_in_subroutine( $name, $stref );
+		$stref = identify_globals_used_in_subroutine_OLD( $name, $stref );
         $stref = determine_argument_io_direction($name,$stref);
 		# Now we're ready to refactor this source
 		$stref = refactor_subroutine( $name, $stref );    # shiver!
@@ -968,7 +1071,11 @@ sub create_refactored_source {
 
 # -----------------------------------------------------------------------------
 
-=info_refactoring
+=pod
+
+=begin markdown
+
+## Info refactoring
 
 for every line
 - check if it needs changing:
@@ -985,7 +1092,7 @@ This is a node called 'RefactoredSubroutineCall'
 * BeginBlock: insert the new subroutine signature and variable declarations
 * EndBlock: insert END
                       
-
+=end markdown
 =cut
 
 sub refactor_subroutine {
@@ -1173,7 +1280,7 @@ sub refactor_function {
     }
 
     print "REFACTORING FUNCTION $f\n" if $V;
-#    die Dumper($stref->{'Functions'}{$f}) if $f eq 'ew';
+    die Dumper($stref->{'Functions'}{$f}) if $f eq 'gser';
     my @lines = @{ $stref->{'Functions'}{$f}{'Lines'} };
     
     my @info =
@@ -1216,7 +1323,8 @@ sub emit_refactored_include {
 	}
 }
 # -----------------------------------------------------------------------------
-=info_functions
+=head2 Info functions
+
 We need to refactor all called functions in the tree.
 In principle, there's no need to refactor functions that are never called.
 So we make a list of called functions and refactor them
@@ -1821,23 +1929,25 @@ sub build_flexpart {
 sub parse_subroutine_calls_new {
 	( my $f, my $stref ) = @_;
 	print "PARSING SUBROUTINE CALLS in $f\n" if $V;
-	my $pnid=$stref->{'NId'};
-	
+	my $pnid=$stref->{'NId'};	
 	my $src = $stref->{'Subroutines'}{$f}{'Source'};
-	if ( $translate == 2 || ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
+	# For C translation and call tree generation
+	if ( $translate == $GO || ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
 	{
-		if ( $translate != 2 ) {
+		if ( $translate != $GO ) {
 			my $nspaces =
 			  64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
 			  my $incls = join(',', keys %{ $stref->{'Subroutines'}{$f}{'Includes'}});
 			print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $src, "\t",$incls,"\n";
 		} # else {
-			if ($translate==2) {
+			if ($translate==$GO) {
 			if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
 				print "ADDING $src to C BuildSources\n" if $V;
 				$stref->{'BuildSources'}{'C'}{$src} = 1;
 				$stref->{'Subroutines'}{$f}{'Status'} = $C_SOURCE;
 			}
+			# Assuming no includes in Functions, this is not needed for Functions
+			# However, this might be too restrictive: surely includes with constants must be supported! FIXME!
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
 				if ( not exists $stref->{'BuildSources'}{'H'}{$inc} ) {
 					print "ADDING $inc to C Header BuildSources\n" if $V;
@@ -1845,14 +1955,14 @@ sub parse_subroutine_calls_new {
 				}
 			}
 		}
-	}
+	}	
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	if ( defined $srcref ) {
-#		my %child_include_count = ();
 		my %called_subs         = ();
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $line = $srcref->[$index];
 			next if $line =~ /^C\s+/;
+			# Subroutine calls
 			if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )
 			{
 				my $name = $1;
@@ -1904,24 +2014,24 @@ sub parse_subroutine_calls_new {
 					if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
 						$stref->{'Indents'} += 4;
 					}
-					$stref = parse_fortran_src_new( $name, $stref );
+					$stref = parse_fortran_src( $name, $stref );
 					if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
 						$stref->{'Indents'} -= 4;
 					}
 				}
 			}
+			# Maybe Function calls
 			if ($line=~/(\w+)\(/) {
 				my @chunks=();
 				my $cline=$line;
 				while ($cline=~/(\w+)\(/) {
 					if ($line!~/call\s+$1/) {
-					push @chunks, $1;
-					$cline=~s/$1\(//;
+					   push @chunks, $1;
+					   $cline=~s/$1\(//;
 					} else {
 						$cline=~s/call\s+\w+\(//;
 					}
-				}
-				
+				}				
 				for my $chunk (@chunks) {
 					if (exists $stref->{'Functions'}{$chunk} and not exists $stref->{'Subroutines'}{$f}{'CalledFunctions'}{$chunk}) {
 						$stref->{'Subroutines'}{$f}{'CalledFunctions'}{$chunk}=1;
@@ -1929,92 +2039,192 @@ sub parse_subroutine_calls_new {
                         $stref->{'Functions'}{$chunk}{'Called'}=1;
                         # We need to parse the function to detect called functions inside it, unless that has been done
                         # I need a status 'Parsed' for this 
-                        $stref=parse_fortran_src_new($chunk,$stref);
+                        $stref=parse_fortran_src($chunk,$stref);
 					}
 				}
 			}
 		}
-#		print "ANALYZING called subs in $f\n" if $V;
-#		my %globs         = ();
-#		my @child_is_root = ();
-#		# See if one of the children is root for any of the includes
-#		my %found_root=();
-#		for my $inc ( keys %{ $child_include_count{$f} } ) {
-#			if ($stref->{'Includes'}{$inc}{'Root'} eq $f) {
-#				$found_root{$inc}=$f;
-#			}
-#			if ( not exists $stref->{'Subroutines'}{$f}{'Includes'}{$inc} ) {
-#				if ( $child_include_count{$f}{$inc} == 1 ) {
-#					push @child_is_root, $inc;
-#				} elsif ( $child_include_count{$f}{$inc} > 1 ) {
-#					print
-#"INFO: $inc occurs in more than one child, not present in parent => make parent $f root\n"
-#					  if $V;
-#					$stref->{'Includes'}{$inc}{'Root'} = $f;
-#					print "INFO: $f is root for $inc (parent is root)\n" if $V;
-#					$found_root{$inc}=$f;
-#					$stref->{'Subroutines'}{$f}{'Includes'}{$inc} = -1;
-#				}
-#			}
-#		}
-		
         $stref->{'Subroutines'}{$f}{'CalledSubs'}=\%called_subs;
-#		for my $name ( keys %called_subs ) {
-#			$stref->{'Subroutines'}{$name}{'Parent'}=$f;
-#			my $root_inc = '';
-#			for my $inc (@child_is_root) {
-#            if ($stref->{'Includes'}{$inc}{'Root'} eq $name) {
-#                $found_root{$inc}=$name;
-#            }
-#				
-#				if ( exists $stref->{'Subroutines'}{$name}{'Includes'}{$inc} ) {
-#					   $stref->{'Includes'}{$inc}{'Root'} = $name;
-#					   $found_root{$inc}=$name;
-#					   $root_inc = $inc;
-#					   print "INFO: $name is root for $inc (child is root)\n" if $V;
-#				}
-#			}
-#			for my $inc ( keys %{ $stref->{'Subroutines'}{$name}{'Globals'} } )
-#			{
-#				next if $inc eq $root_inc;
-#				$globs{$inc} =
-#				  union( $globs{$inc},
-#					$stref->{'Subroutines'}{$name}{'Globals'}{$inc} );
-#			}
-#		}
-#		
-#		for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
-#			print "INFO: $inc in $f\n" if $V;
-#			next unless $stref->{'Includes'}{$inc}{'Type'} eq 'Common';
-#			if ( exists $stref->{'Subroutines'}{$f}{'Globals'}{$inc} ) {
-#				$stref->{'Subroutines'}{$f}{'Globals'}{$inc} =
-#				  union( $stref->{'Subroutines'}{$f}{'Globals'}{$inc},
-#					$globs{$inc} );
-#			} else {
-#				$stref->{'Subroutines'}{$f}{'Globals'}{$inc} = $globs{$inc};
-#			}
-#		}
 	}
 	return $stref;
 }    # END of parse_subroutine_calls_new()
 # -----------------------------------------------------------------------------
+
+sub parse_subroutine_and_function_calls {
+    ( my $f, my $stref ) = @_;
+    print "PARSING SUBROUTINE/FUNCTION CALLS in $f\n" if $V;
+    my $pnid=$stref->{'NId'};
+    my $sub_or_func = sub_func_or_incl($f,$stref);
+    
+    # For C translation and call tree generation
+    if ( $translate == $GO || ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
+    {
+        if ( $translate != $GO ) {
+        	print "ADDING $f to CALL TREE\n" if $V;
+        	$stref=add_to_call_tree($f,$stref);
+#            my $nspaces =
+#              64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
+#              my $incls = join(',', keys %{ $stref->{$sub_or_func}{$f}{'Includes'}});
+#              my $padding=' ' x (32 - length($src)); 
+#              my $src_padded = $src.$padding;
+#              my $tgt=uc(substr($sub_or_func,0,3));
+#            print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $tgt,' ',$src_padded, "\t",$incls,"\n";
+        } # else {
+        if ($translate==$GO) {
+        	$stref = add_to_C_build_sources($f,$stref)
+#        	my $src = $stref->{$sub_or_func}{$f}{'Source'};
+#            if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
+#                print "ADDING $src to C BuildSources\n" if $V;
+#                $stref->{'BuildSources'}{'C'}{$src} = 1;
+#                $stref->{$sub_or_func}{$f}{'Status'} = $C_SOURCE;
+#            }
+#            # Assuming no includes in Functions, this is not needed for Functions
+#            # However, this might be too restrictive: surely includes with constants must be supported! FIXME!
+#            for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } ) {
+#                if ( not exists $stref->{'BuildSources'}{'H'}{$inc} ) {
+#                    print "ADDING $inc to C Header BuildSources\n" if $V;
+#                    $stref->{'BuildSources'}{'H'}{$inc} = 1;
+#                }
+#            }
+        }
+    }   
+    my $srcref = $stref->{$sub_or_func}{$f}{'Lines'};
+    if ( defined $srcref ) {
+#        my %called_subs         = ();
+        for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+            my $line = $srcref->[$index];
+            next if $line =~ /^C\s+/;
+            # Subroutine calls. Surprisingly, these even occur in functions! *shudder*            
+            if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )
+            {
+                my $name = $1;
+                $stref->{'NId'}++;
+                my $nid=$stref->{'NId'};
+                push @{ $stref->{'Nodes'}{$pnid}{'Children'} }, $nid;
+                $stref->{'Nodes'}{$nid}={
+                    'Parent'=>$pnid,
+                    'Children'=>[],
+                    'Subroutine' => $name
+                };                
+                
+                my $argstr = $2 || '';
+                if ( $argstr =~ /^\s*$/ ) {
+                    $argstr = '';
+                }
+#                $called_subs{$name} = $name;
+                $stref->{$sub_or_func}{$f}{'Info'}
+                  ->[$index]{'SubroutineCall'}{'Args'} = $argstr;                
+                my $tvarlst = $argstr;
+                if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
+                    while ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
+                        my $chunk  = $1;
+                        my $chunkr = $chunk;
+                        $chunkr =~ s/,/;/g;
+                        my $pos = index( $tvarlst, $chunk );
+                        substr( $tvarlst, $pos, length($chunk), $chunkr );
+                    }
+                }
+
+                my @tvars   = split( /\s*\,\s*/, $tvarlst );
+                my $p       = '';
+                my @argvars = ();
+                for my $var (@tvars) {
+                    $var =~ s/^\s+//;
+                    $var =~ s/\s+$//;
+                    $var =~ s/;/,/g;
+                    push @argvars, $var;
+                }
+
+                $stref->{$sub_or_func}{$f}{'Info'}
+                  ->[$index]{'SubroutineCall'}{'Args'} = \@argvars;
+                $stref->{$sub_or_func}{$f}{'Info'}
+                  ->[$index]{'SubroutineCall'}{'Name'} = $name;
+
+                    if (exists $stref->{'Subroutines'}{$name}                     
+                    and not exists $stref->{$sub_or_func}{$f}{'CalledSubs'}{$name}                    
+                    ) {
+                        $stref->{$sub_or_func}{$f}{'CalledSubs'}{$name}=1;
+
+                                  
+                if ( not exists $stref->{'Subroutines'}{$name}{'Status'} 
+                    or $stref->{'Subroutines'}{$name}{'Status'} < $PARSED 
+                    or $gen_sub )
+                {
+                	die $name if $f eq 'calcpar' && $line=~/call\s+xyindex_/;
+                    print "\tFOUND SUBROUTINE CALL $name in $f\n" if $V;
+                    if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
+                        $stref->{'Indents'} += 4;
+                    }
+                    $stref = parse_fortran_src( $name, $stref );
+                    if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
+                        $stref->{'Indents'} -= 4;
+                    }
+                } else {
+                	$stref->{'Indents'} += 4;
+                	$stref=add_to_call_tree($name,$stref,'*');
+                	$stref->{'Indents'} -= 4;
+                }
+                    }
+            }
+            # Maybe Function calls
+            if ($line!~/function\s/ && $line!~/subroutine\s/ && $line=~/(\w+)\(/) {
+                my @chunks=();
+                my $cline=$line;
+                while ($cline=~/(\w+)\(/) {
+                    if ($line!~/call\s+$1/) {
+                       push @chunks, $1;
+                       $cline=~s/$1\(//;
+                    } else {
+                        $cline=~s/call\s+\w+\(//;
+                    }
+                }               
+                for my $chunk (@chunks) {
+                    if (exists $stref->{'Functions'}{$chunk} 
+                    # This means it's the first call to function $chunk in $f
+                    and not exists $stref->{$sub_or_func}{$f}{'CalledFunctions'}{$chunk}                    
+                    ) {
+                        $stref->{$sub_or_func}{$f}{'CalledFunctions'}{$chunk}=1;
+                        print "FOUND FUNCTION CALL $chunk in $f\n" if $V;
+                        if ($chunk eq $f) {die $line}
+                        $stref->{'Functions'}{$chunk}{'Called'}=1;
+                        # We need to parse the function to detect called functions inside it, unless that has been done 
+                        if (not exists $stref->{'Functions'}{$chunk} 
+                        or not exists $stref->{'Functions'}{$chunk}{'Status'}
+                        or $stref->{'Functions'}{$chunk}{'Status'}<$PARSED) {
+                        	$stref->{'Indents'} += 4;                        	                        	
+                            $stref=parse_fortran_src($chunk,$stref);
+                            $stref->{'Indents'} -= 4;
+                        } else {
+                            $stref->{'Indents'} += 4;
+                            $stref=add_to_call_tree($chunk,$stref,'*');
+                            $stref->{'Indents'} -= 4;
+                        }
+                    } 
+                }
+            }
+        }
+#        $stref->{$sub_or_func}{$f}{'CalledSubs'}=\%called_subs;        
+    }
+    return $stref;
+}    # END of parse_subroutine_and_function_calls()
+# -----------------------------------------------------------------------------
+# This is a stripped-down version of parse_subroutine_calls_new() because we don't need
+# to propagate globals or arguments from functions. 
 sub parse_function_calls {
     ( my $f, my $stref ) = @_;
     print "PARSING FUNCTION CALLS in $f\n" if $V;
-    my $pnid=$stref->{'NId'};
-    
+    my $pnid=$stref->{'NId'};    
     my $src = $stref->{'Functions'}{$f}{'Source'};
-    if ( $translate == 2 )
+    if ( $translate == $GO )
     {
-            if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
-                print "ADDING $src to C BuildSources\n" if $V;
-                $stref->{'BuildSources'}{'C'}{$src} = 1;
-                $stref->{'Functions'}{$f}{'Status'} = $C_SOURCE;
-            }
+        if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
+            print "ADDING $src to C BuildSources\n" if $V;
+            $stref->{'BuildSources'}{'C'}{$src} = 1;
+            $stref->{'Functions'}{$f}{'Status'} = $C_SOURCE;
+        }
     }
     my $srcref = $stref->{'Functions'}{$f}{'Lines'};
     if ( defined $srcref ) {
-
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
             my $line = $srcref->[$index];
             next if $line =~ /^C\s+/;
@@ -2033,10 +2243,10 @@ sub parse_function_calls {
                     ) {
                     	print "FOUND FUNCTION CALL $chunk in FUNCTION $f\n" if $V;
                         $stref->{'Functions'}{$chunk}{'Called'}=1;                        
-                        	$stref=parse_fortran_src_new($chunk,$stref);                        
+                        	$stref=parse_fortran_src($chunk,$stref);                        
                     } elsif (exists $stref->{'Subroutines'}{$chunk} and $stref->{'Subroutines'}{$chunk}{'Status'}<$PARSED) {
                         print  "FOUND SUBROUTINE CALL $chunk in FUNCTION $f\n" if $V;
-                        $stref=parse_fortran_src_new($chunk,$stref);                                                
+                        $stref=parse_fortran_src($chunk,$stref);                                                
                     	
                     }
                 }
@@ -2051,15 +2261,15 @@ sub parse_subroutine_calls {
 	( my $f, my $stref ) = @_;
 	print "PARSING SUBROUTINE CALLS in $f\n" if $V;
 	my $src = $stref->{'Subroutines'}{$f}{'Source'};
-	if ( $translate == 2 || ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
+	if ( $translate == $GO || ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
 	{
-		if ( $translate != 2 ) {
+		if ( $translate != $GO ) {
 			my $nspaces =
 			  64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
 			  my $incls = join(',', keys %{ $stref->{'Subroutines'}{$f}{'Includes'}});
 			print ' ' x $stref->{'Indents'}, $f, ' ' x $nspaces, $src, "\t",$incls,"\n";
 		} # else {
-			if ($translate==2) {
+			if ($translate==$GO) {
 			if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
 				print "ADDING $src to C BuildSources\n" if $V;
 				$stref->{'BuildSources'}{'C'}{$src} = 1;
@@ -2131,7 +2341,7 @@ sub parse_subroutine_calls {
 							print "Propagating DOWN $inc from $f to $name\n"
 							  if $V;
 							$stref->{'Subroutines'}{$name}{'Includes'}{$inc} =
-							  -3;
+							  -3; 
 						} else {
 							print
 "NO NEED TO propagate DOWN $inc from $f to $name\n"
@@ -2143,7 +2353,7 @@ sub parse_subroutine_calls {
 					if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
 						$stref->{'Indents'} += 4;
 					}
-					$stref = parse_fortran_src( $name, $stref );
+					$stref = parse_fortran_src_OLD( $name, $stref );
 					if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
 						$stref->{'Indents'} -= 4;
 					}
@@ -2240,7 +2450,7 @@ sub resolve_globals {
 		for my $csub (keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'}}) {
 			$stref=resolve_globals($csub,$stref);
 			# Globals for $csub have been determined
-			$stref=identify_globals_used_in_subroutine_new($f,$stref);
+			$stref=identify_globals_used_in_subroutine($f,$stref);
 			# Merge them with globals for $f
 			for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'} }) {
 				$stref->{'Subroutines'}{$f}{'Globals'}{$inc}=ordered_union(
@@ -2252,13 +2462,13 @@ sub resolve_globals {
 	} else {
 		# Leaf node, find globals	
 		print "SUB $f is LEAF\n";
-		$stref=identify_globals_used_in_subroutine_new($f,$stref);
+		$stref=identify_globals_used_in_subroutine($f,$stref);
 	}
 	return $stref;
 }
 
 
-sub identify_globals_used_in_subroutine_new {
+sub identify_globals_used_in_subroutine {
 	( my $f, my $stref ) = @_;
 	warn "GLOBALS in $f\n";
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
@@ -2343,14 +2553,14 @@ sub identify_globals_used_in_subroutine_new {
 	}
 #	die Dumper($stref->{'Subroutines'}{$f}{'Globals'}) if $f=~/interpol_all/;
 	return $stref;
-}
+} # END of identify_globals_used_in_subroutine()
 
 # -----------------------------------------------------------------------------
 
 # Identify which globals from the includes are used in the subroutine
 # FIXME: we can't really do this here because we need to identify the roots
 # for the includes first
-sub identify_globals_used_in_subroutine {
+sub identify_globals_used_in_subroutine_OLD {
 	( my $f, my $stref ) = @_;
 	warn "GLOBALS in $f\n";
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
@@ -2457,7 +2667,7 @@ sub identify_globals_used_in_subroutine {
 		}
 	}
 	return $stref;
-}    # END of identify_globals_used_in_subroutine()
+}    # END of identify_globals_used_in_subroutine_OLD()
 
 # -----------------------------------------------------------------------------
 # To determine if a subroutine argument is I, O or IO:
@@ -2578,14 +2788,16 @@ sub find_vars {
 sub detect_blocks {
 	( my $s, my $stref ) = @_;	
 	print "CHECKING BLOCKS in $s\n" if $V;
-	$stref->{'Subroutines'}{$s}{'HasBlocks'} = 0;
-	my $srcref = $stref->{'Subroutines'}{$s}{'Lines'};
+	my $sub_func_incl= sub_func_or_incl($s,$stref);
+	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
+	my $srcref = $stref->{$sub_func_incl}{$s}{'Lines'};
 	for my $line ( @{$srcref} ) {
 		if ( $line =~ /^C\s/i ) {
 			if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
-				$stref->{'Subroutines'}{$s}{'HasBlocks'} = 1;
-				warn "SUB $s HAS BLOCK: $1\n" if $V;
-				print "SUB $s HAS BLOCK: $1\n" if $V;
+				$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 1;
+				my $tgt=uc(substr($sub_func_incl,0,3));
+				warn "$tgt $s HAS BLOCK: $1\n" if $V;
+				print "$tgt $s HAS BLOCK: $1\n" if $V;
 				last;
 			}
 		}
@@ -2678,10 +2890,15 @@ sub create_subroutine_source_from_block {
 }    # END of create_subroutine_source_from_block()
 
 # -----------------------------------------------------------------------------
+# For every 'include' statement in a subroutine (and I assume functions don't have includes, don't be evil!)
+# the filename is entered in 'Includes' and in Info->[$index]{'Include'}
+# If the include was not yet read, do it now.
 sub parse_includes {
 	( my $f, my $stref ) = @_;
 	print "PARSING INCLUDES for $f\n" if $V;
-	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+	my $sub_or_func = sub_func_or_incl($f,$stref);
+	 
+	my $srcref = $stref->{$sub_or_func}{$f}{'Lines'};
 	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 		my $line = $srcref->[$index];
 		if ( $line =~ /^C\s+/ or $line =~ /^\!\s/ ) {
@@ -2693,16 +2910,15 @@ sub parse_includes {
 
 			my $name = $1;
 			print "FOUND include $name in $f\n" if $V;
-			$stref->{'Subroutines'}{$f}{'Includes'}{$name} = $index;
-			$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'Include'}{'Name'} =
+			$stref->{$sub_or_func}{$f}{'Includes'}{$name} = $index;
+			$stref->{$sub_or_func}{$f}{'Info'}->[$index]{'Include'}{'Name'} =
 			  $name;
 			if ( $stref->{'Includes'}{$name}{'Status'} == $UNREAD ) {
 				print $line, "\n" if $V;
-
-				# Initial guess for Root				
+				# Initial guess for Root. OK? FIXME?				
 				$stref->{'Includes'}{$name}{'Root'}      = $f;
 				$stref->{'Includes'}{$name}{'HasBlocks'} = 0;
-				$stref = parse_fortran_src_new( $name, $stref );
+				$stref = parse_fortran_src( $name, $stref );
 			} else {
 				print $line, " already processed\n" if $V;
 			}
@@ -2713,6 +2929,9 @@ sub parse_includes {
 }    # END of parse_includes()
 
 # -----------------------------------------------------------------------------
+# Create a table of all variables declared in the target, and a list of all the var names occuring on each line. 
+# We record the type of the var and whether it's a scalar or array, because we need that information for translation to C.
+# Also check if the variable happens to be a function. If that is the case, mark that function as 'Called'; if we have not yet parsed its source, do it now.
 
 sub get_var_decls {
 	( my $f, my $stref ) = @_;
@@ -2956,7 +3175,7 @@ sub separate_blocks {
 		my %tvars = %vars;                  # Hurray for pass-by-value!
 		print "\nVARS in $block:\n\n" if $V;
 
-		# FIXME: rework as in identify_globals_used_in_subroutine()
+		# FIXME: rework as in identify_globals_used_in_subroutine_OLD()
 		for my $line (@lines) {
 			my $tline = $line;
 			$tline =~ s/\'.+?\'//;
@@ -3141,7 +3360,7 @@ if (defined $srcref) {
 							if ($is_cont) {
                                 $target = 'NoopTarget';
 						  }
-#							print "WARNING: goto $label ($tindex) is not in loop ($f)\n" if $translate==2; 
+#							print "WARNING: goto $label ($tindex) is not in loop ($f)\n" if $translate==$GO; 
 						}					
 				    } else {
 					   print STDERR
@@ -3177,7 +3396,7 @@ print "NO SOURCE for $f\n";
 # - it lowercases everything
 # - it detects and normalises comments
 # - it detects block markers (for factoring blocks out into subs)
-# The routine is called by parse_fortran_src()
+# The routine is called by parse_fortran_src_OLD()
 # A better way is to extract all subs in a single pass
 # I guess the best wat is to first join the lines, then separate the subs
 sub read_fortran_src {
@@ -3186,9 +3405,8 @@ sub read_fortran_src {
 	my $is_incl = exists $stref->{'Includes'}{$s} ? 1 : 0;
 	# FIXME: handle Functions too!
 	# Unfortunately, a source can contain both subroutines and functions ...
-	my $sub_or_func = exists $stref->{'Subroutines'}{$s} ? 'Subroutines' : 'Functions';
-	my $sub_func_incl = $is_incl ? 'Includes' : $sub_or_func;
-	my $f = $is_incl ? $s : $stref->{$sub_or_func}{$s}{'Source'};
+	my $sub_func_incl = sub_func_or_incl($s,$stref);	
+	my $f = $is_incl ? $s : $stref->{$sub_func_incl}{$s}{'Source'};
 
 	if ( $stref->{$sub_func_incl}{$s}{'Status'} == $UNREAD ) {
 		my $ok = 1;
@@ -3384,7 +3602,7 @@ sub read_fortran_src {
 
 			}
 		}    # if OK
-	}    # if Status==0
+	}  # if Status==0
 
 #die $sub_func_incl.Dumper($stref->{'Functions'}{'ew'}) if $f=~/ew/;
 	return $stref;
@@ -3467,6 +3685,18 @@ sub find_subroutines_functions_and_includes {
 }    # END of find_subroutines_functions_and_includes()
 
 # -----------------------------------------------------------------------------
+sub sub_func_or_incl {
+	( my $f, my $stref ) = @_;
+if	(exists $stref->{'Subroutines'}{$f} ) {
+	return 'Subroutines' 
+} elsif (exists $stref->{'Functions'}{$f}) {
+	return 'Functions';
+} elsif (exists $stref->{'Includes'}{$f}) {
+	return 'Includes'
+	} else {
+		die "No entry for $f in the state\n"; 
+	}
+}
 # -----------------------------------------------------------------------------
 sub show_info {
 	( my $stref ) = @_;
@@ -3519,11 +3749,9 @@ sub insert_lines {
 
 # -----------------------------------------------------------------------------
 
-=info2
-We also need a convenience function to split long lines.
-- count the number of characters, i.e. length()
-- find the last comma before we exceed 64 characters (I guess it's really 72-5?):
-=cut
+# A convenience function to split long lines.
+# - count the number of characters, i.e. length()
+# - find the last comma before we exceed 64 characters (I guess it's really 72-5?):
 
 sub split_long_line {
 	my $line   = shift;
@@ -3650,7 +3878,42 @@ sub ordered_union {
 }    # END of ordered_union()
 
 # -----------------------------------------------------------------------------
- 
+sub add_to_call_tree {
+	(my $f,my $stref,my $stubbed)=@_;
+	$stubbed||=' ';
+	my $sub_or_func = sub_func_or_incl($f,$stref);
+	my $src = $stref->{$sub_or_func}{$f}{'Source'};
+    my $nspaces = 64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
+    my $incls = join(',', keys %{ $stref->{$sub_or_func}{$f}{'Includes'}});
+    my $padding=' ' x (32 - length($src)); 
+    my $src_padded = $src.$padding;
+    my $tgt=uc(substr($sub_or_func,0,3));
+    my @strs = (' ' x $stref->{'Indents'}, $f,$stubbed, ' ' x $nspaces, $tgt,' ',$src_padded, "\t",$incls,"\n");
+    my $str=join('',@strs);
+	push @{ $stref->{'CallTree'} }, $str;
+	return $stref;
+} # END of add_to_call_tree()
+# -----------------------------------------------------------------------------
+sub add_to_C_build_sources {
+   (my $f,my $stref)=@_;
+    my $sub_or_func = sub_func_or_incl($f,$stref);	
+    my $src = $stref->{$sub_or_func}{$f}{'Source'};
+    if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
+        print "ADDING $src to C BuildSources\n" if $V;
+        $stref->{'BuildSources'}{'C'}{$src} = 1;
+        $stref->{$sub_or_func}{$f}{'Status'} = $C_SOURCE;
+    }
+    # Assuming no includes in Functions, this is not needed for Functions
+    # However, this might be too restrictive: surely includes with constants must be supported! FIXME!
+    for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } ) {
+        if ( not exists $stref->{'BuildSources'}{'H'}{$inc} ) {
+            print "ADDING $inc to C Header BuildSources\n" if $V;
+            $stref->{'BuildSources'}{'H'}{$inc} = 1;
+        }
+    }	
+	return $stref;
+}
+# -----------------------------------------------------------------------------
 sub create_call_graph {
     (my $stref)=@_;
     
