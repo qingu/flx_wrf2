@@ -10,6 +10,10 @@ use Carp;
 
 == TODOs
 
+* A serious problem: there can be conflicts between parameters and /common/ globals. For example, someone 
+created pi as a /common/ global, someone else sensibly made it a parameter.
+The error shows up when including the files, so I guess we need to analyse the includes for conflicts. 
+
 * Common variables
 
 Common variables used inside a subroutine should only be elevatated to function arguments if they are used in read mode
@@ -300,6 +304,8 @@ sub main {
     # Now we do the reformatting, block detection etc.
 	$stateref= analyse_sources($stateref); 
 	
+	# So at this point all we need to do is the actual refactoring ...
+	die Dumper($stateref->{'Subroutines'}{'flexpart_wrf'});
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
@@ -2466,7 +2472,7 @@ sub parse_subroutine_and_function_calls {
 
 sub resolve_globals {
 	(my $f, my $stref)=@_;
-	print "RESOLVE: $f\n" if $f=~/timemanager|advance|interpol_all/;
+#	print "RESOLVE: $f\n" if $f=~/timemanager|advance|interpol_all/;
 	if (exists $stref->{'Subroutines'}{$f}{'CalledSubs'} and scalar keys %{$stref->{'Subroutines'}{$f}{'CalledSubs'} }) {		
 		# Not a leaf node, descend 
 		my %globs=();
@@ -2475,29 +2481,48 @@ sub resolve_globals {
             $stref=identify_globals_used_in_subroutine($f,$stref);
                     my @csubs=keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'}};
 		for my $csub (@csubs) {
-			print "$f CALLS $csub\n" if $f =~/advance/ and $csub=~/interpol_all/;
+#			print "$f CALLS $csub\n" if $f =~/advance/ and $csub=~/interpol_all/;
 			$stref=resolve_globals($csub,$stref);
 #			print Dumper($stref->{'Subroutines'}{$csub}{'Globals'}) if $csub=~/interpol_all/;
 
 			# Merge them with globals for $f
-			print "BEFORE:".Dumper($stref->{'Subroutines'}{$f}{'Globals'}{'includecom'}) if $f=~/advance/;
-			print "MERGE $csub INTO $f: " if $f=~/advance/;
+#			print "BEFORE:".Dumper($stref->{'Subroutines'}{$f}{'Globals'}{'includecom'}) if $f=~/advance/;
+#			print "MERGE $csub INTO $f: " if $f=~/advance/;
 			for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'} }) {
 				$stref->{'Subroutines'}{$f}{'Globals'}{$inc}=ordered_union(
 					$stref->{'Subroutines'}{$f}{'Globals'}{$inc},
 					$stref->{'Subroutines'}{$csub}{'Globals'}{$inc}
 					);
 			}
-			print Dumper($stref->{'Subroutines'}{$f}{'Globals'}{'includecom'}) if $f=~/advance/;
+#			print Dumper($stref->{'Subroutines'}{$f}{'Globals'}{'includecom'}) if $f=~/advance/;
 		}
-		  print "AFTER LOOP:".Dumper($stref->{'Subroutines'}{$f}{'Globals'}{'includecom'}) if $f=~/advance/;
+#		  print "AFTER LOOP:".Dumper($stref->{'Subroutines'}{$f}{'Globals'}{'includecom'}) if $f=~/advance/;
 	}
 	 else {
 		# Leaf node, find globals	
 		print "SUB $f is LEAF\n" if $V;
 		$stref=identify_globals_used_in_subroutine($f,$stref);
 	}
-#    die Dumper($stref->{'Subroutines'}{$f}{'Globals'}{'includecom'}) if $f=~/advance/;
+	if ($f=~/flexpart_wrf/) {
+		
+#	print Dumper(keys %{ $stref->{'Subroutines'}{$f}{'Globals'} });
+	for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {
+		if ($stref->{'Includes'}{$inc}{'Type'} eq 'Parameter') {
+			print $inc,"\n";
+    # So now I have to see if there are any conflicts between parameters and ex-globals
+            
+            	for my $commoninc (keys %{ $stref->{'Subroutines'}{$f}{'Globals'} }) {
+            		for my $glob (@{ $stref->{'Subroutines'}{$f}{'Globals'}{$commoninc} }) {
+            	       if (exists $stref->{'Includes'}{$inc}{'Vars'}{$glob}  ) {
+            		      print "CONFLICT: $glob from $inc conflicts with $commoninc\n";
+            	       }
+            		}
+            	}            
+		}
+	}
+	die 
+#    die Dumper($stref->{'Subroutines'}{$f}{'Globals'}) if $f=~/flexpart_wrf/;
+    }
 	return $stref;
 } # END of resolve_globals()
 
@@ -2569,9 +2594,22 @@ sub identify_globals_used_in_subroutine {
 					if ( exists $tvars{$mvar}
 						and not $stref->{'Subroutines'}{$f}{'Vars'}{$mvar} )
 					{
+						my $is_par=0;
+						
+						for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {
+							if ($stref->{'Includes'}{$inc}{'Type'} eq 'Parameter') {
+								if (exists $stref->{'Includes'}{$inc}{'Vars'}{$mvar}) {
+									warn "WARNING: $mvar in $f is a PARAMETER from $inc!";
+									$is_par=1;
+									last;
+								}
+							}
+						}
+						if (not $is_par) {
 						print "FOUND global $mvar in $line\n" if $V;
 						push @globs, $mvar;
 						delete $tvars{$mvar};
+						}
 					} 
 				}
 			}    # for each line
