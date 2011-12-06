@@ -836,10 +836,6 @@ sub refactor_globals {
 				if ( exists $globals{$var} and not exists $args{$var} ) {
 					print STDERR
 "WARNING: local $var in $f ($stref->{'Subroutines'}{$f}{'Source'}) conflicts with global of same name, will be renamed to $var\_LOCAL\n";
-
-# We should actually rename these conflicting vars, rather than removing them.
-# The complication is that the global of the same name might have to be passed to a subroutine call
-# So in each call we must check first for the local, then for the global
 					my $nvar = $var . '_LOCAL';
 					$conflicting_locals{$var} = $nvar;                    
 					$rline =~ s/\b$var\b/$nvar/;
