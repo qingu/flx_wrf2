@@ -465,7 +465,7 @@ sub parse_fortran_src {
            $stref = parse_includes( $f, $stref );         
 
         if ($stref->{$sub_or_func}{$f}{'HasBlocks'}==1) {
-        	$stref=separate_blocks_NEW( $f, $stref );        	
+        	$stref=separate_blocks( $f, $stref );        	
         }
 #	       $stref = detect_blocks( $f, $stref );	       
 	       # Recursive descent via subroutine calls
@@ -498,12 +498,12 @@ sub analyse_sources {
 					$stref->{'Subroutines'}{$f}{'Program'} ==1)
 				) {
             $stref = determine_argument_io_direction($f,$stref);        
-            if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) {
-                $stref = separate_blocks( $f, $stref );
-            }
+#            if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) {
+#                $stref = separate_blocks_OLD( $f, $stref );
+#            }
 		    $stref = identify_loops_breaks( $f, $stref );
 		} else {
-		print "SKIPPING ANALYSIS for $f:".."\n";
+		  print "SKIPPING ANALYSIS for $f:".."\n";
 		}
 	}
 	for my $f (keys %{ $stref->{'Functions'} }) {
@@ -967,8 +967,8 @@ sub refactor_globals {
 }    # END of refactor_globals()
 
 # -----------------------------------------------------------------------------
-sub refactor_blocks {
-	( my $stref, my $f, my $annlines ) = @_;
+sub refactor_blocks_OLD {
+	( my $stref, my $f, my $annlines ) = @_;die;
 	my $rlines = [];
 	print "REFACTORING BLOCKS in $f\n" if $V;
 	my @blocks = ();
@@ -1062,7 +1062,7 @@ sub refactor_blocks {
 	}
 
 	return ( $stref, $rlines );
-}    # END of refactor_blocks()
+}    # END of refactor_blocks_OLD()
 
 # -----------------------------------------------------------------------------
 
@@ -1075,12 +1075,12 @@ sub refactor_blocks {
 #* BreakTarget: Do nothing
 sub create_refactored_source {
 	( my $stref, my $f, my $annlines ) = @_;
-	print "CREATING FINAL $f CODE\n" if $V;
+	print "CREATING FINAL $f CODE\n" if $V; 
 	my $rlines      = [];
 	my @extra_lines = ();
     my $sub_or_func = (exists $stref->{'Subroutines'}{$f})?'Subroutines':'Functions';
 	$stref->{$sub_or_func}{$f}{'RefactoredCode'} =[];
-#	die Dumper(@{$annlines} ) if $f eq 'timemanager';
+#	die Dumper(@{$annlines} ) if $f eq 'particles_main_loop';
 	for my $annline ( @{$annlines} ) {
 		my $line = $annline->[0] || '';    # FIXME: why would line be undefined?
 		my $tags_lref = $annline->[1] || {};
@@ -2965,7 +2965,7 @@ sub detect_blocks {
 }    # END of detect_blocks()
 
 # -----------------------------------------------------------------------------
-sub create_subroutine_source_from_block {
+sub create_subroutine_source_from_block_OLD {
 	( my $f, my $p, my $stref ) = @_;
 	print "CREATING SOURCE for $f\n" if $V;
 
@@ -3046,7 +3046,7 @@ sub create_subroutine_source_from_block {
 	#        };
 
 	return $stref;
-}    # END of create_subroutine_source_from_block()
+}    # END of create_subroutine_source_from_block_OLD()
 
 # -----------------------------------------------------------------------------
 # For every 'include' statement in a subroutine (and I assume functions don't have includes, don't be evil!)
@@ -3278,11 +3278,13 @@ sub get_commons_params_from_includes {
 }    # END of get_commons_params_from_includes()
 
 # -----------------------------------------------------------------------------
-sub separate_blocks_NEW {
+sub separate_blocks {
     ( my $f, my $stref ) = @_;
+    local $V=1;
+#    die "separate_blocks(): FIXME: we need to add in the locals from the parent subroutine as locals in the new subroutine!";
     my $sub_or_func =sub_func_or_incl($f,$stref);
     my $srcref   = $stref->{$sub_or_func}{$f}{'Lines'};
-    my %vars     = %{ $stref->{$sub_or_func}{$f}{'Vars'} };
+    my %vars     = %{ $stref->{$sub_or_func}{$f}{'Vars'} }; 
     my %occs     = ();
     my %blocks   = ();
     my $in_block = 0;
@@ -3299,6 +3301,8 @@ sub separate_blocks_NEW {
             push @{ $blocks{'OUTER'}{'Lines'} }, $line;
             $stref->{$sub_or_func}{$f}{'Info'}
               ->[$index]{'RefactoredSubroutineCall'}{'Name'} = $block;
+              delete $stref->{$sub_or_func}{$f}{'Info'}
+              ->[$index]{'Comments'};
             $stref->{$sub_or_func}{$f}{'Info'}
               ->[$index]{'BeginBlock'}{'Name'} = $block;
             push @{ $blocks{'OUTER'}{'Lines'} }, $line; 
@@ -3323,10 +3327,11 @@ sub separate_blocks_NEW {
             $stref->{$sub_or_func}{$f}{'Info'}->[$index]{'InBlock'}{'Name'} =
               $block;
         } else {
+#        	print "OUTER:",$line,"\n";
             push @{ $blocks{'OUTER'}{'Lines'} }, $line;
         }
     }
-
+# WV06/12/2011: OK up to here
     for my $block ( keys %blocks ) {
         next if $block eq 'OUTER';
         # Here we create an entry for the new subroutine
@@ -3338,11 +3343,12 @@ sub separate_blocks_NEW {
         $stref->{$sub_or_func}{$block}{'Source'} =
           $stref->{$sub_or_func}{$f}{'Source'};
     }
-
+die ;
 # 6. Identify which vars are used
 #   - in both => these become function arguments
 #   - only in "outer" => do nothing for those
 #   - only in "inner" => can be removed from outer variable declarations
+
 # Find all vars used in each block, starting with the outer block
 # It is best to loop over all vars per line per block, because we can remove the encountered vars
     for my $block ( keys %blocks ) {
@@ -3350,6 +3356,7 @@ sub separate_blocks_NEW {
         my %tvars = %vars;                  # Hurray for pass-by-value!
         print "\nVARS in $block:\n\n" if $V;
         for my $line (@lines) {
+        	print $block,':',$line,"\n";
             my $tline = $line;
             $tline =~ s/\'.+?\'//;
             for my $var ( keys %tvars ) {
@@ -3360,7 +3367,8 @@ sub separate_blocks_NEW {
                 }
             }
         }
-    }
+    } 
+    die;
     # Construct the subroutine signatures
     my %args = ();
     for my $block ( keys %blocks ) {
@@ -3373,10 +3381,11 @@ sub separate_blocks_NEW {
                 push @{ $args{$block} }, $var;
             }
         }
+        die;
         $stref->{'Subroutines'}{$block}{'Args'} = $args{$block};
         my $sig   = "      subroutine $block(";
         my $decls = [];
-        for my $argv ( @{ $args{$block} } ) {
+        for my $argv ( @{ $args{$block} } ) {        	
             $sig .= "$argv,";
             my $decl = $vars{$argv}{'Decl'};    #|| $commons{$argv}{'Decl'};
             push @{$decls}, $decl;
@@ -3385,7 +3394,14 @@ sub separate_blocks_NEW {
 #        $stref->{$sub_or_func}{$f}{'Blocks'}{$block}{'Args'}  = $args{$block};
         $stref->{$sub_or_func}{$block}{'Sig'}   = $sig;        
         $stref->{$sub_or_func}{$block}{'Decls'} = $decls;
-        shift @{$stref->{$sub_or_func}{$block}{'Lines'}};
+        my $marker=shift @{$stref->{$sub_or_func}{$block}{'Lines'}};
+        my $siginfo=shift @{$stref->{$sub_or_func}{$block}{'Info'}};
+        for my $argv ( @{ $args{$block} } ) {
+        	 my $decl = $vars{$argv}{'Decl'};
+            unshift @{$stref->{$sub_or_func}{$block}{'Lines'}},$decl;
+            unshift @{ $stref->{'Subroutines'}{$block}{'Info'} }, {'VarDecl' => [$argv] };
+        }
+        unshift @{ $stref->{'Subroutines'}{$block}{'Info'} }, $siginfo;
         my $fl=shift @{$stref->{$sub_or_func}{$block}{'Info'}};
         for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } ) {
 #            $stref->{$sub_or_func}{$f}{'Blocks'}{$block}{'Includes'}{$inc} = -2;
@@ -3395,7 +3411,8 @@ sub separate_blocks_NEW {
              unshift @{ $stref->{'Subroutines'}{$block}{'Info'} }, {'Include' => {'Name'=>$inc}};
               $stref->{'Subroutines'}{$block}{'Includes'}{$inc} = 1;
         }
-        unshift @{$stref->{$sub_or_func}{$block}{'Lines'}},$sig;
+        unshift @{$stref->{$sub_or_func}{$block}{'Lines'}},$sig; 
+        
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
         	if ($index==$blocks{$block}{'BeginBlockIdx'}) {
         		$sig=~s/subroutine/call/;
@@ -3411,177 +3428,178 @@ sub separate_blocks_NEW {
         if ($V) {
             print $sig, "\n";
             print join( "\n", @{$decls} ), "\n";
-        }
+        }        
         $stref->{'Subroutines'}{$block}{'Status'}=$READ;
+#        die Dumper($stref->{'Subroutines'}{$block});
     }
 #die Dumper($stref->{'Subroutines'}{$f});
     return $stref;
-}    # END of separate_blocks_NEW()
+}    # END of separate_blocks()
 
 # -----------------------------------------------------------------------------
-sub separate_blocks {
-	( my $f, my $stref ) = @_;
-	my $srcref   = $stref->{'Subroutines'}{$f}{'Lines'};
-	my %vars     = %{ $stref->{'Subroutines'}{$f}{'Vars'} };
-	my %occs     = ();
-	my %blocks   = ();
-	my $in_block = 0;
-	my $block    = 'OUTER';
-	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-		my $line = $srcref->[$index];
-
-		if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
-			$in_block = 1;
-			$block    = $1;
-			print "FOUND BLOCK $block\n" if $V;
-			push @{ $blocks{'OUTER'} }, $line;
-			$stref->{'Subroutines'}{$f}{'Info'}
-			  ->[$index]{'RefactoredSubroutineCall'}{'Name'} = $block;
-			$stref->{'Subroutines'}{$f}{'Info'}
-			  ->[$index]{'BeginBlock'}{'Name'} = $block;
-			next;
-		}
-		if ( $line =~ /^C\s+END\sSUBROUTINE\s(\w+)/ ) {
-			$in_block = 0;
-			$block    = $1;
-			push @{ $blocks{$block} }, $line;
-			$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'EndBlock'}{'Name'} =
-			  $block;
-			next;
-		}
-		if ($in_block) {
-			push @{ $blocks{$block} }, $line;
-			$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'InBlock'}{'Name'} =
-			  $block;
-		} else {
-			push @{ $blocks{'OUTER'} }, $line;
-		}
-	}
-
-	for my $block ( keys %blocks ) {
-		next if $block eq 'OUTER';
-		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Lines'} =
-		  $blocks{$block};
-		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Source'} =
-		  $stref->{'Subroutines'}{$f}{'Source'};
-	}
-
-  # So now we have split the file in blocks, we have identified the common vars.
-
-# 6. Identify which vars are used
-#   - in both => these become function arguments
-#   - only in "outer" => do nothing for those
-#   - only in "inner" => can be removed from outer variable declarations
-# Find all vars used in each block, starting with the outer block
-# It is best to loop over all vars per line per block, because we can remove the encountered vars
-	for my $block ( keys %blocks ) {
-		my @lines = @{ $blocks{$block} };
-		my %tvars = %vars;                  # Hurray for pass-by-value!
-		print "\nVARS in $block:\n\n" if $V;
-
-		# FIXME: rework as in identify_globals_used_in_subroutine_OLD()
-		for my $line (@lines) {
-			my $tline = $line;
-			$tline =~ s/\'.+?\'//;
-			for my $var ( keys %tvars ) {
-				if ( $tline =~ /\W$var\W/ or $tline =~ /\W$var\s*$/ ) {
-					print "FOUND $var\n" if $V;
-					$occs{$block}{$var} = $var;
-					delete $tvars{$var};
-				}
-			}
-		}
-
-		#		$stref->{'Subroutines'}{$block}{'Occs'} = $occs{$block};
-	}
-
- #	my %args = ();
- #	for my $block ( keys %occs ) {
- #		next if $block eq 'OUTER';
- #		print "\nARGS for $block:\n" if $V;
- #		for my $var ( keys %{ $occs{$block} } ) {
- #			if ( exists $occs{'OUTER'}{$var} ) {
- #				print "$var\n" if $V;
- #				push @{ $args{$block} }, $var;
- #			}
- #		}
- #	}
- # WV: we do this later
- #	# 7. Identify which commons are used in inner, make them function arguments
- #	# This is the same as in remove_globals
- #       my %commons=();
- #        for my $i ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
- #            if ( $stref->{'Includes'}{$i}{'Type'} eq 'Common' ) {
- #                %commons=(%commons, %{ $stref->{'Includes'}{$i}{'Commons'} });
- #            }
- #        }
- #	   $stref->{'Subroutines'}{$f}{'Commons'}=\%commons;
- #	# This is almost the same as above
- #	for my $block ( keys %blocks ) {
- #		next if $block eq 'OUTER';
- #		my @lines = @{ $blocks{$block} };
- #        my @tvars=keys %commons;
- #		for my $line (@lines) {
- #			for my $var ( @tvars ) {
- #				next if not defined $var;
- #				if ( $line =~ /\W$var\W/ ) {
- #					push @{ $args{$block} }, $var;
- #					undef $var;
- #				}
- #			}
- #		}
- #		if ($V) {
- #			print "\nCOMMON VARS in block $block:\n\n";
- #			for my $var ( @{ $args{$block} } ) {
- #				print "$var\n";
- #			}
- #		}
- #		$stref->{'Subroutines'}{$block}{'Args'} = $args{$block};
- #	}
-
-	# Construct the subroutine signatures
-	my %args = ();
-	for my $block ( keys %blocks ) {
-		next if $block eq 'OUTER';
-
-		print "\nARGS for BLOCK $block:\n" if $V;
-		for my $var ( keys %{ $occs{$block} } ) {
-			if ( exists $occs{'OUTER'}{$var} ) {
-				print "$var\n" if $V;
-				push @{ $args{$block} }, $var;
-			}
-		}
-		$stref->{'Subroutines'}{$block}{'Args'} = $args{$block};
-		my $sig   = "      subroutine $block(";
-		my $decls = [];
-		for my $argv ( @{ $args{$block} } ) {
-			$sig .= "$argv,";
-			my $decl = $vars{$argv}{'Decl'};    #|| $commons{$argv}{'Decl'};
-			push @{$decls}, $decl;
-		}
-		$sig =~ s/\,$/)\n/s;
-		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Args'}  = $args{$block};
-		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Sig'}   = $sig;
-		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Decls'} = $decls;
-
-#        $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Lines'} = $blocks{$block};
-#        $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Source'} = $stref->{'Subroutines'}{$f}{'Source'};
-		for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
-
-			#        	if($stref->{'Subroutines'}{$f}{'Includes'}{$inc}!=-1) {
-			$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Includes'}{$inc} =
-			  -2;
-
-			#        	}
-		}
-		if ($V) {
-			print $sig, "\n";
-			print join( "\n", @{$decls} ), "\n";
-		}
-	}
-
-	return $stref;
-}    # END of separate_blocks()
+#sub separate_blocks_OLD {
+#	( my $f, my $stref ) = @_;
+#	my $srcref   = $stref->{'Subroutines'}{$f}{'Lines'};
+#	my %vars     = %{ $stref->{'Subroutines'}{$f}{'Vars'} };
+#	my %occs     = ();
+#	my %blocks   = ();
+#	my $in_block = 0;
+#	my $block    = 'OUTER';
+#	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+#		my $line = $srcref->[$index];
+#
+#		if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
+#			$in_block = 1;
+#			$block    = $1;
+#			print "FOUND BLOCK $block\n" if $V;
+#			push @{ $blocks{'OUTER'} }, $line;
+#			$stref->{'Subroutines'}{$f}{'Info'}
+#			  ->[$index]{'RefactoredSubroutineCall'}{'Name'} = $block;
+#			$stref->{'Subroutines'}{$f}{'Info'}
+#			  ->[$index]{'BeginBlock'}{'Name'} = $block;
+#			next;
+#		}
+#		if ( $line =~ /^C\s+END\sSUBROUTINE\s(\w+)/ ) {
+#			$in_block = 0;
+#			$block    = $1;
+#			push @{ $blocks{$block} }, $line;
+#			$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'EndBlock'}{'Name'} =
+#			  $block;
+#			next;
+#		}
+#		if ($in_block) {
+#			push @{ $blocks{$block} }, $line;
+#			$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'InBlock'}{'Name'} =
+#			  $block;
+#		} else {
+#			push @{ $blocks{'OUTER'} }, $line;
+#		}
+#	}
+#
+#	for my $block ( keys %blocks ) {
+#		next if $block eq 'OUTER';
+#		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Lines'} =
+#		  $blocks{$block};
+#		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Source'} =
+#		  $stref->{'Subroutines'}{$f}{'Source'};
+#	}
+#
+#  # So now we have split the file in blocks, we have identified the common vars.
+#
+## 6. Identify which vars are used
+##   - in both => these become function arguments
+##   - only in "outer" => do nothing for those
+##   - only in "inner" => can be removed from outer variable declarations
+## Find all vars used in each block, starting with the outer block
+## It is best to loop over all vars per line per block, because we can remove the encountered vars
+#	for my $block ( keys %blocks ) {
+#		my @lines = @{ $blocks{$block} };
+#		my %tvars = %vars;                  # Hurray for pass-by-value!
+#		print "\nVARS in $block:\n\n" if $V;
+#
+#		# FIXME: rework as in identify_globals_used_in_subroutine_OLD()
+#		for my $line (@lines) {
+#			my $tline = $line;
+#			$tline =~ s/\'.+?\'//;
+#			for my $var ( keys %tvars ) {
+#				if ( $tline =~ /\W$var\W/ or $tline =~ /\W$var\s*$/ ) {
+#					print "FOUND $var\n" if $V;
+#					$occs{$block}{$var} = $var;
+#					delete $tvars{$var};
+#				}
+#			}
+#		}
+#
+#		#		$stref->{'Subroutines'}{$block}{'Occs'} = $occs{$block};
+#	}
+#
+# #	my %args = ();
+# #	for my $block ( keys %occs ) {
+# #		next if $block eq 'OUTER';
+# #		print "\nARGS for $block:\n" if $V;
+# #		for my $var ( keys %{ $occs{$block} } ) {
+# #			if ( exists $occs{'OUTER'}{$var} ) {
+# #				print "$var\n" if $V;
+# #				push @{ $args{$block} }, $var;
+# #			}
+# #		}
+# #	}
+# # WV: we do this later
+# #	# 7. Identify which commons are used in inner, make them function arguments
+# #	# This is the same as in remove_globals
+# #       my %commons=();
+# #        for my $i ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
+# #            if ( $stref->{'Includes'}{$i}{'Type'} eq 'Common' ) {
+# #                %commons=(%commons, %{ $stref->{'Includes'}{$i}{'Commons'} });
+# #            }
+# #        }
+# #	   $stref->{'Subroutines'}{$f}{'Commons'}=\%commons;
+# #	# This is almost the same as above
+# #	for my $block ( keys %blocks ) {
+# #		next if $block eq 'OUTER';
+# #		my @lines = @{ $blocks{$block} };
+# #        my @tvars=keys %commons;
+# #		for my $line (@lines) {
+# #			for my $var ( @tvars ) {
+# #				next if not defined $var;
+# #				if ( $line =~ /\W$var\W/ ) {
+# #					push @{ $args{$block} }, $var;
+# #					undef $var;
+# #				}
+# #			}
+# #		}
+# #		if ($V) {
+# #			print "\nCOMMON VARS in block $block:\n\n";
+# #			for my $var ( @{ $args{$block} } ) {
+# #				print "$var\n";
+# #			}
+# #		}
+# #		$stref->{'Subroutines'}{$block}{'Args'} = $args{$block};
+# #	}
+#
+#	# Construct the subroutine signatures
+#	my %args = ();
+#	for my $block ( keys %blocks ) {
+#		next if $block eq 'OUTER';
+#
+#		print "\nARGS for BLOCK $block:\n" if $V;
+#		for my $var ( keys %{ $occs{$block} } ) {
+#			if ( exists $occs{'OUTER'}{$var} ) {
+#				print "$var\n" if $V;
+#				push @{ $args{$block} }, $var;
+#			}
+#		}
+#		$stref->{'Subroutines'}{$block}{'Args'} = $args{$block};
+#		my $sig   = "      subroutine $block(";
+#		my $decls = [];
+#		for my $argv ( @{ $args{$block} } ) {
+#			$sig .= "$argv,";
+#			my $decl = $vars{$argv}{'Decl'};    #|| $commons{$argv}{'Decl'};
+#			push @{$decls}, $decl;
+#		}
+#		$sig =~ s/\,$/)\n/s;
+#		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Args'}  = $args{$block};
+#		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Sig'}   = $sig;
+#		$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Decls'} = $decls;
+#
+##        $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Lines'} = $blocks{$block};
+##        $stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Source'} = $stref->{'Subroutines'}{$f}{'Source'};
+#		for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
+#
+#			#        	if($stref->{'Subroutines'}{$f}{'Includes'}{$inc}!=-1) {
+#			$stref->{'Subroutines'}{$f}{'Blocks'}{$block}{'Includes'}{$inc} =
+#			  -2;
+#
+#			#        	}
+#		}
+#		if ($V) {
+#			print $sig, "\n";
+#			print join( "\n", @{$decls} ), "\n";
+#		}
+#	}
+#
+#	return $stref;
+#}    # END of separate_blocks_OLD()
 
 # -----------------------------------------------------------------------------
 # FIXME: "error: break statement not within loop or switch"
