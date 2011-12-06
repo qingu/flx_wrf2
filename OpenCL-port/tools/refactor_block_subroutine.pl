@@ -2645,6 +2645,24 @@ sub identify_globals_used_in_subroutine {
 					$stref->{'Subroutines'}{$f}{'Info'}
 					  ->[$index]{'Signature'}{'Name'} = $name;
 					$stref->{'Subroutines'}{$f}{'Args'} = \@args;
+				} elsif ( $first && $line =~ /^\s+subroutine\s+(\w+)[^\(]*$/ ) {
+					my $name   = $1;
+                    $stref->{'Subroutines'}{$f}{'Info'}
+                      ->[$index]{'Signature'}{'Args'} = [];
+                      my $has_var_decls=scalar %{ $stref->{'Subroutines'}{$f}{'Vars'} };
+                    if (not $has_var_decls) {
+                    	print "INFO: $f has no arguments and no local var decls\n";
+                    	if (exists $stref->{'Subroutines'}{$f}{'ImplicitNone'}) {
+                    		print "INFO: $f has 'implicit none'\n";
+                    		my $idx=$stref->{'Subroutines'}{$f}{'ImplicitNone'} +1;
+                    		$stref->{'Subroutines'}{$f}{'Info'}->[$idx]{'ExGlobVarDecls'}={};
+                    	} else {
+                    $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'ExGlobVarDecls'}={};
+                    	}
+                    }                      
+                    $stref->{'Subroutines'}{$f}{'Info'}
+                      ->[$index]{'Signature'}{'Name'} = $name;
+                    $stref->{'Subroutines'}{$f}{'Args'} = [];
 				}
 				# Determine the program arguments
 				# FIXME: Not sure why this is done here?
@@ -2655,7 +2673,6 @@ sub identify_globals_used_in_subroutine {
 					$stref->{'Subroutines'}{$f}{'Info'}
 					  ->[$index]{'Signature'}{'Name'} = $name;
 				}
-
 				my @chunks = split( /\W+/, $line );
 				for my $mvar (@chunks) {
 #				next if $mvar =~/\b(?:if|then|do|goto|integer|real|call|\d+)\b/; # is slower!
@@ -2702,114 +2719,114 @@ sub identify_globals_used_in_subroutine {
 # Identify which globals from the includes are used in the subroutine
 # FIXME: we can't really do this here because we need to identify the roots
 # for the includes first
-sub identify_globals_used_in_subroutine_OLD {
-	( my $f, my $stref ) = @_;
-#	warn "GLOBALS in $f\n";
-	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
-	if ( defined $srcref ) {
-		my %commons = ();
-		print "COMMONS ANALYSIS in $f\n" if $V;
-		if ( not exists $stref->{'Subroutines'}{$f}{'Commons'} ) {
-			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
-				if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common' ) {
-					print "COMMONS from $inc in $f? " if $V;
-					$commons{$inc} = $stref->{'Includes'}{$inc}{'Commons'};
-				}
-			}
-			$stref->{'Subroutines'}{$f}{'Commons'}    = \%commons;
-			$stref->{'Subroutines'}{$f}{'HasCommons'} = 1;
-		} else {
-			print "already done\n" if $V;
-			%commons = %{ $stref->{'Subroutines'}{$f}{'Commons'} };
-		}
-		die Dumper(keys %commons)."\n<".Dumper(keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'}  }).">\n" if $f=~/advance/;
-		my $first = 1;
-		for my $inc ( keys %commons ) {
-			print "\nGLOBAL VAR ANALYSIS for $inc in $f\n" if $V;
-			my @inherited_globs =
-			  ( defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc} )
-			  ? @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
-			  : ();
-			my $propagated_globs=[];
-#			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'} }) {
-				for my $csub ($stref->{'Subroutines'}{$f}{'CalledSubs'}) {				
-					if (exists $stref->{'Subroutines'}{$csub}{'CommonIncludes'}{$inc}) {
-						$propagated_globs=ordered_union($propagated_globs,$stref->{'Subroutines'}{$csub}{'Globals'}{$inc});
-					}
-				}				
+#sub identify_globals_used_in_subroutine_OLD {
+#	( my $f, my $stref ) = @_;
+##	warn "GLOBALS in $f\n";
+#	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+#	if ( defined $srcref ) {
+#		my %commons = ();
+#		print "COMMONS ANALYSIS in $f\n" if $V;
+#		if ( not exists $stref->{'Subroutines'}{$f}{'Commons'} ) {
+#			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} } ) {
+#				if ( $stref->{'Includes'}{$inc}{'Type'} eq 'Common' ) {
+#					print "COMMONS from $inc in $f? " if $V;
+#					$commons{$inc} = $stref->{'Includes'}{$inc}{'Commons'};
+#				}
 #			}
-			my @globs = ();
-			my %tvars = %{ $commons{$inc} };
-			for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-				my $line = $srcref->[$index];
-				if ( $line =~ /^C\s+/ ) {
-					next;
-				}
-
-				# We shouldn't look for globals in the declarations, silly!
-				if ( $line =~
-/(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
-				  )
-				{
-					next;
-				}
-
-				# FIXME: Not sure why this is done here?
-				if ( $first && $line =~ /^\s+subroutine\s+(\w+)\((.*)\)/ ) {
-					my $name   = $1;
-					my $argstr = $2;
-					$argstr =~ s/^\s+//;
-					$argstr =~ s/\s+$//;
-					my @args = split( /\s*,\s*/, $argstr );
-
-#					print "ARGS FOR $f ($inc): <",join(',',@args),">\n" if $V and $f=~/particles_/;
-#	                print STDERR "ARGS for $f ($inc): <",join(',',@args),">\n" if $V and $f=~/particles_/;
-					$stref->{'Subroutines'}{$f}{'Info'}
-					  ->[$index]{'Signature'}{'Args'} = \@args;
-					$stref->{'Subroutines'}{$f}{'Info'}
-					  ->[$index]{'Signature'}{'Name'} = $name;
-					$stref->{'Subroutines'}{$f}{'Args'} = \@args;
-				}
-				if ( $first && $line =~ /^\s+program\s+(\w+)\s*$/ ) {
-					my $name = $1;
-					$stref->{'Subroutines'}{$f}{'Info'}
-					  ->[$index]{'Signature'}{'Args'} = [];
-					$stref->{'Subroutines'}{$f}{'Info'}
-					  ->[$index]{'Signature'}{'Name'} = $name;
-				}
-
-				#	            # Need to skip literal strings and formats!
-				#	            my $tline=$line;
-				#	            while ($tline=~/\'.+?\'/) {
-				#	                $tline=~s/\'.*?\'//;
-				#	            }
-				my @chunks = split( /\W+/, $line );
-				for my $mvar (@chunks) {
-#				next if $mvar =~/\b(?:if|then|do|goto|integer|real|call|\d+)\b/; # is slower!
-# if a var on a line is declared locally, it is obviously not a global!
-					if ( exists $tvars{$mvar}
-						and not $stref->{'Subroutines'}{$f}{'Vars'}{$mvar} )
-					{
-						print "FOUND global $mvar in $line\n" if $V;
-						push @globs, $mvar;
-						delete $tvars{$mvar};
-					} 
-				}
-			}    # for each line
-			@globs = @{ union( \@globs, \@inherited_globs ) };
-			if ($V) {
-				print "\nALL GLOBAL VARS from $inc in subroutine $f:\n\n";
-				for my $var (@globs) {
-					print "$var\n";
-				}
-				print "\n";
-			}
-			$stref->{'Subroutines'}{$f}{'Globals'}{$inc} = \@globs;
-			$first = 0;
-		}
-	}
-	return $stref;
-}    # END of identify_globals_used_in_subroutine_OLD()
+#			$stref->{'Subroutines'}{$f}{'Commons'}    = \%commons;
+#			$stref->{'Subroutines'}{$f}{'HasCommons'} = 1;
+#		} else {
+#			print "already done\n" if $V;
+#			%commons = %{ $stref->{'Subroutines'}{$f}{'Commons'} };
+#		}
+#		die Dumper(keys %commons)."\n<".Dumper(keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'}  }).">\n" if $f=~/advance/;
+#		my $first = 1;
+#		for my $inc ( keys %commons ) {
+#			print "\nGLOBAL VAR ANALYSIS for $inc in $f\n" if $V;
+#			my @inherited_globs =
+#			  ( defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc} )
+#			  ? @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
+#			  : ();
+#			my $propagated_globs=[];
+##			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'CommonIncludes'} }) {
+#				for my $csub ($stref->{'Subroutines'}{$f}{'CalledSubs'}) {				
+#					if (exists $stref->{'Subroutines'}{$csub}{'CommonIncludes'}{$inc}) {
+#						$propagated_globs=ordered_union($propagated_globs,$stref->{'Subroutines'}{$csub}{'Globals'}{$inc});
+#					}
+#				}				
+##			}
+#			my @globs = ();
+#			my %tvars = %{ $commons{$inc} };
+#			for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+#				my $line = $srcref->[$index];
+#				if ( $line =~ /^C\s+/ ) {
+#					next;
+#				}
+#
+#				# We shouldn't look for globals in the declarations, silly!
+#				if ( $line =~
+#/(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
+#				  )
+#				{
+#					next;
+#				}
+#
+#				# FIXME: Not sure why this is done here?
+#				if ( $first && $line =~ /^\s+subroutine\s+(\w+)\((.*)\)/ ) {
+#					my $name   = $1;
+#					my $argstr = $2;
+#					$argstr =~ s/^\s+//;
+#					$argstr =~ s/\s+$//;
+#					my @args = split( /\s*,\s*/, $argstr );
+#
+##					print "ARGS FOR $f ($inc): <",join(',',@args),">\n" if $V and $f=~/particles_/;
+##	                print STDERR "ARGS for $f ($inc): <",join(',',@args),">\n" if $V and $f=~/particles_/;
+#					$stref->{'Subroutines'}{$f}{'Info'}
+#					  ->[$index]{'Signature'}{'Args'} = \@args;
+#					$stref->{'Subroutines'}{$f}{'Info'}
+#					  ->[$index]{'Signature'}{'Name'} = $name;
+#					$stref->{'Subroutines'}{$f}{'Args'} = \@args;
+#				}
+#				if ( $first && $line =~ /^\s+program\s+(\w+)\s*$/ ) {
+#					my $name = $1;
+#					$stref->{'Subroutines'}{$f}{'Info'}
+#					  ->[$index]{'Signature'}{'Args'} = [];
+#					$stref->{'Subroutines'}{$f}{'Info'}
+#					  ->[$index]{'Signature'}{'Name'} = $name;
+#				}
+#
+#				#	            # Need to skip literal strings and formats!
+#				#	            my $tline=$line;
+#				#	            while ($tline=~/\'.+?\'/) {
+#				#	                $tline=~s/\'.*?\'//;
+#				#	            }
+#				my @chunks = split( /\W+/, $line );
+#				for my $mvar (@chunks) {
+##				next if $mvar =~/\b(?:if|then|do|goto|integer|real|call|\d+)\b/; # is slower!
+## if a var on a line is declared locally, it is obviously not a global!
+#					if ( exists $tvars{$mvar}
+#						and not $stref->{'Subroutines'}{$f}{'Vars'}{$mvar} )
+#					{
+#						print "FOUND global $mvar in $line\n" if $V;
+#						push @globs, $mvar;
+#						delete $tvars{$mvar};
+#					} 
+#				}
+#			}    # for each line
+#			@globs = @{ union( \@globs, \@inherited_globs ) };
+#			if ($V) {
+#				print "\nALL GLOBAL VARS from $inc in subroutine $f:\n\n";
+#				for my $var (@globs) {
+#					print "$var\n";
+#				}
+#				print "\n";
+#			}
+#			$stref->{'Subroutines'}{$f}{'Globals'}{$inc} = \@globs;
+#			$first = 0;
+#		}
+#	}
+#	return $stref;
+#}    # END of identify_globals_used_in_subroutine_OLD()
 
 # -----------------------------------------------------------------------------
 # To determine if a subroutine argument is I, O or IO:
@@ -3097,7 +3114,12 @@ sub get_var_decls {
 				  ->[$index]{'TrailingComments'} = {};
 				next;
 			}
-
+            if ( $line =~/implicit\s+none/) {
+#            	print "INFO: $f has 'implicit none'\n"; 
+            	$stref->{$sub_or_incl}{$f}{'Info'}
+                  ->[$index]{'ImplicitNone'}={};
+                  $stref->{$sub_or_incl}{$f}{'ImplicitNone'}=$index;
+            }
 			if ( $line =~
 /(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
 			  )
