@@ -13,7 +13,8 @@ use Carp;
 * A serious problem: there can be conflicts between parameters and /common/ globals. For example, someone 
 created pi as a /common/ global, someone else sensibly made it a parameter.
 The error shows up when including the files, so I guess we need to analyse the includes for conflicts. 
-
+* Ad-hoc strategy: if an ex-glob argument conflicts with a parameter, we replace the name in the signature and the calls buth nowhere else
+ 
 * Common variables
 
 Common variables used inside a subroutine should only be elevatated to function arguments if they are used in read mode
@@ -305,7 +306,7 @@ sub main {
 	$stateref= analyse_sources($stateref); 
 	
 	# So at this point all we need to do is the actual refactoring ...
-	die Dumper($stateref->{'Subroutines'}{'flexpart_wrf'});
+#	die Dumper($stateref->{'Subroutines'}{'flexpart_wrf'});
 	# Refactor the source
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
@@ -654,7 +655,8 @@ sub create_chain {
 sub refactor_globals {
 	
 	( my $stref, my $f, my $annlines ) = @_;
-	print "REFACTORING GLOBALS in $f\n" if $V;
+#	local $V=1 if $f=~/advance/;
+	print "REFACTORING GLOBALS in $f\n" if  $V;
 	my $rlines = [];
 	my @globs  = ();
 	my $s=$stref->{'Subroutines'}{$f}{'Source'};
@@ -674,6 +676,25 @@ sub refactor_globals {
 	my %globals            = map { $_ => 1 } @globs;
 	my %args               = ();
 	my %conflicting_locals = ();
+	if(exists $stref->{'Subroutines'}{$f}{'ConflictingGlobals'}) {
+	   %conflicting_locals = %{ $stref->{'Subroutines'}{$f}{'ConflictingGlobals'} };
+	} 
+		my %conflicting_params=();
+		for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {
+			
+	        if ($stref->{'Includes'}{$inc}{'Type'} eq 'Parameter') {
+#	        	print $inc,"\n" if ($f=~/gridcheck/);
+	            if (exists $stref->{'Includes'}{$inc}{'ConflictingGlobals'} ) {
+	            	warn "ADDED CONFLICTING PARAMS from $inc\n" if ($f=~/gridcheck/);  
+	       %conflicting_params = (%conflicting_params, %{ $stref->{'Includes'}{$inc}{'ConflictingGlobals'} });                	
+	            }                                           
+	        }
+	    }
+	    # FIXME: not sure about this
+#	    if (%conflicting_params) {	    	
+#	    	%conflicting_locals=(%conflicting_locals,%conflicting_params);
+#		}
+	
 	my $var_decl_hook=0;
 	for my $annline ( @{$annlines} ) {
 		my $line      = $annline->[0] || '';
@@ -685,8 +706,10 @@ sub refactor_globals {
 
 		if ( exists $tags{'Signature'} ) {
 			my $name = $tags{'Signature'}{'Name'};
+			print "ORIG ARGS:".join(',',@{ $tags{'Signature'}{'Args'}}),"\n" if $V;
 			%args = map { $_ => 1 } @{ $tags{'Signature'}{'Args'} };
 			my @exglobs = ();
+			my @nexglobs = ();   
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
 				print "INFO: INC $inc in $f\n" if $V;
 				if ( not exists $stref->{'Includes'}{$inc}{'Root'} ) {
@@ -702,15 +725,25 @@ sub refactor_globals {
 						$stref->{'Subroutines'}{$f}{'Vars'}{$var}=$stref->{'Includes'}{$inc}{'Vars'}{$var};
 						}
 					}
-				@exglobs = (
-					@exglobs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
-				);
+					print "$inc:".join(',',@{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }),"\n" if $V;
+				    @exglobs = (
+					   @exglobs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
+				    );
 				}
-			}			
+			}	
+			             for my $var (@exglobs) {
+                    if (exists $conflicting_params{$var}) {
+                        print "WARNING: CONFLICT in ARGS for $f, renamed $var to ${var}_GLOB\n";
+                        push @nexglobs,$conflicting_params{$var};
+                    } else {
+                        push @nexglobs,$var;
+                    }
+                }
 			my $args_ref =
-			  ordered_union( $tags{'Signature'}{'Args'}, \@exglobs );
+			  ordered_union( $tags{'Signature'}{'Args'}, \@nexglobs );
 			  $stref->{'Subroutines'}{$f}{'RefactoredArgList'} = $args_ref;
 			my $args_str = join( ',', @{$args_ref} );
+			print "NEW ARGS: $args_str\n" if $V;
 			my $rline = '';
 			if ( $stref->{'Subroutines'}{$f}{'Program'} ) {
 				$rline = '      program ' . $name;
@@ -746,11 +779,12 @@ sub refactor_globals {
 			my $inc = $tags{'Include'}{'Name'};
 			print "INFO: INC $inc in $f\n" if $V;
 			if (
-				$stref->{'Includes'}{$inc}{'Type'} eq 'Common' and (
-					$stref->{'Includes'}{$inc}{'Root'} ne $f
-				)
-			  )
-			{
+				$stref->{'Includes'}{$inc}{'Type'} eq 'Common') { 
+					
+#					if (
+#					$stref->{'Includes'}{$inc}{'Root'} ne $f
+#				)			  
+#			{
 				if ($V) {
 					print "SKIPPED $inc: Root: ",
 					  ( $stref->{'Includes'}{$inc}{'Root'} ne $f ) ? 0 : 1,
@@ -759,12 +793,16 @@ sub refactor_globals {
 						  and ( $f eq $stref->{'Top'} ) ) ? 1 : 0, "\n";
 				}
 				$skip = 1;
-			}
+#			} 
+#			else {
+#				print "INFO: COMMON INC $inc in $f\n";
+#			}
+				}
 		}
 
 		if ( exists $tags{'ExGlobVarDecls'} ) {
 
-			# We abuse ExGlobVarDecls as a hook for the addional includes
+			# First, abuse ExGlobVarDecls as a hook for the addional includes
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
 				print "INC: $inc, root: $stref->{'Includes'}{$inc}{'Root'} \n"
 				  if $V;
@@ -773,12 +811,13 @@ sub refactor_globals {
 				exists $stref->{'Subroutines'}{$f}{'CommonIncludes'}{$inc} 
 					and $f eq $stref->{'Includes'}{$inc}{'Root'} )
 				{   # and $f ne $stref->{'Top'}) { # FIXME: not sure about this!
+					print "INFO: instantiating merged INC $inc in $f\n";					
 					my $rline = "      include '$inc'";
 					$tags_lref->{'Include'}{'Name'} = $inc;
 					push @{$rlines}, [ $rline, $tags_lref ];
 				}
 			}
-
+            # Then generate declarations for ex-globals
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
 				print "INFO: GLOBALS from INC $inc in $f\n" if $V;
 				for
@@ -786,6 +825,7 @@ sub refactor_globals {
 				{
 					if ( exists $args{$var} ) {
 						my $rline = "*** ARG MASKS GLOB $var in $f!";
+						warn $rline,"\n";
 						push @{$rlines}, [ $rline, $tags_lref ];
 					} else {
 						if (
@@ -797,6 +837,11 @@ sub refactor_globals {
 								my $rline =
 								  $stref->{'Subroutines'}{$f}{'Commons'}{$inc}
 								  {$var}{'Decl'};
+								  if (exists $conflicting_params{$var}) {
+								  	my $gvar=$conflicting_params{$var};
+								  	print "REPLACING $var by ${var}_GLOB in ex-glob declarations for $f\n";
+								  	$rline=~s/\b$var\b/$gvar/;
+								  }
 								if ( not defined $rline ) {
 									print "*** NO DECL for $var in $f!\n" if $V;
 									$rline = "*** NO DECL for $var in $f!";
@@ -869,10 +914,23 @@ sub refactor_globals {
 			{
 				next if $stref->{'Includes'}{$inc}{'Root'} eq $name;
 				if (defined $stref->{'Subroutines'}{$name}{'Globals'}{$inc} ) {
+					if (%conflicting_locals) {
+                        for my $var (@{ $stref->{'Subroutines'}{$name}{'Globals'}{$inc} }) {
+                        	if (exists $conflicting_locals{$var}) {
+                        		warn "REPLACING $var in call to $name in $f with ${var}_GLOB!\n";
+                        		push @globals, $conflicting_locals{$var};
+                        	} else {
+                        		push @globals,$var;
+                        	}                       
+                        }					
+					} else {
+					
+					
 				@globals = (
 					@globals,
 					@{ $stref->{'Subroutines'}{$name}{'Globals'}{$inc} }
 				);
+					}
 				}
 			}
 			my $orig_args = [];
@@ -1248,10 +1306,10 @@ sub refactor_include {
 	if ($V) {
 		print "\n\n";
 		print "#" x 80, "\n";
-		print "Refactoring $f\n";
+		print "Refactoring INC $f\n";
 		print "#" x 80, "\n";
 	}
-#	print Dumper( $stref->{'Includes'}{$f} );
+
 	my @lines = @{ $stref->{'Includes'}{$f}{'Lines'} };
 	my @info =
 	  defined $stref->{'Includes'}{$f}{'Info'}
@@ -1274,7 +1332,21 @@ sub refactor_include {
 		if ( exists $tags{'Common'} ) {
 			$skip = 1;
 		}
-
+        if ( exists $tags{'VarDecl'}) {
+        	my @nvars=();
+        	for my $var (@{ $annline->[1]{'VarDecl'} }) {
+        		if ($stref->{'Includes'}{$f}{'Type'} ne 'Parameter' and
+        		exists $stref->{'Includes'}{$f}{'ConflictingGlobals'}{$var}) {
+        			warn "CONFLICT in $f: $var\n";
+        			my $gvar=$stref->{'Includes'}{$f}{'ConflictingGlobals'}{$var};
+        			push @nvars,$gvar;
+        			$line=~s/\b$var\b/$gvar/;
+        		} else {
+        			push @nvars,$var;
+        		}
+        	}
+        	$annline->[1]{'VarDecl'}=[@nvars];        	
+        }
 		if ( $skip == 0 ) {
 
 			if ( not exists $tags{'Comments'} ) {
@@ -1292,7 +1364,7 @@ sub refactor_include {
 
 	return $stref;
 
-}
+} # refactor_include()
 # -----------------------------------------------------------------------------
 sub refactor_function {
     ( my $f, my $stref ) = @_;
@@ -2504,19 +2576,20 @@ sub resolve_globals {
 #	print Dumper(keys %{ $stref->{'Subroutines'}{$f}{'Globals'} });
 	for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {
 		if ($stref->{'Includes'}{$inc}{'Type'} eq 'Parameter') {
-			print $inc,"\n";
-    # So now I have to see if there are any conflicts between parameters and ex-globals
-            
+    # So now I have to see if there are any conflicts between parameters and ex-globals            
             	for my $commoninc (keys %{ $stref->{'Subroutines'}{$f}{'Globals'} }) {
-            		for my $glob (@{ $stref->{'Subroutines'}{$f}{'Globals'}{$commoninc} }) {
-            	       if (exists $stref->{'Includes'}{$inc}{'Vars'}{$glob}  ) {
-            		      print "CONFLICT: $glob from $inc conflicts with $commoninc\n";
+            		for my $mpar (@{ $stref->{'Subroutines'}{$f}{'Globals'}{$commoninc} }) {
+            	       if (exists $stref->{'Includes'}{$inc}{'Vars'}{$mpar}  ) {
+            		      print "CONFLICT: $mpar from $inc conflicts with $commoninc\n";
+            		      $stref->{'Subroutines'}{$f}{'ConflictingGlobals'}{$mpar}=$mpar.'_GLOB';
+            		      $stref->{'Includes'}{$commoninc}{'ConflictingGlobals'}{$mpar}=$mpar.'_GLOB';
+            		      $stref->{'Includes'}{$inc}{'ConflictingGlobals'}{$mpar}=$mpar.'_GLOB';
             	       }
             		}
             	}            
 		}
 	}
-	die 
+	
 #    die Dumper($stref->{'Subroutines'}{$f}{'Globals'}) if $f=~/flexpart_wrf/;
     }
 	return $stref;
