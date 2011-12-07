@@ -1,125 +1,303 @@
+FOUND BLOCK particles_main_loop
+
+VARS in particles_main_loop:
+
+FOUND j
+FOUND itime
+FOUND itage
+FOUND nage
+FOUND cbt
+FOUND uap
+FOUND ucp
+FOUND us
+FOUND uzp
+FOUND vs
+FOUND ws
+FOUND xold
+FOUND yold
+FOUND zold
+FOUND nstop
+FOUND prob
+FOUND k
+FOUND decfact
+FOUND drydeposit
+FOUND ldeltat
+
+VARS in OUTER:
+
+FOUND itime
+FOUND ldeltat
+FOUND loutend
+FOUND loutnext
+FOUND loutstart
+FOUND nstop
+FOUND nstop1
+FOUND outnum
+FOUND prob
+FOUND weight
+FOUND uap
+FOUND ucp
+FOUND uzp
+FOUND us
+FOUND vs
+FOUND ws
+FOUND j
+FOUND k
+FOUND l
+FOUND n
+FOUND itage
+FOUND ix
+FOUND jy
+FOUND nage
+FOUND decfact
+FOUND cbt
+FOUND drydeposit
+FOUND gridtotalunc
+FOUND wetgridtotalunc
+FOUND drygridtotalunc
+FOUND xold
+FOUND yold
+FOUND zold
+
+ARGS for BLOCK particles_main_loop:
+cbt
+decfact
+drydeposit
+itage
+itime
+j
+k
+ldeltat
+nage
+nstop
+prob
+uap
+ucp
+us
+uzp
+vs
+ws
+xold
+yold
+zold
+      call particles_main_loop(cbt,decfact,drydeposit,itage,itime,j,k,ldeltat,nage,nstop,prob,uap,ucp,us,uzp,vs,ws,xold,yold,zold)
+        real cbt(maxpart)
+        real decfact
+        real drydeposit(maxspec)
+        integer itage
+        integer itime
+        integer j
+        integer k
+        integer ldeltat
+        integer nage
+        integer nstop
+        real prob(maxspec)
+        real uap(maxpart)
+        real ucp(maxpart)
+        real us(maxpart)
+        real uzp(maxpart)
+        real vs(maxpart)
+        real ws(maxpart)
+        real xold
+        real yold
+        real zold
 
 Call tree for flexpart_wrf:
 
-flexpart_wrf                                                    SUB ./flexpart_wrf.f                	includeconv,includecom,includepar
-    gasdev1                                                     SUB ./random.f                      	
-        ran3                                                    FUN ./random.f                      	
-    readpaths                                                   SUB ./readpaths.f                   	includecom,includepar
-    readcommand                                                 SUB ./readcommand.f                 	includecom,includepar
-        skplin                                                  SUB ./skplin.f                      	
-        juldate                                                 FUN ./juldate.f                     	
-    readageclasses                                              SUB ./readageclasses.f              	includecom,includepar
-    readavailable                                               SUB ./readavailable.f               	includecom,includepar
-    gridcheck                                                   SUB ./gridcheck.f                   	includeconv,includecom,includepar
-        read_ncwrfout_gridinfo                                  SUB ./read_ncwrfout.f               	
-        read_ncwrfout_1realfield                                SUB ./read_ncwrfout.f               	
-            reorder_ncwrfout_1realfield                         SUB ./read_ncwrfout.f               	
-        test_xyindex_to_ll_wrf                                  SUB ./map_proj_wrf.f                	includecom,includepar
-            map_set                                             SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-                map_init                                        SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-                set_ps                                          SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-                set_lc                                          SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-                    lc_cone                                     SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-                ij_to_latlon                                    SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-                    ijll_ps                                     SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-                    ijll_lc                                     SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-    gridcheck_nests                                             SUB ./gridcheck_nests.f             	includecom,includepar
-        xyindex_to_ll_wrf                                       SUB ./map_proj_wrf.f                	includecom,includepar
-    readoutgrid                                                 SUB ./readoutgrid.f                 	includecom,includepar
-        ll_to_xymeter_wrf                                       SUB ./map_proj_wrf.f                	includecom,includepar
-            ll_to_xyindex_wrf                                   SUB ./map_proj_wrf.f                	includecom,includepar
-                latlon_to_ij                                    SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-                    llij_ps                                     SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-                    llij_lc                                     SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
-        xymeter_to_ll_wrf                                       SUB ./map_proj_wrf.f                	includecom,includepar
-    readreceptors                                               SUB ./readreceptors.f               	includecom,includepar
-    readspecies                                                 SUB ./readspecies.f                 	includecom,includepar
-    readlanduse                                                 SUB ./readlanduse.f                 	includecom,includepar
-    assignland                                                  SUB ./assignland.f                  	includecom,includepar
-    readreleases                                                SUB ./readreleases.f                	includecom,includepar
-        part0                                                   SUB ./part0.f                       	includepar
-            erf                                                 FUN ./erf.f                         	
-                gammp                                           FUN ./erf.f                         	
-                    gser                                        SUB ./erf.f                         	
-                        gammln                                  FUN ./erf.f                         	
-                    gcf                                         SUB ./erf.f                         	
-    readdepo                                                    SUB ./readdepo.f                    	includecom,includepar
-    coordtrafo                                                  SUB ./coordtrafo.f                  	includecom,includepar
-    readpartpositions                                           SUB ./readpartpositions.f           	includecom,includepar
-        ran1                                                    FUN ./random.f                      	
-    outgrid_init                                                SUB ./outgrid_init.f                	includecom,includepar
-    outgrid_init_nest                                           SUB ./outgrid_init_nest.f           	includecom,includepar
-    writeheader                                                 SUB ./writeheader.f                 	includecom,includepar
-        caldate                                                 SUB ./caldate.f                     	
-    writeheader_nest                                            SUB ./writeheader_nest.f            	includecom,includepar
-    openreceptors                                               SUB ./openreceptors.f               	includecom,includepar
-    openouttraj                                                 SUB ./openouttraj.f                 	includecom,includepar
-    timemanager                                                 SUB ./timemanager.f                 	includecom,includepar
-        wetdepo                                                 SUB ./wetdepo.f                     	includecom,includepar
-            interpol_rain                                       SUB ./interpol_rain.f               	
-            interpol_rain_nests                                 SUB ./interpol_rain_nests.f         	
-            wetdepokernel                                       SUB ./wetdepokernel.f               	includecom,includepar
-            wetdepokernel_nest                                  SUB ./wetdepokernel_nest.f          	includecom,includepar
-        convmix                                                 SUB ./convmix.f                     	includeconv,includecom,includepar
-            sort2                                               SUB ./sort2.f                       	
-            calcmatrix                                          SUB ./calcmatrix.f                  	includeconv,includecom,includepar
-                f_qvsat                                         FUN ./qvsat.f                       	
-                    f_esl                                       FUN ./qvsat.f                       	
-                    f_esi                                       FUN ./qvsat.f                       	
-                convect                                         SUB ./convect43c.f                  	includeconv,includepar
-                    tlift                                       SUB ./convect43c.f                  	includeconv,includepar
-            redist                                              SUB ./redist.f                      	includeconv,includecom,includepar
-                ew                                              FUN ./ew.f                          	
-            calcfluxes                                          SUB ./calcfluxes.f                  	includecom,includepar
-        getfields                                               SUB ./getfields.f                   	includecom,includepar
-            readwind                                            SUB ./readwind.f                    	includecom,includepar
-                read_ncwrfout_1datetime                         SUB ./read_ncwrfout.f               	
-                pbl_profile                                     SUB ./pbl_profile.f                 	includepar
-                    psim                                        FUN ./psim.f                        	includepar
-                    psih                                        FUN ./psih.f                        	includepar
-            readwind_nests                                      SUB ./readwind_nests.f              	includecom,includepar
-            calcpar                                             SUB ./calcpar.f                     	includecom,includepar
-                scalev                                          FUN ./scalev.f                      	includepar
-                obukhov                                         FUN ./obukhov.f                     	includepar
-                richardson                                      SUB ./richardson.f                  	includepar
-                getvdep                                         SUB ./getvdep.f                     	includecom,includepar
-                    getrb                                       SUB ./getrb.f                       	includepar
-                    raerod                                      FUN ./raerod.f                      	includepar
-                    getrc                                       SUB ./getrc.f                       	includecom,includepar
-                    partdep                                     SUB ./partdep.f                     	includepar
-                calcpv                                          SUB ./calcpv.f                      	includecom,includepar
-            calcpar_nests                                       SUB ./calcpar_nests.f               	includecom,includepar
-                calcpv_nests                                    SUB ./calcpv_nests.f                	includecom,includepar
-            verttransform                                       SUB ./verttransform.f               	includecom,includepar
-            verttransform_nests                                 SUB ./verttransform_nests.f         	includecom,includepar
-        init_domainfill                                         SUB ./init_domainfill.f             	includecom,includepar
-        boundcond_domainfill                                    SUB ./boundcond_domainfill.f        	includecom,includepar
-        releaseparticles                                        SUB ./releaseparticles.f            	includecom,includepar
-        conccalc                                                SUB ./conccalc.f                    	includecom,includepar
-        partoutput_short                                        SUB ./partoutput_short.f            	includecom,includepar
-        concoutput                                              SUB ./concoutput.f                  	includecom,includepar
-            mean                                                SUB ./mean.f                        	
-        concoutput_nest                                         SUB ./concoutput_nest.f             	includecom,includepar
-        plumetraj                                               SUB ./plumetraj.f                   	includecom,includepar
-            clustering                                          SUB ./clustering.f                  	includepar
-            centerofmass                                        SUB ./centerofmass.f                	includepar
-        fluxoutput                                              SUB ./fluxoutput.f                  	includecom,includepar
-        partoutput                                              SUB ./partoutput.f                  	includecom,includepar
-        initialize                                              SUB ./initialize.f                  	includehanna,includecom,includeinterpol,includepar
-            interpol_all                                        SUB ./interpol_all.f                	includehanna,includecom,includeinterpol,includepar
-            hanna                                               SUB ./hanna.f                       	includehanna,includecom,includepar
-            hanna1                                              SUB ./hanna1.f                      	includehanna,includecom,includepar
-            interpol_wind                                       SUB ./interpol_wind.f               	includecom,includeinterpol,includepar
-        advance                                                 SUB ./advance.f                     	includehanna,includecom,includeinterpol,includepar
-            interpol_all_nests                                  SUB ./interpol_all_nests.f          	includehanna,includecom,includeinterpol,includepar
-            interpol_misslev                                    SUB ./interpol_misslev.f            	includehanna,includecom,includeinterpol,includepar
-            interpol_misslev_nests                              SUB ./interpol_misslev_nests.f      	includehanna,includecom,includeinterpol,includepar
-            hanna_short                                         SUB ./hanna_short.f                 	includehanna,includecom,includepar
-            interpol_vdep                                       SUB ./interpol_vdep.f               	includecom,includeinterpol,includepar
-            interpol_vdep_nests                                 SUB ./interpol_vdep_nests.f         	includecom,includeinterpol,includepar
-            interpol_wind_nests                                 SUB ./interpol_wind_nests.f         	includecom,includeinterpol,includepar
-            windalign                                           SUB ./windalign.f                   	
-            interpol_wind_short                                 SUB ./interpol_wind_short.f         	includecom,includeinterpol,includepar
-            interpol_wind_short_nests                           SUB ./interpol_wind_short_nests.f   	includecom,includeinterpol,includepar
-        drydepokernel                                           SUB ./drydepokernel.f               	includecom,includepar
-        drydepokernel_nest                                      SUB ./drydepokernel_nest.f          	includecom,includepar
+flexpart_wrf                                                     SUB ./flexpart_wrf.f                	includeconv,includecom,includepar
+    gasdev1                                                      SUB ./random.f                      	
+        ran3                                                     FUN ./random.f                      	
+    readpaths                                                    SUB ./readpaths.f                   	includecom,includepar
+    readcommand                                                  SUB ./readcommand.f                 	includecom,includepar
+        skplin                                                   SUB ./skplin.f                      	
+        juldate                                                  FUN ./juldate.f                     	
+    readageclasses                                               SUB ./readageclasses.f              	includecom,includepar
+    readavailable                                                SUB ./readavailable.f               	includecom,includepar
+        juldate*                                                 FUN ./juldate.f                     	
+    gridcheck                                                    SUB ./gridcheck.f                   	includeconv,includecom,includepar
+        read_ncwrfout_gridinfo                                   SUB ./read_ncwrfout.f               	
+        read_ncwrfout_1realfield                                 SUB ./read_ncwrfout.f               	
+            reorder_ncwrfout_1realfield                          SUB ./read_ncwrfout.f               	
+        test_xyindex_to_ll_wrf                                   SUB ./map_proj_wrf.f                	includecom,includepar
+            map_set                                              SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+                map_init                                         SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+                set_ps                                           SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+                set_lc                                           SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+                    lc_cone                                      SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+                ij_to_latlon                                     SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+                    ijll_ps                                      SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+                    ijll_lc                                      SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+            ij_to_latlon*                                        SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+    gridcheck_nests                                              SUB ./gridcheck_nests.f             	includecom,includepar
+        read_ncwrfout_gridinfo*                                  SUB ./read_ncwrfout.f               	
+        read_ncwrfout_1realfield*                                SUB ./read_ncwrfout.f               	
+        xyindex_to_ll_wrf                                        SUB ./map_proj_wrf.f                	includecom,includepar
+            ij_to_latlon*                                        SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+        test_xyindex_to_ll_wrf*                                  SUB ./map_proj_wrf.f                	includecom,includepar
+    readoutgrid                                                  SUB ./readoutgrid.f                 	includecom,includepar
+        skplin*                                                  SUB ./skplin.f                      	
+        ll_to_xymeter_wrf                                        SUB ./map_proj_wrf.f                	includecom,includepar
+            ll_to_xyindex_wrf                                    SUB ./map_proj_wrf.f                	includecom,includepar
+                latlon_to_ij                                     SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+                    llij_ps                                      SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+                    llij_lc                                      SUB ./map_proj_wrf_subaa.f          	include_wrf_map_utils
+        xymeter_to_ll_wrf                                        SUB ./map_proj_wrf.f                	includecom,includepar
+            xyindex_to_ll_wrf*                                   SUB ./map_proj_wrf.f                	includecom,includepar
+    readreceptors                                                SUB ./readreceptors.f               	includecom,includepar
+        skplin*                                                  SUB ./skplin.f                      	
+        ll_to_xyindex_wrf*                                       SUB ./map_proj_wrf.f                	includecom,includepar
+        xyindex_to_ll_wrf*                                       SUB ./map_proj_wrf.f                	includecom,includepar
+    readspecies                                                  SUB ./readspecies.f                 	includecom,includepar
+    readlanduse                                                  SUB ./readlanduse.f                 	includecom,includepar
+    assignland                                                   SUB ./assignland.f                  	includecom,includepar
+        xyindex_to_ll_wrf*                                       SUB ./map_proj_wrf.f                	includecom,includepar
+    readreleases                                                 SUB ./readreleases.f                	includecom,includepar
+        skplin*                                                  SUB ./skplin.f                      	
+        part0                                                    SUB ./part0.f                       	includepar
+            erf                                                  FUN ./erf.f                         	
+                gammp                                            FUN ./erf.f                         	
+                    gser                                         SUB ./erf.f                         	
+                        gammln                                   FUN ./erf.f                         	
+                    gcf                                          SUB ./erf.f                         	
+                        gammln*                                  FUN ./erf.f                         	
+        ll_to_xymeter_wrf*                                       SUB ./map_proj_wrf.f                	includecom,includepar
+        xymeter_to_ll_wrf*                                       SUB ./map_proj_wrf.f                	includecom,includepar
+        juldate*                                                 FUN ./juldate.f                     	
+    readdepo                                                     SUB ./readdepo.f                    	includecom,includepar
+    coordtrafo                                                   SUB ./coordtrafo.f                  	includecom,includepar
+    readpartpositions                                            SUB ./readpartpositions.f           	includecom,includepar
+        ll_to_xyindex_wrf*                                       SUB ./map_proj_wrf.f                	includecom,includepar
+        juldate*                                                 FUN ./juldate.f                     	
+        ran1                                                     FUN ./random.f                      	
+    outgrid_init                                                 SUB ./outgrid_init.f                	includecom,includepar
+    outgrid_init_nest                                            SUB ./outgrid_init_nest.f           	includecom,includepar
+    writeheader                                                  SUB ./writeheader.f                 	includecom,includepar
+        caldate                                                  SUB ./caldate.f                     	
+    writeheader_nest                                             SUB ./writeheader_nest.f            	includecom,includepar
+        caldate*                                                 SUB ./caldate.f                     	
+    openreceptors                                                SUB ./openreceptors.f               	includecom,includepar
+        xymeter_to_ll_wrf*                                       SUB ./map_proj_wrf.f                	includecom,includepar
+    openouttraj                                                  SUB ./openouttraj.f                 	includecom,includepar
+    timemanager                                                  SUB ./timemanager.f                 	includecom,includepar
+        wetdepo                                                  SUB ./wetdepo.f                     	includecom,includepar
+            interpol_rain                                        SUB ./interpol_rain.f               	
+            interpol_rain_nests                                  SUB ./interpol_rain_nests.f         	
+            wetdepokernel                                        SUB ./wetdepokernel.f               	includecom,includepar
+            wetdepokernel_nest                                   SUB ./wetdepokernel_nest.f          	includecom,includepar
+        convmix                                                  SUB ./convmix.f                     	includeconv,includecom,includepar
+            sort2                                                SUB ./sort2.f                       	
+            calcmatrix                                           SUB ./calcmatrix.f                  	includeconv,includecom,includepar
+                f_qvsat                                          FUN ./qvsat.f                       	
+                    f_esl                                        FUN ./qvsat.f                       	
+                    f_esi                                        FUN ./qvsat.f                       	
+                convect                                          SUB ./convect43c.f                  	includeconv,includepar
+                    tlift                                        SUB ./convect43c.f                  	includeconv,includepar
+            redist                                               SUB ./redist.f                      	includeconv,includecom,includepar
+                ew                                               FUN ./ew.f                          	
+                ran3*                                            FUN ./random.f                      	
+            calcfluxes                                           SUB ./calcfluxes.f                  	includecom,includepar
+        getfields                                                SUB ./getfields.f                   	includecom,includepar
+            readwind                                             SUB ./readwind.f                    	includecom,includepar
+                read_ncwrfout_gridinfo*                          SUB ./read_ncwrfout.f               	
+                read_ncwrfout_1datetime                          SUB ./read_ncwrfout.f               	
+                juldate*                                         FUN ./juldate.f                     	
+                read_ncwrfout_1realfield*                        SUB ./read_ncwrfout.f               	
+                ew*                                              FUN ./ew.f                          	
+                pbl_profile                                      SUB ./pbl_profile.f                 	includepar
+                    ew*                                          FUN ./ew.f                          	
+                    psim                                         FUN ./psim.f                        	includepar
+                    psih                                         FUN ./psih.f                        	includepar
+            readwind_nests                                       SUB ./readwind_nests.f              	includecom,includepar
+                read_ncwrfout_gridinfo*                          SUB ./read_ncwrfout.f               	
+                read_ncwrfout_1datetime*                         SUB ./read_ncwrfout.f               	
+                juldate*                                         FUN ./juldate.f                     	
+                read_ncwrfout_1realfield*                        SUB ./read_ncwrfout.f               	
+                ew*                                              FUN ./ew.f                          	
+                pbl_profile*                                     SUB ./pbl_profile.f                 	includepar
+            calcpar                                              SUB ./calcpar.f                     	includecom,includepar
+                xyindex_to_ll_wrf*                               SUB ./map_proj_wrf.f                	includecom,includepar
+                scalev                                           FUN ./scalev.f                      	includepar
+                    ew*                                          FUN ./ew.f                          	
+                obukhov                                          FUN ./obukhov.f                     	includepar
+                    ew*                                          FUN ./ew.f                          	
+                richardson                                       SUB ./richardson.f                  	includepar
+                    ew*                                          FUN ./ew.f                          	
+                    f_qvsat*                                     FUN ./qvsat.f                       	
+                ew*                                              FUN ./ew.f                          	
+                getvdep                                          SUB ./getvdep.f                     	includecom,includepar
+                    caldate*                                     SUB ./caldate.f                     	
+                    getrb                                        SUB ./getrb.f                       	includepar
+                    raerod                                       FUN ./raerod.f                      	includepar
+                        psih*                                    FUN ./psih.f                        	includepar
+                    getrc                                        SUB ./getrc.f                       	includecom,includepar
+                    partdep                                      SUB ./partdep.f                     	includepar
+                calcpv                                           SUB ./calcpv.f                      	includecom,includepar
+                    xyindex_to_ll_wrf*                           SUB ./map_proj_wrf.f                	includecom,includepar
+            calcpar_nests                                        SUB ./calcpar_nests.f               	includecom,includepar
+                xyindex_to_ll_wrf*                               SUB ./map_proj_wrf.f                	includecom,includepar
+                scalev*                                          FUN ./scalev.f                      	includepar
+                obukhov*                                         FUN ./obukhov.f                     	includepar
+                richardson*                                      SUB ./richardson.f                  	includepar
+                ew*                                              FUN ./ew.f                          	
+                getvdep*                                         SUB ./getvdep.f                     	includecom,includepar
+                calcpv_nests                                     SUB ./calcpv_nests.f                	includecom,includepar
+                    xyindex_to_ll_wrf*                           SUB ./map_proj_wrf.f                	includecom,includepar
+            verttransform                                        SUB ./verttransform.f               	includecom,includepar
+                ew*                                              FUN ./ew.f                          	
+            verttransform_nests                                  SUB ./verttransform_nests.f         	includecom,includepar
+                ew*                                              FUN ./ew.f                          	
+        init_domainfill                                          SUB ./init_domainfill.f             	includecom,includepar
+            xyindex_to_ll_wrf*                                   SUB ./map_proj_wrf.f                	includecom,includepar
+            ran1*                                                FUN ./random.f                      	
+        boundcond_domainfill                                     SUB ./boundcond_domainfill.f        	includecom,includepar
+            xyindex_to_ll_wrf*                                   SUB ./map_proj_wrf.f                	includecom,includepar
+            ran1*                                                FUN ./random.f                      	
+        releaseparticles                                         SUB ./releaseparticles.f            	includecom,includepar
+            juldate*                                             FUN ./juldate.f                     	
+            caldate*                                             SUB ./caldate.f                     	
+            xyindex_to_ll_wrf*                                   SUB ./map_proj_wrf.f                	includecom,includepar
+            ran1*                                                FUN ./random.f                      	
+        conccalc                                                 SUB ./conccalc.f                    	includecom,includepar
+        partoutput_short                                         SUB ./partoutput_short.f            	includecom,includepar
+            caldate*                                             SUB ./caldate.f                     	
+        concoutput                                               SUB ./concoutput.f                  	includecom,includepar
+            caldate*                                             SUB ./caldate.f                     	
+            mean                                                 SUB ./mean.f                        	
+        concoutput_nest                                          SUB ./concoutput_nest.f             	includecom,includepar
+            caldate*                                             SUB ./caldate.f                     	
+            mean*                                                SUB ./mean.f                        	
+        plumetraj                                                SUB ./plumetraj.f                   	includecom,includepar
+            clustering                                           SUB ./clustering.f                  	includepar
+            centerofmass                                         SUB ./centerofmass.f                	includepar
+            mean*                                                SUB ./mean.f                        	
+        fluxoutput                                               SUB ./fluxoutput.f                  	includecom,includepar
+            caldate*                                             SUB ./caldate.f                     	
+        partoutput                                               SUB ./partoutput.f                  	includecom,includepar
+            caldate*                                             SUB ./caldate.f                     	
+            xymeter_to_ll_wrf*                                   SUB ./map_proj_wrf.f                	includecom,includepar
+        particles_main_loop                                      SUB ./timemanager.f                 	includecom,includepar
+            initialize                                           SUB ./initialize.f                  	includehanna,includecom,includeinterpol,includepar
+                ran3*                                            FUN ./random.f                      	
+                interpol_all                                     SUB ./interpol_all.f                	includehanna,includecom,includeinterpol,includepar
+                hanna                                            SUB ./hanna.f                       	includehanna,includecom,includepar
+                hanna1                                           SUB ./hanna1.f                      	includehanna,includecom,includepar
+                interpol_wind                                    SUB ./interpol_wind.f               	includecom,includeinterpol,includepar
+            advance                                              SUB ./advance.f                     	includehanna,includecom,includeinterpol,includepar
+                ran3*                                            FUN ./random.f                      	
+                interpol_all*                                    SUB ./interpol_all.f                	includehanna,includecom,includeinterpol,includepar
+                interpol_all_nests                               SUB ./interpol_all_nests.f          	includehanna,includecom,includeinterpol,includepar
+                interpol_misslev                                 SUB ./interpol_misslev.f            	includehanna,includecom,includeinterpol,includepar
+                interpol_misslev_nests                           SUB ./interpol_misslev_nests.f      	includehanna,includecom,includeinterpol,includepar
+                hanna*                                           SUB ./hanna.f                       	includehanna,includecom,includepar
+                hanna1*                                          SUB ./hanna1.f                      	includehanna,includecom,includepar
+                hanna_short                                      SUB ./hanna_short.f                 	includehanna,includecom,includepar
+                interpol_vdep                                    SUB ./interpol_vdep.f               	includecom,includeinterpol,includepar
+                interpol_vdep_nests                              SUB ./interpol_vdep_nests.f         	includecom,includeinterpol,includepar
+                interpol_wind*                                   SUB ./interpol_wind.f               	includecom,includeinterpol,includepar
+                interpol_wind_nests                              SUB ./interpol_wind_nests.f         	includecom,includeinterpol,includepar
+                windalign                                        SUB ./windalign.f                   	
+                interpol_wind_short                              SUB ./interpol_wind_short.f         	includecom,includeinterpol,includepar
+                interpol_wind_short_nests                        SUB ./interpol_wind_short_nests.f   	includecom,includeinterpol,includepar
+            calcfluxes*                                          SUB ./calcfluxes.f                  	includecom,includepar
+            drydepokernel                                        SUB ./drydepokernel.f               	includecom,includepar
+            drydepokernel_nest                                   SUB ./drydepokernel_nest.f          	includecom,includepar

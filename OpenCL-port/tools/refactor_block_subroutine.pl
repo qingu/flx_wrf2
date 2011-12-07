@@ -171,6 +171,7 @@ use File::Copy;
 use Digest::MD5;
 our $VER='0.2';
 our $V              = 0;
+our $W=0;
 # Instead of FORTRAN's 'continue', we insert a call to a subroutine noop() that does nothing
 # This is because F2C_ACC handles continue incorrectly
 our $noop           = 1;
@@ -233,19 +234,21 @@ sub main {
 		die "Please specifiy FORTRAN subroutine or program to refactor\n";
 	}
 	my %opts = ();
-	getopts( 'vhCTNbB', \%opts );
+	getopts( 'vwhCTNbB', \%opts );
 	my $subname = $ARGV[0];
     if ($subname) {
 	$subname =~ s/\.f$//;
     }
 	#	  die %opts;
 	$V = ( $opts{'v'} ) ? 1 : 0;
+	$W = ($opts{'w'} or $V) ? 1 : 0;
 	my $help = ( $opts{'h'} ) ? 1 : 0;
 	if ($help) {
 		die "
-    $0 [-hvC] <toplevel subroutine name> [<(extracted) subroutine name>]
+    $0 [-hvwCTNbB] <toplevel subroutine name> [<(extracted) subroutine name>]
     -h: help
-    -v: verbose
+    -w: show warnings 
+    -v: verbose (implies -w)
     -C: Only generate call tree, don't refactor or emit
     -T: Translate <subroutine name> and dependencies to C 
     -N: Don't replace CONTINUE by CALL NOOP
@@ -623,8 +626,7 @@ sub create_chain {
         	for my $inc (keys %{ $stref->{'Subroutines'}{$sub}{'Includes'} } ){
         		if ($stref->{'Includes'}{$inc}{'Type'} eq 'Common' 
         		and not exists $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}
-        		) { 
-        			print "$sub:\tCOPYING $inc\n" if $sub=~/advance/;
+        		) {         			
        	            $stref->{'Subroutines'}{$sub}{'CommonIncludes'}{$inc}=1 ;       	            
         		}
         	}
@@ -676,6 +678,7 @@ sub refactor_globals {
 	my %globals            = map { $_ => 1 } @globs;
 	my %args               = ();
 	my %conflicting_locals = ();
+	my %conflicting_exglobs_params = ();
 	if(exists $stref->{'Subroutines'}{$f}{'ConflictingGlobals'}) {
 	   %conflicting_locals = %{ $stref->{'Subroutines'}{$f}{'ConflictingGlobals'} };
 	} 
@@ -684,16 +687,15 @@ sub refactor_globals {
 			
 	        if ($stref->{'Includes'}{$inc}{'Type'} eq 'Parameter') {
 #	        	print $inc,"\n" if ($f=~/gridcheck/);
-	            if (exists $stref->{'Includes'}{$inc}{'ConflictingGlobals'} ) {
-	            	warn "ADDED CONFLICTING PARAMS from $inc\n" if ($f=~/gridcheck/);  
+	            if (exists $stref->{'Includes'}{$inc}{'ConflictingGlobals'} ) {  
 	       %conflicting_params = (%conflicting_params, %{ $stref->{'Includes'}{$inc}{'ConflictingGlobals'} });                	
 	            }                                           
 	        }
 	    }
-	    # FIXME: not sure about this
-#	    if (%conflicting_params) {	    	
-#	    	%conflicting_locals=(%conflicting_locals,%conflicting_params);
-#		}
+	    
+	    if (%conflicting_params) {	    	
+	    	%conflicting_exglobs_params=(%conflicting_locals,%conflicting_params);
+		}
 	
 	my $var_decl_hook=0;
 	for my $annline ( @{$annlines} ) {
@@ -733,7 +735,7 @@ sub refactor_globals {
 			}	
 			             for my $var (@exglobs) {
                     if (exists $conflicting_params{$var}) {
-                        print "WARNING: CONFLICT in ARGS for $f, renamed $var to ${var}_GLOB\n";
+                        print "WARNING: CONFLICT in arguments for $f, renamed $var to ${var}_GLOB\n" if $W;
                         push @nexglobs,$conflicting_params{$var};
                     } else {
                         push @nexglobs,$var;
@@ -811,7 +813,7 @@ sub refactor_globals {
 				exists $stref->{'Subroutines'}{$f}{'CommonIncludes'}{$inc} 
 					and $f eq $stref->{'Includes'}{$inc}{'Root'} )
 				{   # and $f ne $stref->{'Top'}) { # FIXME: not sure about this!
-					print "INFO: instantiating merged INC $inc in $f\n";					
+					print "INFO: instantiating merged INC $inc in $f\n" if $V;					
 					my $rline = "      include '$inc'";
 					$tags_lref->{'Include'}{'Name'} = $inc;
 					push @{$rlines}, [ $rline, $tags_lref ];
@@ -839,7 +841,7 @@ sub refactor_globals {
 								  {$var}{'Decl'};
 								  if (exists $conflicting_params{$var}) {
 								  	my $gvar=$conflicting_params{$var};
-								  	print "REPLACING $var by ${var}_GLOB in ex-glob declarations for $f\n";
+								  	print "WARNING: CONFLICT in arg decls for $f: renaming $var to ${var}_GLOB\n" if $W;
 								  	$rline=~s/\b$var\b/$gvar/;
 								  }
 								if ( not defined $rline ) {
@@ -873,7 +875,7 @@ sub refactor_globals {
 				if (exists $stref->{'Functions'}{$var} ) {
 #					warn "FOUND FUNCTION $var in $f\n";
 					if ($is_C_target) {
-				    	print "WARNING: $var in $f is a function!\n";
+				    	print "WARNING: $var in $f is a function!\n" if $W;
 #					   $stref->{'Subroutines'}{$f}{'CalledFunctions'}{$var}=1;
 					   $skip_var=1;
 				    } 
@@ -884,8 +886,8 @@ sub refactor_globals {
 				} 
 				if (not $skip_var) {
 				if ( exists $globals{$var} and not exists $args{$var} ) {
-					print STDERR
-"WARNING: local $var in $f ($stref->{'Subroutines'}{$f}{'Source'}) conflicts with global of same name, will be renamed to $var\_LOCAL\n";
+					print 
+"WARNING: CONFLICT in $f ($stref->{'Subroutines'}{$f}{'Source'}):  renaming local $var to $var\_LOCAL\n" if $W;
 					my $nvar = $var . '_LOCAL';
 					$conflicting_locals{$var} = $nvar;                    
 					$rline =~ s/\b$var\b/$nvar/;
@@ -908,17 +910,18 @@ sub refactor_globals {
 		}
 		if ( exists $tags{'SubroutineCall'} ) {
 			# simply tag the common vars onto the arguments
-			my $name    = $tags{'SubroutineCall'}{'Name'};
+			my $name    = $tags{'SubroutineCall'}{'Name'};						
 			my @globals = ();
 			for my $inc ( keys %{ $stref->{'Subroutines'}{$name}{'Globals'} } )
 			{
 				next if $stref->{'Includes'}{$inc}{'Root'} eq $name;
 				if (defined $stref->{'Subroutines'}{$name}{'Globals'}{$inc} ) {
-					if (%conflicting_locals) {
+					
+					if (%conflicting_exglobs_params) {
                         for my $var (@{ $stref->{'Subroutines'}{$name}{'Globals'}{$inc} }) {
-                        	if (exists $conflicting_locals{$var}) {
-                        		warn "REPLACING $var in call to $name in $f with ${var}_GLOB!\n";
-                        		push @globals, $conflicting_locals{$var};
+                        	if (exists $conflicting_exglobs_params{$var}) {
+                        		print "WARNING: CONFLICT in call to $name in $f:renaming $var with ${var}_GLOB!\n" if $W;
+                        		push @globals, $conflicting_exglobs_params{$var};
                         	} else {
                         		push @globals,$var;
                         	}                       
@@ -933,6 +936,7 @@ sub refactor_globals {
 					}
 				}
 			}
+#			die Dumper(%conflicting_exglobs_params) if $name eq 'map_set';
 			my $orig_args = [];
 			for my $arg ( @{ $tags{'SubroutineCall'}{'Args'} } ) {
 				if ( exists $conflicting_locals{$arg} ) {
@@ -1230,8 +1234,7 @@ sub refactor_all_subroutines {
 	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
 		if ( not defined $stref->{'Subroutines'}{$f}{'Status'} ) {
 			$stref->{'Subroutines'}{$f}{'Status'} = $UNREAD;
-			print STDERR "WARNING: no Status for $f\n";
-			print "WARNING: no Status for $f\n";
+			print "WARNING: no Status for $f\n" if $W;
 		}
 		next if $stref->{'Subroutines'}{$f}{'Status'} == $UNREAD;
 		do {
@@ -1336,9 +1339,9 @@ sub refactor_include {
         	my @nvars=();
         	for my $var (@{ $annline->[1]{'VarDecl'} }) {
         		if ($stref->{'Includes'}{$f}{'Type'} ne 'Parameter' and
-        		exists $stref->{'Includes'}{$f}{'ConflictingGlobals'}{$var}) {
-        			warn "CONFLICT in $f: $var\n";
+        		exists $stref->{'Includes'}{$f}{'ConflictingGlobals'}{$var}) {        			
         			my $gvar=$stref->{'Includes'}{$f}{'ConflictingGlobals'}{$var};
+        			print "WARNING: CONFLICT in var decls in $f: renaming $var to $gvar\n" if $W;
         			push @nvars,$gvar;
         			$line=~s/\b$var\b/$gvar/;
         		} else {
@@ -1578,7 +1581,7 @@ sub translate_to_C {
 		print $cmd, "\n" if $V;
 		system($cmd);
 		} else {
-			print "WARNING: $csrc does not exist\n";
+			print "WARNING: $csrc does not exist\n" if $W;
 		}
 	}
 
@@ -1864,7 +1867,7 @@ sub postprocess_C {
                     my $ftype=$calledsubvars{$called_sub_arg}{'Type'};
                     my $tftype=$vars{$var}{'Type'};
                     if ($ftype ne $tftype) {
-                    	print "WARNING: $tftype $var ($sub) <> $ftype $called_sub_arg ($calledsub)\n";
+                    	print "WARNING: $tftype $var ($sub) <> $ftype $called_sub_arg ($calledsub)\n" if $W;
                     }
                     my $ctype=toCType($ftype);
                 	  my $cptype=$ctype.'*';
@@ -2580,7 +2583,7 @@ sub resolve_globals {
             	for my $commoninc (keys %{ $stref->{'Subroutines'}{$f}{'Globals'} }) {
             		for my $mpar (@{ $stref->{'Subroutines'}{$f}{'Globals'}{$commoninc} }) {
             	       if (exists $stref->{'Includes'}{$inc}{'Vars'}{$mpar}  ) {
-            		      print "CONFLICT: $mpar from $inc conflicts with $commoninc\n";
+            		      print "WARNNG: $mpar from $inc conflicts with $mpar from $commoninc\n" if $V;
             		      $stref->{'Subroutines'}{$f}{'ConflictingGlobals'}{$mpar}=$mpar.'_GLOB';
             		      $stref->{'Includes'}{$commoninc}{'ConflictingGlobals'}{$mpar}=$mpar.'_GLOB';
             		      $stref->{'Includes'}{$inc}{'ConflictingGlobals'}{$mpar}=$mpar.'_GLOB';
@@ -2651,9 +2654,9 @@ sub identify_globals_used_in_subroutine {
                       ->[$index]{'Signature'}{'Args'} = [];
                       my $has_var_decls=scalar %{ $stref->{'Subroutines'}{$f}{'Vars'} };
                     if (not $has_var_decls) {
-                    	print "INFO: $f has no arguments and no local var decls\n";
+                    	print "INFO: $f has no arguments and no local var decls\n" if $V;
                     	if (exists $stref->{'Subroutines'}{$f}{'ImplicitNone'}) {
-                    		print "INFO: $f has 'implicit none'\n";
+                    		print "INFO: $f has 'implicit none'\n" if $V;
                     		my $idx=$stref->{'Subroutines'}{$f}{'ImplicitNone'} +1;
                     		$stref->{'Subroutines'}{$f}{'Info'}->[$idx]{'ExGlobVarDecls'}={};
                     	} else {
@@ -2685,7 +2688,7 @@ sub identify_globals_used_in_subroutine {
 						for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {
 							if ($stref->{'Includes'}{$inc}{'Type'} eq 'Parameter') {
 								if (exists $stref->{'Includes'}{$inc}{'Vars'}{$mvar}) {
-									warn "WARNING: $mvar in $f is a PARAMETER from $inc!";
+									print "WARNING: $mvar in $f is a PARAMETER from $inc!\n" if $W;
 									$is_par=1;
 									last;
 								}
@@ -3207,7 +3210,7 @@ sub get_commons_params_from_includes {
 				my @tcommons = split( /\s*\,\s*/, $commonlst );
 				for my $var (@tcommons) {
 					if ( not defined $vars{$var} ) {
-						print STDERR "MISSING: <", $var, ">\n";
+						print "WARNING: MISSING: <", $var, ">\n" if $W;
 					} else {
 						print $var, "\t", $vars{$var}{'Type'}, "\n" if $V;
 						$stref->{'Includes'}{$f}{'Commons'}{$var} = $vars{$var};
@@ -3226,7 +3229,7 @@ sub get_commons_params_from_includes {
 
 				for my $var (@pvars) {
 					if ( not defined $vars{$var} ) {
-						print STDERR "NOT A PARAMETER: <", $var, ">\n";
+						print "WARNINGS: NOT A PARAMETER: <", $var, ">\n" if $W;
 					} else {
 						$stref->{'Includes'}{$f}{'Parameters'}{$var} =
 						  $vars{$var};
@@ -3280,7 +3283,7 @@ sub get_commons_params_from_includes {
 # -----------------------------------------------------------------------------
 sub separate_blocks {
     ( my $f, my $stref ) = @_;
-    local $V=1;
+    
 #    die "separate_blocks(): FIXME: we need to add in the locals from the parent subroutine as locals in the new subroutine!";
     my $sub_or_func =sub_func_or_incl($f,$stref);
     my $srcref   = $stref->{$sub_or_func}{$f}{'Lines'};
@@ -3361,7 +3364,7 @@ sub separate_blocks {
     #    	print $block,':',$line,"\n";
             my $tline = $line;
             $tline =~ s/\'.+?\'//;
-            for my $var ( keys %tvars ) {
+            for my $var ( sort keys %tvars ) {
                 if ( $tline =~ /\W$var\W/ or $tline =~ /\W$var\s*$/ ) {
                     print "FOUND $var\n" if $V;
                     $occs{$block}{$var} = $var;
@@ -3370,20 +3373,20 @@ sub separate_blocks {
             }
         }
     } 
-    die;
+    
     # Construct the subroutine signatures
     my %args = ();
     for my $block ( keys %blocks ) {
         next if $block eq 'OUTER';
 
         print "\nARGS for BLOCK $block:\n" if $V;
-        for my $var ( keys %{ $occs{$block} } ) {
+        for my $var ( sort keys %{ $occs{$block} } ) {
             if ( exists $occs{'OUTER'}{$var} ) {
                 print "$var\n" if $V;
                 push @{ $args{$block} }, $var;
             }
         }
-        die;
+        
         $stref->{'Subroutines'}{$block}{'Args'} = $args{$block};
         my $sig   = "      subroutine $block(";
         my $decls = [];
@@ -3659,8 +3662,8 @@ if (defined $srcref) {
 					delete $do_loops{$label};
 					$nest--;
 				} else {
-					print STDERR
-"WARNING: $f: Found continue for label $label but nesting level is wrong: $nest<>$do_loops{$label}[1]\n";
+					print 
+"WARNING: $f: Found continue for label $label but nesting level is wrong: $nest<>$do_loops{$label}[1]\n" if $W;
 				}
 			} elsif ( exists $gotos{$label} ) {
 				my $target = 'GotoTarget';
@@ -3687,8 +3690,8 @@ if (defined $srcref) {
 #							print "WARNING: goto $label ($tindex) is not in loop ($f)\n" if $translate==$GO; 
 						}					
 				    } else {
-					   print STDERR
-"WARNING: $f: Found GOTO target not BREAK for label $label: wrong nesting $nest<>$gotos{$label}[1]\n";
+					   print 
+"WARNING: $f: Found GOTO target not BREAK for label $label: wrong nesting $nest<>$gotos{$label}[1]\n" if $W;
 				    }
 			 }
 				$stref->{$sub_or_func}{$f}{'Info'}
@@ -3736,7 +3739,7 @@ sub read_fortran_src {
 	if ( $stref->{$sub_func_incl}{$s}{'Status'} == $UNREAD ) {
 		my $ok = 1;
 		open my $SRC, '<', $f or do {
-			print STDERR "Can't find '$f' ($s)\n";
+			print "WARNING: Can't find '$f' ($s)\n";
 			$ok = 0;
 		};
 		if ($ok) {
@@ -3981,19 +3984,19 @@ sub find_subroutines_functions_and_includes {
 						and $stref->{'Subroutines'}{$sub}{'Source'} !~
 						/$sub\.f/ )
 					{
-						print STDERR "WARNING: Ignoring source "
+						print  "WARNING: Ignoring source "
 						  . $stref->{'Subroutines'}{$sub}{'Source'}
-						  . " because source $src matches subroutine name $sub.\n";
+						  . " because source $src matches subroutine name $sub.\n" if $W;
 					}
 					$stref->{'Subroutines'}{$sub}{'Source'}  = $src;
 					$stref->{'Subroutines'}{$sub}{'Status'}  = $UNREAD;
 					$stref->{'Subroutines'}{$sub}{'Program'} = $is_prog;
 					
 				} else {
-					print STDERR
+					print 
 "WARNING: Ignoring source $src for $sub because another source, "
 					  . $stref->{'Subroutines'}{$sub}{'Source'}
-					  . " exists.\n";
+					  . " exists.\n" if $W;
 				}
 			};
 			$line =~ /^\s*include\s+\'(\w+)\'/ && do {				
@@ -4062,7 +4065,7 @@ sub show_info {
 				print "\n";
 			}
 		} else {
-			print "WARNING: No info for $f\n";
+			print "WARNING: No info for $f\n" if $W;
 		}
 
 	}
@@ -4110,7 +4113,7 @@ sub split_long_line {
 		my $idx3 = index( $rline, $split_on3, $ll - $nchars );
 		my $idx4 = index( $rline, $split_on4, $ll - $nchars );
 		if ( $idx < 0 && $idx2 < 0 && $idx3 < 0 && $idx4 < 0 ) {
-			warn "WARNING: Can't split line \n$line\n" if $V;
+			warn "WARNING: Can't split line \n$line\n" if $W;
 		} elsif ( $idx >= 0 ) {
 			print "Split line on ", $ll - $idx, ", '$split_on'\n" if $V;
 		} elsif ( $idx < 0 && $idx2 >= 0 ) {
@@ -4164,7 +4167,7 @@ sub split_long_line {
 		}
 		if ($split_lines[0]!~/^C/ && $split_lines[0]=~/\t/ && $split_lines[0]!~/^\s{6}/ && $split_lines[0]!~/^\t/) {
 			# problematic tab!
-			print "WARNING: Pathological TAB in ".$split_lines[0]."\n";
+			print "WARNING: Pathological TAB in ".$split_lines[0]."\n" if $W;
 			my $sixspaces = ' ' x 6;
 			$split_lines[0]=~s/^\ +\t//;
 			if (length($split_lines[0])>66) {
@@ -4172,7 +4175,7 @@ sub split_long_line {
 			    $split_lines[0]=~s/\s+$//;
 			}
 			if (length($split_lines[0])>66) {
-				print "WARNING: Line still too long: ".$split_lines[0]."\n"; 
+				print "WARNING: Line still too long: ".$split_lines[0]."\n" if $W; 
 			}
 			$split_lines[0]=$sixspaces.$split_lines[0] unless $split_lines[0]=~/^\s+\d+/;
 #			warn "<$split_lines[0]>\n";

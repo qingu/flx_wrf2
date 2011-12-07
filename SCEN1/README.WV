@@ -1,0 +1,8 @@
+To run FLEXPART_WRF:
+
+../RefactoredSources/flexpart_wrf
+
+To plot the results:
+
+cd plot
+./prepare_and_plot.pl
