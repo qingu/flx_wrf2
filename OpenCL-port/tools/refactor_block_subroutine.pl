@@ -4276,3 +4276,7 @@ ratio="fill";
     close $DOT;
 }
 # -----------------------------------------------------------------------------
+# Like Haskell's findWithDefault
+sub lookup {
+	
+}
