@@ -3289,6 +3289,7 @@ sub separate_blocks {
     my %blocks   = ();
     my $in_block = 0;
     my $block    = 'OUTER';
+    $blocks{'OUTER'}={'Lines'=>[]};            
     my $block_idx=0;
     for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
         my $line = $srcref->[$index];
@@ -3297,8 +3298,7 @@ sub separate_blocks {
             $in_block = 1;
             $block    = $1;
             print "FOUND BLOCK $block\n" if $V;            
-            $blocks{'OUTER'}={'Lines'=>[]};            
-            push @{ $blocks{'OUTER'}{'Lines'} }, $line;
+            #push @{ $blocks{'OUTER'}{'Lines'} }, $line;
             $stref->{$sub_or_func}{$f}{'Info'}
               ->[$index]{'RefactoredSubroutineCall'}{'Name'} = $block;
               delete $stref->{$sub_or_func}{$f}{'Info'}
@@ -3314,6 +3314,7 @@ sub separate_blocks {
         if ( $line =~ /^C\s+END\sSUBROUTINE\s(\w+)/ ) {
             $in_block = 0;
             $block    = $1;
+            push @{ $blocks{'OUTER'}{'Lines'} }, $line; 
             push @{ $blocks{$block}{'Lines'} }, '      end';
             push @{ $blocks{$block}{'Info'} }, $stref->{$sub_or_func}{$f}{'Info'}->[$index];
             $stref->{$sub_or_func}{$f}{'Info'}->[$index]{'EndBlock'}{'Name'} =
@@ -3327,11 +3328,12 @@ sub separate_blocks {
             $stref->{$sub_or_func}{$f}{'Info'}->[$index]{'InBlock'}{'Name'} =
               $block;
         } else {
-#        	print "OUTER:",$line,"\n";
+        #	print "OUTER:",$line,"\n";
             push @{ $blocks{'OUTER'}{'Lines'} }, $line;
         }
     }
 # WV06/12/2011: OK up to here
+#die Dumper($blocks{'OUTER'}{'Lines'});
     for my $block ( keys %blocks ) {
         next if $block eq 'OUTER';
         # Here we create an entry for the new subroutine
@@ -3343,7 +3345,7 @@ sub separate_blocks {
         $stref->{$sub_or_func}{$block}{'Source'} =
           $stref->{$sub_or_func}{$f}{'Source'};
     }
-die ;
+#die Dumper($blocks{'OUTER'}{'Lines'});
 # 6. Identify which vars are used
 #   - in both => these become function arguments
 #   - only in "outer" => do nothing for those
@@ -3356,7 +3358,7 @@ die ;
         my %tvars = %vars;                  # Hurray for pass-by-value!
         print "\nVARS in $block:\n\n" if $V;
         for my $line (@lines) {
-        	print $block,':',$line,"\n";
+    #    	print $block,':',$line,"\n";
             my $tline = $line;
             $tline =~ s/\'.+?\'//;
             for my $var ( keys %tvars ) {
