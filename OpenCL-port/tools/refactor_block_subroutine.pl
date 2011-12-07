@@ -2,61 +2,24 @@
 use warnings;
 use strict;
 use Carp;
+use Data::Dumper;
+
 =pod
 
-=begin wikidoc
+=begin markdown
 
-= FORTRAN Refactoring Tool
+# FORTRAN Refactoring Tool
 
-== TODOs
-
-* A serious problem: there can be conflicts between parameters and /common/ globals. For example, someone 
-created pi as a /common/ global, someone else sensibly made it a parameter.
-The error shows up when including the files, so I guess we need to analyse the includes for conflicts. 
-* Ad-hoc strategy: if an ex-glob argument conflicts with a parameter, we replace the name in the signature and the calls buth nowhere else
- 
-* Common variables
-
-Common variables used inside a subroutine should only be elevatated to function arguments if they are used in read mode
-before being used in write mode, is that correct? No!
-Suppose f1 does this:
-
-    x1=42
-    y=x1*x1;
-    x1+=y
-
-And f2 does:
-
-    y=x1 OR z=f(x1)
-    x1=43
-
-Because of the assignment, x1 must be an argument of f2
-Now, if f1 does not have x1 as an argument, the code
-
-    f1()
-    f2(x1)
-
-That means that regardless of what happens to those common vars, we need to add them to the arguments.
-But that then means the enclosing function needs to declare them...
-
-    int x1
-    f1(x1)
-    f2(x1)
-
-Wich means that I need to add the missing variable declarations in the enclosing sub
+## TODOs
   
 * Create intermediate directories for converted files
-*  Determine if a subroutine argument is I, O or I/O => OK
-*  Determine variables with same name as functions. F2C-ACC doesn't remove those, although it should. => OK
-*  Refactor FUNCTIONS!! and translate to C and emit headers as well
+*  Determine if a subroutine argument is I, O or I/O => need to do this recursively
 *  Declarations from F2C-ACC are broken, emit our own => OK
 *  But F2C-ACC's function calls are wrong too! They use the non-pointer vars where they should use the pointers! => OK
 *  Put F2C-ACC into our tree, if the license allows it. => OK
 
-The mechanism for dealing with globals is broken because I need to identify the root for each include first, in a separate pass.
-To do so, I need to walk the subroutine call tree first. In other words, an extra pass is needed.
 
-== Draft Outline  
+## Draft Outline  
 
 0.2 Get rid of "common" variables, move them into function arguments 
 This is refactoring, and there is really only one proper way to do this:
@@ -68,13 +31,14 @@ and add them to the function signature as well
 
 Now, I don't have a full FORTRAN parser, but let's see what we can do with some limiting assumptions:
 - assume the block is simply identified with a comment "C BEGIN blockname" and "C END blockname"
-- assume any line starting with /^\s[\+\&]/ is a continuation line, deal with these first
+- assume any line starting with `/^\s[\+\&]/` is a continuation line, deal with these first
 - assume that _all_ variables in includecom are common, and _all_ variable in includepar are parameters?
 That won't do. No, we read the includes, and parse the "common" blocks
 - we're only really interested in a few specific intrinsic types: 
-/(integer|real|double\s+precision|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/ 
 
-The most difficult bit is finding the variables, I guess \W$varname\W should do?
+    /(integer|real|double\s+precision|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/ 
+
+The most difficult bit is finding the variables, I guess `$varname` should do?
 
 With these assumptions, we can write a crude parser and function arg identifier as follows:
 0. Slurp the source; strip the comments
@@ -144,7 +108,7 @@ Status: for programs, subroutines, functions and includes
     3: after create_subroutine_source_from_block()
 After building this structure, what we need is to go through it an revert it so it becomes index => information
 
-=end wikidoc
+=end markdown
 
 
 
@@ -164,12 +128,13 @@ State = MkState {
 Nodes = Hash.Map Int Node
 
 =cut
-use Getopt::Std;
 
+use Getopt::Std;
 use File::Find;
 use File::Copy;
 use Digest::MD5;
-our $VER='0.2';
+
+our $VER='0.3';
 our $V              = 0;
 our $W=0;
 # Instead of FORTRAN's 'continue', we insert a call to a subroutine noop() that does nothing
@@ -188,28 +153,27 @@ our $sub_to_translate='';
 #   C_SOURCE means that this source code will be translated to C
 (our $UNREAD, our $READ, our $PARSED, our $FROM_BLOCK, our $C_SOURCE)=(0..4);
 our $targetdir = '../RefactoredSources';
-use Data::Dumper;
 
 &main();
 
 # -----------------------------------------------------------------------------
 =pod
 
-=begin wikidoc
+=begin markdown
 
-== Main subroutine
+## Main subroutine
 
-The {main()} subroutine performs following actions:
+The `main()` subroutine performs following actions:
 
 - Argument parsing
-- {init_state()}: Initialise the global state
+- `init_state()`: Initialise the global state
 - {find_subroutines_functions_and_includes()}: Find all subroutines, functions and includes (from now on, 'targets') in the source code tree. 
 The subroutine creates an entry in the state for every target:
 
         $stref->{$target_type}{$target_name}{'Source'}  = $target_source;
         $stref->{$target_type}{$target_name}{'Status'}  = $UNREAD;
         
-- {parse_fortran_src()} :
+- `parse_fortran_src()` :
 
     * Read the source and do some minimal processsing
     $stref = read_fortran_src( $f, $stref );
@@ -223,18 +187,19 @@ The subroutine creates an entry in the state for every target:
     * 4. Parse Includes: parse common blocks and parameters, create $stref->{'Commons'}
         $stref = get_commons_params_from_includes( $f, $stref );
         
-- {find_root_for_includes()} :
+- `find_root_for_includes() :
     
-=end wikidoc
+=end markdown
 
 =cut
+
 sub main {
 	# Argument parsing. Factor out!
 	if ( not @ARGV ) {
 		die "Please specifiy FORTRAN subroutine or program to refactor\n";
 	}
 	my %opts = ();
-	getopts( 'vwhCTNbB', \%opts );
+	getopts( 'vwhCTNbBG', \%opts );
 	my $subname = $ARGV[0];
     if ($subname) {
 	$subname =~ s/\.f$//;
@@ -254,9 +219,14 @@ sub main {
     -N: Don't replace CONTINUE by CALL NOOP
     -b: Generate SCons build script, currently ignored 
     -B: Build FLEXPART (implies -b)
+    -G: Generate Markdown documentation
     \n";
 	}
-
+if ( $opts{'G'} ) {
+	print "Generating docs...\n";
+	generate_docs();
+	exit(0);
+}
 	if ( $opts{'C'} ) {
 		$call_tree_only = 1;
 		$main_tree = $ARGV[1] ? 0 : 1;
@@ -522,8 +492,8 @@ sub analyse_sources {
 # Then we find the root for each include in turn
 =pod
 
-=begin wikidoc
-== Handling of Common Block Variables
+=begin markdown
+## Handling of Common Block Variables
 
 FORTRAN's `common` blocks are a mechanism to create global variables:
 
@@ -532,10 +502,10 @@ different program units can share the same data without using arguments." [F77 r
 
 This is problematic for translation of code to OpenCL as of course it is not possible to have
 globals across memory spaces. 
-[ Also, I personally think these globals are ~evil~: for examples, see FLEXPART.  
+[ Also, I personally think these globals are /evil/ -- for examples, see FLEXPART.]  
 
 
-=end wikidoc
+=end markdown
 
 =cut 
 sub find_root_for_includes {
@@ -1162,9 +1132,9 @@ sub create_refactored_source {
 
 =pod
 
-=begin wikidoc
+=begin markdown
 
-== Info refactoring
+## Info refactoring
 
 for every line
 - check if it needs changing:
@@ -1181,7 +1151,7 @@ This is a node called 'RefactoredSubroutineCall'
 * BeginBlock: insert the new subroutine signature and variable declarations
 * EndBlock: insert END
                       
-=end wikidoc
+=end markdown
 =cut
 
 sub refactor_subroutine {
@@ -1558,14 +1528,14 @@ sub emit_all {
 #		}
 #	}
 	# NOOP source
-	if ($noop) {
-		copy( '../OpenCL-port/tools/noop.c', "$targetdir/noop.c" );
-#		$stref->{'BuildSources'}{'C'}{'noop.c'} = 1;
+	if ($noop) {		
+		  copy( '../OpenCL-port/tools/noop.c', "$targetdir/noop.c" );
 	}
 
 }    # END of emit_all()
 
 # -----------------------------------------------------------------------------
+
 sub translate_to_C {
 	( my $stref ) = @_;
 
@@ -1970,8 +1940,7 @@ sub toCType { (my $ftype)=@_;
 # -----------------------------------------------------------------------------
 sub create_build_script {
 	( my $stref ) = @_;
-
-	# First attempt, Fortran only
+# FIXME: we should probe the system here!
 	my @gfs = (
 		'/opt/local/bin/gfortran-mp-4.6',
 		'/usr/local/bin/gfortran-4.6', '/usr/bin/gfortran'
@@ -1987,6 +1956,9 @@ sub create_build_script {
 	my $fsources = join( ',', map { "'" . $_ . "'" } @fsourcelst );
 
 	my $csources = '';
+	if ($noop) {
+		$stref->{'BuildSources'}{'C'}{'noop.f'}=1;
+	}
 	if ( exists $stref->{'BuildSources'}{'C'} ) {
 		my @csourcelst = sort keys %{ $stref->{'BuildSources'}{'C'} };
 		$csources = join( ',', map { s/\.f$/.c/; "'" . $_ . "'" } @csourcelst );
@@ -4284,4 +4256,78 @@ ratio="fill";
 # Like Haskell's findWithDefault
 sub lookup {
 	
+}
+# -----------------------------------------------------------------------------
+
+sub generate_docs {
+	my $scriptsrc = $0;
+	my $markdownsrc=$scriptsrc;
+	$markdownsrc=~s/^.*\///;
+	$markdownsrc=~s/\.pl$/.markdown/;
+	open my $PL,'<',$scriptsrc;
+	open my $MD,'>',$markdownsrc;
+	my $md=0;
+    while (<$PL>) {
+        /^=begin\s+markdown/ && do {
+	        $md=1;
+	        next;
+	    };
+	    /^=end\s+markdown/ && do {
+	        $md=0;
+	        next;
+	    };
+	
+	    if ($md==1) {
+	    	#my $el;eval("\$el= q($_)");
+	        print $MD $_;#$el;
+	    }
+    }
+    close $PL;
+    close $MD;
+    my $tex_src_in=$markdownsrc;
+    $tex_src_in=~s/\.markdown/_in.tex/;
+    system("pandoc -f markdown -t latex $markdownsrc > $tex_src_in ");
+    
+    my $tex_src_out=$tex_src_in;
+
+    $tex_src_out=~s/_in\././;
+    open my $TEXIN, '<',$tex_src_in;
+    open my $TEXOUT, '>',$tex_src_out;
+    print $TEXOUT <<'ENDH';
+\documentclass{article}
+\usepackage[T1]{fontenc}
+\usepackage{textcomp}
+
+%%  Latex generated from POD in document /Users/wim/SoC_Research/FLEXPART/flx_wrf2/OpenCL-port/tools/refactor_block_subroutine.pod
+%%  Using the perl module Pod::LaTeX
+%%  Converted on Sun Nov 13 23:38:44 2011
+
+
+\usepackage{makeidx}
+\makeindex
+
+
+\begin{document}
+
+\tableofcontents
+
+ENDH
+
+    my $code=0;
+    while ( <$TEXIN> ){
+	    /verbatim/ && do {
+	        $code=1-$code;
+	    };
+	    print $TEXOUT $_;
+	    if ($code) {
+	        print $TEXOUT "\n";
+	    }
+    }
+    close $TEXIN;
+    print $TEXOUT '\printindex'."\n";
+    print $TEXOUT '\end{document}'."\n";
+    close $TEXOUT;
+    system("pdflatex $tex_src_out");
+        
+    
 }
