@@ -273,8 +273,9 @@ if ( $opts{'G'} ) {
     # Now we can do proper globals handling
     # We need to walk the tree again, find the globals in rec descent.
 	$stateref= resolve_globals($subname,$stateref);
-
-    # The remaining problem is that we did not yet factor out blocks into subroutines.
+    
+    # I think we need to refactor the source first without creating the new sources,
+    # then us this info to determine the IO direction 
     # Now we do the reformatting, block detection etc.
 	$stateref= analyse_sources($stateref); 
 	
@@ -627,45 +628,39 @@ sub create_chain {
 sub refactor_globals {
 	
 	( my $stref, my $f, my $annlines ) = @_;
-#	local $V=1 if $f=~/advance/;
-	print "REFACTORING GLOBALS in $f\n" if  $V;
+
+	print "REFACTORING GLOBALS in $f\n" if  $V; #die Dumper( $stref->{'Subroutines'}{$f}{'Args'}) if $f=~/advance/;
 	my $rlines = [];
-	my @globs  = ();
+	
 	my $s=$stref->{'Subroutines'}{$f}{'Source'};
 	my $is_C_target=exists $stref->{'BuildSources'}{'C'}{$s}?1:0;
 		
-	# Quick and dirty way to get the Kinds of all arguments
-	my %maybe_args = ();
-	for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
-		if (defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc}) {
-		@globs = ( @globs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } );
-		}
-		if (defined $stref->{'Includes'}{$inc}{'Vars'}) {
-		%maybe_args=(%maybe_args,%{ $stref->{'Includes'}{$inc}{'Vars'}  });
-		}
-	}
-	%maybe_args=(%{ $stref->{'Subroutines'}{$f}{'Vars'} },%maybe_args);	
-	my %globals            = map { $_ => 1 } @globs;
+	(my $maybe_args,my $globals) = get_maybe_args_globs ($stref, $f);
+	
 	my %args               = ();
+	
 	my %conflicting_locals = ();
-	my %conflicting_exglobs_params = ();
+	my %conflicting_params= ();
+	
+	if (exists $stref->{'Subroutines'}{$f}{'ConflictingParams'}) {
+		%conflicting_params= %{ $stref->{'Subroutines'}{$f}{'ConflictingParams'}};
+	}
 	if(exists $stref->{'Subroutines'}{$f}{'ConflictingGlobals'}) {
 	   %conflicting_locals = %{ $stref->{'Subroutines'}{$f}{'ConflictingGlobals'} };
 	} 
-		my %conflicting_params=();
-		for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {
-			
-	        if ($stref->{'Includes'}{$inc}{'Type'} eq 'Parameter') {
-#	        	print $inc,"\n" if ($f=~/gridcheck/);
-	            if (exists $stref->{'Includes'}{$inc}{'ConflictingGlobals'} ) {  
-	       %conflicting_params = (%conflicting_params, %{ $stref->{'Includes'}{$inc}{'ConflictingGlobals'} });                	
-	            }                                           
-	        }
-	    }
-	    
-	    if (%conflicting_params) {	    	
-	    	%conflicting_exglobs_params=(%conflicting_locals,%conflicting_params);
-		}
+		
+#    for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {			
+#        if ($stref->{'Includes'}{$inc}{'Type'} eq 'Parameter') {
+#	       if (exists $stref->{'Includes'}{$inc}{'ConflictingGlobals'} ) {  
+#	           %conflicting_params = (%conflicting_params, %{ $stref->{'Includes'}{$inc}{'ConflictingGlobals'} });                	
+#	       }                                           
+#        }
+#    }
+
+	my %conflicting_exglobs_params = ();    
+    if (%conflicting_params) {	    	
+	   %conflicting_exglobs_params=(%conflicting_locals,%conflicting_params);
+    }
 	
 	my $var_decl_hook=0;
 	for my $annline ( @{$annlines} ) {
@@ -729,8 +724,8 @@ sub refactor_globals {
 				if (exists  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg} ) {
 				    my $iodir = $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg};
 				    my $kind='Unknown';
-				    if (exists $maybe_args{$arg}{'Kind'}) {
-				    	$kind=$maybe_args{$arg}{'Kind'};
+				    if (exists $maybe_args->{$arg}{'Kind'}) {
+				    	$kind=$maybe_args->{$arg}{'Kind'};
 				    }
 				    my $ntabs=' ' x 8;
 				    if ($iodir eq 'In' and $kind eq 'Scalar') {
@@ -855,7 +850,7 @@ sub refactor_globals {
 #                    }										
 				} 
 				if (not $skip_var) {
-				if ( exists $globals{$var} and not exists $args{$var} ) {
+				if ( exists $globals->{$var} and not exists $args{$var} ) {
 					print 
 "WARNING: CONFLICT in $f ($stref->{'Subroutines'}{$f}{'Source'}):  renaming local $var to $var\_LOCAL\n" if $W;
 					my $nvar = $var . '_LOCAL';
@@ -941,6 +936,80 @@ sub refactor_globals {
 }    # END of refactor_globals()
 
 # -----------------------------------------------------------------------------
+sub refactor_subroutine_signature {
+	(my $stref, my $f)=@_;
+            print "ORIG ARGS:".join(',',@{ $stref->{'Subroutines'}{$f}{'Args'} }),"\n" if $V;
+            my %args = map { $_ => 1 } @{ $stref->{'Subroutines'}{$f}{'Args'} };
+            my @exglobs = ();
+            my @nexglobs = ();   
+            my $conflicting_params=$stref->{'Subroutines'}{$f}{'ConflictingParams'};
+            for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
+                print "INFO: INC $inc in $f\n" if $V;
+                if ( not exists $stref->{'Includes'}{$inc}{'Root'} ) {
+                    die "$inc has no Root in $f";
+                }
+                if ( $stref->{'Includes'}{$inc}{'Root'} eq $f ) {
+                    print "INFO: $f is root for $inc (lookup)\n" if $V;
+                    next;
+                }
+                if (defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc} ) {
+                    for my $var ( @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } ) {
+                        if (not exists $stref->{'Subroutines'}{$f}{'Vars'}{$var}){
+                        $stref->{'Subroutines'}{$f}{'Vars'}{$var}=$stref->{'Includes'}{$inc}{'Vars'}{$var};
+                        }
+                    }
+                    print "$inc:".join(',',@{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }),"\n" if $V;
+                    @exglobs = (
+                       @exglobs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
+                    );
+                }
+            }   
+                         for my $var (@exglobs) {
+                    if (exists $conflicting_params->{$var}) {
+                        print "WARNING: CONFLICT in arguments for $f, renamed $var to ${var}_GLOB\n" if $W;
+                        push @nexglobs,$conflicting_params->{$var};
+                    } else {
+                        push @nexglobs,$var;
+                    }
+                }
+            my $args_ref =
+              ordered_union( $stref->{'Subroutines'}{$f}{'Args'}, \@nexglobs );
+              $stref->{'Subroutines'}{$f}{'RefactoredArgList'} = $args_ref;
+#            my $args_str = join( ',', @{$args_ref} );
+#            print "NEW ARGS: $args_str\n" if $V;
+#            my $rline = '';
+#            if ( $stref->{'Subroutines'}{$f}{'Program'} ) {
+#                $rline = '      program ' . $f;
+#            } else {
+#                $rline = '      subroutine ' . $f . '(' . $args_str . ')';
+#            }
+#            $tags{'Refactored'} = 1;
+#            push @${rlines}, [ $rline, $tags_lref ];
+#            # IO direction information
+#            for my $arg ( @{$args_ref} ) {
+#                if (exists  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg} ) {
+#                    my $iodir = $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg};
+#                    my $kind='Unknown';
+#                    if (exists $maybe_args->{$arg}{'Kind'}) {
+#                        $kind=$maybe_args->{$arg}{'Kind'};
+#                    }
+#                    my $ntabs=' ' x 8;
+#                    if ($iodir eq 'In' and $kind eq 'Scalar') {
+#                        $ntabs='';
+#                    } elsif ($iodir eq 'Out') {
+#                        $ntabs=' ' x 4;
+#                    }
+#                    my $comment ="C      $ntabs$arg:\t$iodir, $kind"; 
+#                    push @${rlines}, [ $comment, {'Comment'=>1} ];
+#                } else {
+##                   warn "NO IO info for $arg in $f\n";
+#                }
+#            }
+#            $skip = 1;
+        
+        return $stref;
+} # END of refactor_subroutine_signature()
+# ----------------------------------------------------------------------------------------------------        
 sub refactor_blocks_OLD {
 	( my $stref, my $f, my $annlines ) = @_;die;
 	my $rlines = [];
@@ -2546,7 +2615,7 @@ sub resolve_globals {
 		print "SUB $f is LEAF\n" if $V;
 		$stref=identify_globals_used_in_subroutine($f,$stref);
 	}
-	if ($f=~/flexpart_wrf/) {
+#	if ($f=~/flexpart_wrf/) {
 		
 #	print Dumper(keys %{ $stref->{'Subroutines'}{$f}{'Globals'} });
 	for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {
@@ -2566,6 +2635,14 @@ sub resolve_globals {
 	}
 	
 #    die Dumper($stref->{'Subroutines'}{$f}{'Globals'}) if $f=~/flexpart_wrf/;
+#    }
+    $stref->{'Subroutines'}{$f}{'ConflictingParams'}={};
+    for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {          
+        if ($stref->{'Includes'}{$inc}{'Type'} eq 'Parameter') {
+           if (exists $stref->{'Includes'}{$inc}{'ConflictingGlobals'} ) {  
+               %{ $stref->{'Subroutines'}{$f}{'ConflictingParams'} } = (%{ $stref->{'Subroutines'}{$f}{'ConflictingParams'} }, %{ $stref->{'Includes'}{$inc}{'ConflictingGlobals'} });                  
+           }                                           
+        }
     }
 	return $stref;
 } # END of resolve_globals()
@@ -2803,6 +2880,117 @@ sub identify_globals_used_in_subroutine {
 #	return $stref;
 #}    # END of identify_globals_used_in_subroutine_OLD()
 
+# -----------------------------------------------------------------------------
+# We do a recusive descent for all called subroutines, and for the leaves we do the analysis
+sub determine_argument_io_direction_rec {
+    ( my $f, my $stref ) = @_;
+    my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+    if (exists $stref->{'Subroutines'}{$f}{'CalledSubs'}) {
+        for my $calledsub (keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'} }) {
+            $stref=determine_argument_io_direction_rec($calledsub,$stref);
+        }
+    }
+    $stref=determine_argument_io_direction_rec_core($f,$stref);
+    # For a leaf, this should resolve all
+    # For a non-leaf, we should merge the declarations from the calls
+    if (exists $stref->{'Subroutines'}{$f}{'CalledSubs'}) {
+        for my $calledsub (keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'} }) {
+    # This is a bit tricky. First we must build an lookup table between
+    # the subroutine arguments and the arguments to the call.
+            $stref=merge_iodir_info($stref,$f,$calledsub);
+        }
+     }
+        
+    
+    return $stref;
+} # determine_argument_io_direction_rec()
+# -----------------------------------------------------------------------------
+sub merge_iodir_info {
+	(my $stref,my $f,my $calledsub) =@_;
+	return $stref;
+}
+# -----------------------------------------------------------------------------
+sub determine_argument_io_direction_core {
+    ( my $f, my $stref ) = @_;
+    my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+#   local $V=1 if $f=~/advance/;
+    print "DETERMINE IO DIR FOR SUB $f\n" if $V;
+    my @exglobs = ();
+    for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
+        if (defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc}) {
+            @exglobs = (
+                @exglobs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
+            );
+        }
+    }
+    my $args_ref = union( $stref->{'Subroutines'}{$f}{'Args'}, \@exglobs );
+    
+    my %args = map { $_ => 'Unknown' } @{ $args_ref };
+    
+    # Now, we need to get the values for args used in called subs
+    # So we need a list of called subs.
+    for my $cs (keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'} }) {
+        print "CALLED SUB: $cs\n" if $V;
+        for my $cs_arg (keys %{ $stref->{'Subroutines'}{$cs}{'RefactoredArgs'} }) {
+            print "\tCSARG: $cs_arg\n" if $V;
+            if (exists $args{$cs_arg} and $stref->{'Subroutines'}{$cs}{'RefactoredArgs'}{$cs_arg} ne 'Unknown' ) {
+                print "\t\tINHERIT ARG IO for $cs_arg from $cs\n" if $V; 
+                $args{$cs_arg}= $stref->{'Subroutines'}{$cs}{'RefactoredArgs'}{$cs_arg};
+            }
+        }       
+    }
+    # Then for each of these, we go through the args.
+    # If an arg has a non-'U' value, we overwrite it.   
+    
+    if ( defined $srcref ) {
+        for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+            my $line = $srcref->[$index];
+            if ( $line =~ /^C\s+/ ) {
+                next;
+            }
+                # Skip the declarations
+                if ( $line =~
+/(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
+                  )
+                {
+                    next;
+                }
+            
+            if ( $line =~ /\s+(\w+)(?:\([^=]*\))?\s*=\s*(.+?)\s*$/ and $line!~/^\s*do\s+.+\s*=/) { # Assignment, but not a loop. This is weak! 
+            
+                 my $var=$1;
+                 my $rhs=$2;
+                 if (exists $args{$var} ) {
+                    
+                    if( $args{$var} eq 'Unknown') {
+                        print "LINE: $line\n" if $V;
+                       print "ARG $var: 'Out'\n" if $V;
+                       $args{$var}='Out';
+                    } elsif ($args{$var} eq 'In') {
+                        print "LINE: $line\n" if $V;
+                        print "ARG $var: 'InOut'\n" if $V;
+                        $args{$var}='InOut';
+                    }
+                 }
+                 if ($line=~/^\s*if/) {                 
+                    (my $cond,my $rest) = split(/\s+(\w+)(?:\([^=]*\))?\s*=\s*/,$line);                 
+#                   print "COND: $cond\n";
+#                   print "REST: $rest\n";
+                    find_vars($cond,\%args, \&set_io_dir);
+                 } 
+#                print "RHS: $rhs\n";
+                find_vars($rhs,\%args, \&set_io_dir);    
+
+            } else { # not an assignment, do as before
+                print "LINE: $line\n" if $V;
+                find_vars($line,\%args, \&set_io_dir);           
+            }
+        }
+    }
+    $stref->{'Subroutines'}{$f}{'RefactoredArgs'}=\%args;
+#   die Dumper($stref->{'Subroutines'}{$f}{'RefactoredArgs'}) if $f=~/timemanager/;
+    return $stref;
+} # determine_argument_io_direction_core()
 # -----------------------------------------------------------------------------
 # To determine if a subroutine argument is I, O or IO:
 # if it appears only on the LHS of an '=' => O
@@ -4330,4 +4518,25 @@ ENDH
     system("pdflatex $tex_src_out");
         
     
+}
+    # Quick and dirty way to get the Kinds of all arguments
+sub get_maybe_args_globs {
+	(my $stref, my $f) = @_;	
+
+	my @globs      = ();
+	my %maybe_args = ();
+	for my $inc (
+		keys %{
+			$stref->{
+				'Subroutines'}{$f}{'Globals'} } ) {
+		if (defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc}) {
+    		@globs = ( @globs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } );
+		}
+		if (defined $stref->{'Includes'}{$inc}{'Vars'}) {
+	   	   %maybe_args=(%maybe_args,%{ $stref->{'Includes'}{$inc}{'Vars'}  });
+		}
+	}
+	%maybe_args=(%{ $stref->{'Subroutines'}{$f}{'Vars'} },%maybe_args);	
+	my %globals            = map { $_ => 1 } @globs;
+    return (\%maybe_args,\%globals);
 }
