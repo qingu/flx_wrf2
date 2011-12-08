@@ -275,9 +275,10 @@ if ( $opts{'G'} ) {
 	$stateref= resolve_globals($subname,$stateref);
 #    $stateref= resolve_globals($subname,$stateref);    
     # I think we need to refactor the source first without creating the new sources,
-    # then us this info to determine the IO direction 
+    # then us this info to determine the IO direction
+     
     # Now we do the reformatting, block detection etc.
-#    determine_argument_io_direction_rec($subname,$stateref);
+#    FIXME: determine_argument_io_direction_rec($subname,$stateref);
     
 	$stateref= analyse_sources($stateref); 
 	
@@ -629,6 +630,7 @@ sub create_chain {
 # -----------------------------------------------------------------------------
 sub refactor_globals {	
 	( my $stref, my $f, my $annlines ) = @_;
+
 	print "REFACTORING GLOBALS in $f\n" if  $V; #die Dumper( $stref->{'Subroutines'}{$f}{'Args'}) if $f=~/advance/;
 	my $rlines = [];	
 	my $s=$stref->{'Subroutines'}{$f}{'Source'};
@@ -938,7 +940,7 @@ sub refactor_globals {
 # -----------------------------------------------------------------------------
 sub refactor_subroutine_signature {
 	(my $stref, my $f)=@_;
-	local $V=1;
+	
 	if ($V) {
 		if (exists $stref->{'Subroutines'}{$f}{'Args'}) {
             print "SUB $f ORIG ARGS:".join(',',@{ $stref->{'Subroutines'}{$f}{'Args'} }),"\n";
@@ -982,7 +984,6 @@ sub refactor_subroutine_signature {
             my $args_ref =
               ordered_union( $stref->{'Subroutines'}{$f}{'Args'}, \@nexglobs );
               $stref->{'Subroutines'}{$f}{'RefactoredArgList'} = $args_ref;
-        
         return $stref;
 } # END of refactor_subroutine_signature()
 # --------------------------------------------------------------------------------
@@ -1073,7 +1074,7 @@ sub create_exglob_var_declarations {
                 {
                     if ( exists $args{$var} ) {
                         my $rline = "*** ARG MASKS GLOB $var in $f!";
-                        warn $rline,"\n";
+#                        warn $rline,"\n";
                         push @{$rlines}, [ $rline, $tags_lref ];
                     } else {
                         if (
@@ -2351,7 +2352,7 @@ sub toCType { (my $ftype)=@_;
     if (exists($corr{$ftype})) {
         return $corr{$ftype};
     } else {
-        warn "NO TYPE for $ftype\n";
+        print "WARNING: NO TYPE for $ftype\n";
         return 'NOTYPE';
     }
 } # END of toCType()
@@ -3000,7 +3001,7 @@ sub resolve_globals {
 sub identify_globals_used_in_subroutine {
 	( my $f, my $stref ) = @_;	
 #	local $V=1 if $f=~/interpol/;
-	warn "GLOBALS in $f\n";
+#	warn "GLOBALS in $f\n";
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	if ( defined $srcref ) {
 # First determine subroutine arguments
@@ -3011,15 +3012,15 @@ sub identify_globals_used_in_subroutine {
                 }
                 # Determine the subroutine arguments
                 # FIXME: Not sure why this is done here?
-                if ( $line =~ /^\s+subroutine\s+(\w+)\((.*)\)/i ) {
+                if ( $line =~ /^\s+subroutine\s+(\w+)\s*\((.*)\)/ ) {
                     my $name   = $1;                    
                     my $argstr = $2;
-                    warn "FOUND SUB SIG $name WITH $argstr\n";
+#                    warn "FOUND SUB SIG $name WITH $argstr\n";
                     $argstr =~ s/^\s+//;
                     $argstr =~ s/\s+$//;
 #                   my @args=();
                     my @args = split( /\s*,\s*/, $argstr );
-                    warn "ARGS: ".join(',',@args)."\n";
+#                    warn "ARGS: ".join(',',@args)."\n";
                     $stref->{'Subroutines'}{$f}{'Info'}
                       ->[$index]{'Signature'}{'Args'} = [@args];
                     $stref->{'Subroutines'}{$f}{'Info'}
@@ -3282,7 +3283,12 @@ sub determine_argument_io_direction_rec {
 # -----------------------------------------------------------------------------
 sub get_argnames_for_calls_in_sub {
     ( my $f, my $stref ) = @_;
-    warn $f;
+#    for my $arg ( @{ $stref->{'Subroutines'}{$f}{'RefactoredArgList'} }) {
+#    	if ($arg=~/[\(\)]/) { 
+#    		print "\t\t$arg\n";die;
+#    	}
+#    }
+    my %args = map {$_ => 1 } @{ $stref->{'Subroutines'}{$f}{'RefactoredArgList'} };
     my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	
 	    if ( defined $srcref ) {
@@ -3299,7 +3305,7 @@ sub get_argnames_for_calls_in_sub {
             	$stref=refactor_subroutine_call_args($stref, $f, $index);
             	# Now get the RefactoredArgs
             	my $ref_call_args=$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'SubroutineCall'}{'RefactoredArgs'};
-            	print "CALL $name\n";
+            	print "CALL to $name in $f\n";#" (".join(',',@{ $stref->{'Subroutines'}{$f}{'RefactoredArgList'} }).")\n";
 #            	print "CALL $name: ",join(',',@{ $ref_call_args })."\n";
             	# Get the RefactoredArgList            	
             	my $ref_sig_args=$stref->{'Subroutines'}{$name}{'RefactoredArgList'};
@@ -3311,9 +3317,13 @@ sub get_argnames_for_calls_in_sub {
             	my $i=0;
             	for my $call_arg (@{$ref_call_args }) {
             		my $sig_arg=$ref_sig_args->[$i];
+            		# FIXME: ad hoc, deal with other casts as well!
+                    $call_arg=~s/float\(// && $call_arg=~s/\)$//;
+                    # Clean up call args for comparison
+            		$call_arg=~s/\(.*//;
             		$i++;
-            		if ($call_arg ne $sig_arg) {
-            			print "($call_arg => $sig_arg)\n";
+            		if ($call_arg ne $sig_arg and exists $args{$call_arg}) {
+            			print "\t($call_arg => $sig_arg)\n";
             		}
             	}
             	 }
@@ -4693,7 +4703,7 @@ sub split_long_line {
 		my $idx3 = index( $rline, $split_on3, $ll - $nchars );
 		my $idx4 = index( $rline, $split_on4, $ll - $nchars );
 		if ( $idx < 0 && $idx2 < 0 && $idx3 < 0 && $idx4 < 0 ) {
-			warn "WARNING: Can't split line \n$line\n" if $W;
+			print "WARNING: Can't split line \n$line\n" if $W;
 		} elsif ( $idx >= 0 ) {
 			print "Split line on ", $ll - $idx, ", '$split_on'\n" if $V;
 		} elsif ( $idx < 0 && $idx2 >= 0 ) {
