@@ -277,6 +277,8 @@ if ( $opts{'G'} ) {
     # I think we need to refactor the source first without creating the new sources,
     # then us this info to determine the IO direction 
     # Now we do the reformatting, block detection etc.
+#    determine_argument_io_direction_rec($subname,$stateref);
+    
 	$stateref= analyse_sources($stateref); 
 	
 	# So at this point all we need to do is the actual refactoring ...
@@ -625,29 +627,26 @@ sub create_chain {
 		return $stref;
 }
 # -----------------------------------------------------------------------------
-sub refactor_globals {
-	
+sub refactor_globals {	
 	( my $stref, my $f, my $annlines ) = @_;
-
 	print "REFACTORING GLOBALS in $f\n" if  $V; #die Dumper( $stref->{'Subroutines'}{$f}{'Args'}) if $f=~/advance/;
-	my $rlines = [];
-	
+	my $rlines = [];	
 	my $s=$stref->{'Subroutines'}{$f}{'Source'};
 	my $is_C_target=exists $stref->{'BuildSources'}{'C'}{$s}?1:0;
 		
-	(my $maybe_args,my $globals) = get_maybe_args_globs ($stref, $f);
-	
-	my %args               = ();
-	
-	my %conflicting_locals = ();
-	my %conflicting_params= ();
-	
-	if (exists $stref->{'Subroutines'}{$f}{'ConflictingParams'}) {
-		%conflicting_params= %{ $stref->{'Subroutines'}{$f}{'ConflictingParams'}};
-	}
-	if(exists $stref->{'Subroutines'}{$f}{'ConflictingGlobals'}) {
-	   %conflicting_locals = %{ $stref->{'Subroutines'}{$f}{'ConflictingGlobals'} };
-	} 
+#	(my $maybe_args,my $globals) = get_maybe_args_globs ($stref, $f);
+#	
+#	my %args               = ();
+#	
+#	my %conflicting_locals = ();
+#	my %conflicting_params= ();
+#	
+#	if (exists $stref->{'Subroutines'}{$f}{'ConflictingParams'}) {
+#		%conflicting_params= %{ $stref->{'Subroutines'}{$f}{'ConflictingParams'}};
+#	}
+#	if(exists $stref->{'Subroutines'}{$f}{'ConflictingGlobals'}) {
+#	   %conflicting_locals = %{ $stref->{'Subroutines'}{$f}{'ConflictingGlobals'} };
+#	} 
 		
 #    for my $inc (keys %{ $stref->{'Subroutines'}{$f}{'Includes'} }) {			
 #        if ($stref->{'Includes'}{$inc}{'Type'} eq 'Parameter') {
@@ -657,12 +656,13 @@ sub refactor_globals {
 #        }
 #    }
 
-	my %conflicting_exglobs_params = ();    
-    if (%conflicting_params) {	    	
-	   %conflicting_exglobs_params=(%conflicting_locals,%conflicting_params);
-    }
+#	my %conflicting_exglobs_params = ();    
+#    if (%conflicting_params) {	    	
+#	   %conflicting_exglobs_params=(%conflicting_locals,%conflicting_params);
+#    }
 	
 	my $var_decl_hook=0;
+	my $idx=0;
 	for my $annline ( @{$annlines} ) {
 		my $line      = $annline->[0] || '';
 		my $tags_lref = $annline->[1];
@@ -918,17 +918,19 @@ sub refactor_globals {
 		}
 		
 		if ( not exists $tags{'Comments'} and $skip == 0 ) {
-			my $rline = $line;
-			for my $lvar ( keys %conflicting_locals ) {
-				if ( $rline =~ /\b$lvar\b/ ) {
-                   print  "WARNING: CONFLICT in $f, renaming $lvar with $conflicting_locals{$lvar}\n" if $W;
-					$rline =~ s/\b$lvar\b/$conflicting_locals{$lvar}/g;
-				}
-			}
-			push @{$rlines}, [ $rline, $tags_lref ];
+			$rlines=rename_conflicting_locals($stref,$f,$annline,$rlines);
+#			my $rline = $line;
+#			for my $lvar ( keys %conflicting_locals ) {
+#				if ( $rline =~ /\b$lvar\b/ ) {
+#                   print  "WARNING: CONFLICT in $f, renaming $lvar with $conflicting_locals{$lvar}\n" if $W;
+#					$rline =~ s/\b$lvar\b/$conflicting_locals{$lvar}/g;
+#				}
+#			}
+#			push @{$rlines}, [ $rline, $tags_lref ];
 			$skip = 1;
 		}
 		push @{$rlines}, $annline unless $skip;
+		$idx++;
 	}
 	return $rlines;
 }    # END of refactor_globals()
@@ -936,7 +938,14 @@ sub refactor_globals {
 # -----------------------------------------------------------------------------
 sub refactor_subroutine_signature {
 	(my $stref, my $f)=@_;
-            print "ORIG ARGS:".join(',',@{ $stref->{'Subroutines'}{$f}{'Args'} }),"\n" if $V;
+	local $V=1;
+	if ($V) {
+		if (exists $stref->{'Subroutines'}{$f}{'Args'}) {
+            print "SUB $f ORIG ARGS:".join(',',@{ $stref->{'Subroutines'}{$f}{'Args'} }),"\n";
+	} else {
+		print "SUB $f ORIG ARGS: ()\n";
+	}
+	}
             my %args = map { $_ => 1 } @{ $stref->{'Subroutines'}{$f}{'Args'} };
             my @exglobs = ();
             my @nexglobs = ();   
@@ -976,6 +985,29 @@ sub refactor_subroutine_signature {
         
         return $stref;
 } # END of refactor_subroutine_signature()
+# --------------------------------------------------------------------------------
+sub rename_conflicting_locals {
+    ( my $stref, my $f, my $annline, my $rlines ) = @_;
+    my $line      = $annline->[0] || '';
+    my $tags_lref = $annline->[1];
+#    my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
+#    my %args = map { $_ => 1 } @{ $stref->{'Subroutines'}{$f}{'Args'} };        
+#    my @vars  = @{ $tags{'VarDecl'} };
+#    (my $maybe_args,my $globals) = get_maybe_args_globs ($stref, $f);   
+    my %conflicting_locals = ();
+    if(exists $stref->{'Subroutines'}{$f}{'ConflictingGlobals'}) {
+       %conflicting_locals = %{ $stref->{'Subroutines'}{$f}{'ConflictingGlobals'} };
+    } 
+	           my $rline = $line;
+            for my $lvar ( keys %conflicting_locals ) {
+                if ( $rline =~ /\b$lvar\b/ ) {
+                   print  "WARNING: CONFLICT in $f, renaming $lvar with $conflicting_locals{$lvar}\n" if $W;
+                    $rline =~ s/\b$lvar\b/$conflicting_locals{$lvar}/g;
+                }
+            }
+            push @{$rlines}, [ $rline, $tags_lref ];
+    return $rlines;	
+} # END of rename_conflicting_locals()
 # --------------------------------------------------------------------------------
 sub create_refactored_vardecls {	
     ( my $stref, my $f, my $annline, my $rlines, my $is_C_target ) = @_;
@@ -1214,6 +1246,7 @@ sub create_refactored_subroutine_call {
             }
             my $args_ref = ordered_union( $orig_args, $globals );
             
+            
             my $args_str = join( ',', @{$args_ref} );
             $line =~ s/call\s.*$//;
             my $rline = "call $name($args_str)\n";
@@ -1269,7 +1302,63 @@ sub determine_exglob_subroutine_call_args {
 #            my $args_ref = ordered_union( $orig_args, \@globals );	
 	return \@globals;
 } # END of determine_exglob_subroutine_call_args 
-# ----------------------------------------------------------------------------------------------------                
+# ----------------------------------------------------------------------------------------------------       
+sub refactor_subroutine_call_args {
+    (my $stref, my $f, my $idx)=@_;
+        
+    my $tags      = $stref->{'Subroutines'}{$f}{'Info'}[$idx];    
+    # simply tag the common vars onto the arguments
+    my $name    = $tags->{'SubroutineCall'}{'Name'};
+    
+    my %conflicting_locals = ();
+    my %conflicting_params= ();    
+    if (exists $stref->{'Subroutines'}{$f}{'ConflictingParams'}) {
+        %conflicting_params= %{ $stref->{'Subroutines'}{$f}{'ConflictingParams'}};
+    }
+    if(exists $stref->{'Subroutines'}{$f}{'ConflictingGlobals'}) {
+       %conflicting_locals = %{ $stref->{'Subroutines'}{$f}{'ConflictingGlobals'} };
+    } 
+    my %conflicting_exglobs_params = ();    
+    if (%conflicting_params) {          
+       %conflicting_exglobs_params=(%conflicting_locals,%conflicting_params);
+    }                        
+            my @globals = ();
+            for my $inc ( keys %{ $stref->{'Subroutines'}{$name}{'Globals'} } )
+            {
+                next if $stref->{'Includes'}{$inc}{'Root'} eq $name;
+                if (defined $stref->{'Subroutines'}{$name}{'Globals'}{$inc} ) {                    
+                    if (%conflicting_exglobs_params) {
+                        for my $var (@{ $stref->{'Subroutines'}{$name}{'Globals'}{$inc} }) {
+                            if (exists $conflicting_exglobs_params{$var}) {
+                                print "WARNING: CONFLICT in call to $name in $f:renaming $var with ${var}_GLOB!\n" if $W;
+                                push @globals, $conflicting_exglobs_params{$var};
+                            } else {
+                                push @globals,$var;
+                            }                       
+                        }                   
+                    } else {
+                @globals = (
+                    @globals,
+                    @{ $stref->{'Subroutines'}{$name}{'Globals'}{$inc} }
+                );
+                    }
+                }
+            }
+         
+            my $orig_args = [];
+            for my $arg ( @{ $tags->{'SubroutineCall'}{'Args'} } ) {
+                if ( exists $conflicting_locals{$arg} ) {
+                    push @{$orig_args}, $conflicting_locals{$arg};
+                } else {
+                    push @{$orig_args}, $arg;
+                }
+            }
+            my $args_ref = ordered_union( $orig_args, \@globals ); 
+            $tags->{'SubroutineCall'}{'RefactoredArgs'}=$args_ref;
+            $stref->{'Subroutines'}{$f}{'Info'}[$idx]=$tags;
+    return $stref;
+} # END of refactor_subroutine_call_args 
+# ----------------------------------------------------------------------------------------------------               
 sub refactor_blocks_OLD {
 	( my $stref, my $f, my $annlines ) = @_;die;
 	my $rlines = [];
@@ -2909,11 +2998,68 @@ sub resolve_globals {
 
 # ----------------------------------------------------------------------------------------------------
 sub identify_globals_used_in_subroutine {
-	( my $f, my $stref ) = @_;
+	( my $f, my $stref ) = @_;	
 #	local $V=1 if $f=~/interpol/;
-#	warn "GLOBALS in $f\n";
+	warn "GLOBALS in $f\n";
 	my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
 	if ( defined $srcref ) {
+# First determine subroutine arguments
+            for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+                my $line = $srcref->[$index];
+                if ( $line =~ /^C\s+/ ) {
+                    next;
+                }
+                # Determine the subroutine arguments
+                # FIXME: Not sure why this is done here?
+                if ( $line =~ /^\s+subroutine\s+(\w+)\((.*)\)/i ) {
+                    my $name   = $1;                    
+                    my $argstr = $2;
+                    warn "FOUND SUB SIG $name WITH $argstr\n";
+                    $argstr =~ s/^\s+//;
+                    $argstr =~ s/\s+$//;
+#                   my @args=();
+                    my @args = split( /\s*,\s*/, $argstr );
+                    warn "ARGS: ".join(',',@args)."\n";
+                    $stref->{'Subroutines'}{$f}{'Info'}
+                      ->[$index]{'Signature'}{'Args'} = [@args];
+                    $stref->{'Subroutines'}{$f}{'Info'}
+                      ->[$index]{'Signature'}{'Name'} = $name;
+                    $stref->{'Subroutines'}{$f}{'Args'} = [@args];   
+#                    die Dumper($stref->{'Subroutines'}{$f}{'Args'}) if $name eq 'ij_to_latlon';               
+                    last;
+                } elsif ( $line =~ /^\s+subroutine\s+(\w+)[^\(]*$/ ) {
+                    my $name   = $1;
+                    $stref->{'Subroutines'}{$f}{'Info'}
+                      ->[$index]{'Signature'}{'Args'} = [];
+                      my $has_var_decls=scalar %{ $stref->{'Subroutines'}{$f}{'Vars'} };
+                    if (not $has_var_decls) {
+                        print "INFO: $f has no arguments and no local var decls\n" if $V;
+                        if (exists $stref->{'Subroutines'}{$f}{'ImplicitNone'}) {
+                            print "INFO: $f has 'implicit none'\n" if $V;
+                            my $idx=$stref->{'Subroutines'}{$f}{'ImplicitNone'} +1;
+                            $stref->{'Subroutines'}{$f}{'Info'}->[$idx]{'ExGlobVarDecls'}={};
+                        } else {
+                    $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'ExGlobVarDecls'}={};
+                        }
+                    }                      
+                    $stref->{'Subroutines'}{$f}{'Info'}
+                      ->[$index]{'Signature'}{'Name'} = $name;
+                    $stref->{'Subroutines'}{$f}{'Args'} = [];
+                    last;
+                }
+                # Determine the program arguments
+                # FIXME: Not sure why this is done here?
+                if (  $line =~ /^\s+program\s+(\w+)\s*$/ ) {
+                    my $name = $1;
+                    $stref->{'Subroutines'}{$f}{'Info'}
+                      ->[$index]{'Signature'}{'Args'} = [];
+                    $stref->{'Subroutines'}{$f}{'Info'}
+                      ->[$index]{'Signature'}{'Name'} = $name;
+                      last;
+                }                
+            }    # for each line
+            		
+		
 		my %commons = ();
 		print "COMMONS ANALYSIS in $f\n" if $V;
 		if ( not exists $stref->{'Subroutines'}{$f}{'Commons'} ) {
@@ -2937,6 +3083,11 @@ sub identify_globals_used_in_subroutine {
 				if ( $line =~ /^C\s+/ ) {
 					next;
 				}
+				
+                if ( $line =~ /^\s+(subroutine|program)\s+(\w+)/ ) {
+                    next;
+                }
+				
 				# We shouldn't look for globals in the declarations, silly!
 				if ( $line =~
 /(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
@@ -2944,47 +3095,7 @@ sub identify_globals_used_in_subroutine {
 				{
 					next;
 				}
-				# Determine the subroutine arguments
-				# FIXME: Not sure why this is done here?
-				if ( $first && $line =~ /^\s+subroutine\s+(\w+)\((.*)\)/ ) {
-					my $name   = $1;
-					my $argstr = $2;
-					$argstr =~ s/^\s+//;
-					$argstr =~ s/\s+$//;
-					my @args = split( /\s*,\s*/, $argstr );
-					$stref->{'Subroutines'}{$f}{'Info'}
-					  ->[$index]{'Signature'}{'Args'} = \@args;
-					$stref->{'Subroutines'}{$f}{'Info'}
-					  ->[$index]{'Signature'}{'Name'} = $name;
-					$stref->{'Subroutines'}{$f}{'Args'} = \@args;
-				} elsif ( $first && $line =~ /^\s+subroutine\s+(\w+)[^\(]*$/ ) {
-					my $name   = $1;
-                    $stref->{'Subroutines'}{$f}{'Info'}
-                      ->[$index]{'Signature'}{'Args'} = [];
-                      my $has_var_decls=scalar %{ $stref->{'Subroutines'}{$f}{'Vars'} };
-                    if (not $has_var_decls) {
-                    	print "INFO: $f has no arguments and no local var decls\n" if $V;
-                    	if (exists $stref->{'Subroutines'}{$f}{'ImplicitNone'}) {
-                    		print "INFO: $f has 'implicit none'\n" if $V;
-                    		my $idx=$stref->{'Subroutines'}{$f}{'ImplicitNone'} +1;
-                    		$stref->{'Subroutines'}{$f}{'Info'}->[$idx]{'ExGlobVarDecls'}={};
-                    	} else {
-                    $stref->{'Subroutines'}{$f}{'Info'}->[$index]{'ExGlobVarDecls'}={};
-                    	}
-                    }                      
-                    $stref->{'Subroutines'}{$f}{'Info'}
-                      ->[$index]{'Signature'}{'Name'} = $name;
-                    $stref->{'Subroutines'}{$f}{'Args'} = [];
-				}
-				# Determine the program arguments
-				# FIXME: Not sure why this is done here?
-				if ( $first && $line =~ /^\s+program\s+(\w+)\s*$/ ) {
-					my $name = $1;
-					$stref->{'Subroutines'}{$f}{'Info'}
-					  ->[$index]{'Signature'}{'Args'} = [];
-					$stref->{'Subroutines'}{$f}{'Info'}
-					  ->[$index]{'Signature'}{'Name'} = $name;
-				}
+				
 				my @chunks = split( /\W+/, $line );
 				for my $mvar (@chunks) {
 #				next if $mvar =~/\b(?:if|then|do|goto|integer|real|call|\d+)\b/; # is slower!
@@ -3144,29 +3255,78 @@ sub identify_globals_used_in_subroutine {
 # We do a recusive descent for all called subroutines, and for the leaves we do the analysis
 sub determine_argument_io_direction_rec {
     ( my $f, my $stref ) = @_;
-    my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+#    my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
     if (exists $stref->{'Subroutines'}{$f}{'CalledSubs'}) {
         for my $calledsub (keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'} }) {
             $stref=determine_argument_io_direction_rec($calledsub,$stref);
         }
     }
-    $stref=determine_argument_io_direction_rec_core($f,$stref);
+#    $stref=determine_argument_io_direction_rec_core($f,$stref);
     # For a leaf, this should resolve all
     # For a non-leaf, we should merge the declarations from the calls
-    if (exists $stref->{'Subroutines'}{$f}{'CalledSubs'}) {
-        for my $calledsub (keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'} }) {
-    # This is a bit tricky. First we must build an lookup table between
-    # the subroutine arguments and the arguments to the call.
-            $stref=merge_iodir_info($stref,$f,$calledsub);
-        }
-     }
+    # This is more tricky than it seems because a sub can be called multiple times with different arguments.
+    # So first we need to determine the argument of the call, then map them to the arguments of the sub
+    $stref=refactor_subroutine_signature($stref,$f);
+    get_argnames_for_calls_in_sub($f,$stref);
+#    if (exists $stref->{'Subroutines'}{$f}{'CalledSubs'}) {
+#        for my $calledsub (keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'} }) {
+#    # This is a bit tricky. First we must build an lookup table between
+#    # the subroutine arguments and the arguments to the call.
+#            $stref=merge_iodir_info($stref,$f,$calledsub);
+#        }
+#     }
         
     
     return $stref;
 } # determine_argument_io_direction_rec()
 # -----------------------------------------------------------------------------
+sub get_argnames_for_calls_in_sub {
+    ( my $f, my $stref ) = @_;
+    warn $f;
+    my $srcref = $stref->{'Subroutines'}{$f}{'Lines'};
+	
+	    if ( defined $srcref ) {
+        for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+            my $line = $srcref->[$index];
+            my $tags=$stref->{'Subroutines'}{$f}{'Info'}->[$index];
+            if ( $line =~ /^C\s+/ ) {
+                next;
+            }
+            if (exists $tags->{'SubroutineCall'}) {
+            	# First refactor!
+            	my $name = $tags->{'SubroutineCall'}{'Name'};
+            	
+            	$stref=refactor_subroutine_call_args($stref, $f, $index);
+            	# Now get the RefactoredArgs
+            	my $ref_call_args=$stref->{'Subroutines'}{$f}{'Info'}->[$index]{'SubroutineCall'}{'RefactoredArgs'};
+            	print "CALL $name\n";
+#            	print "CALL $name: ",join(',',@{ $ref_call_args })."\n";
+            	# Get the RefactoredArgList            	
+            	my $ref_sig_args=$stref->{'Subroutines'}{$name}{'RefactoredArgList'};
+#            	print " SIG $name: ",join(',',@{ $ref_sig_args })."\n";
+            	my $ca=scalar(@{$ref_call_args}); my $sa=scalar(@{$ref_sig_args});
+            	 if ($ca!=$sa) {
+            	 	print "NOT SAME LENGTH! ($ca<>$sa)\n";
+            	 } else {
+            	my $i=0;
+            	for my $call_arg (@{$ref_call_args }) {
+            		my $sig_arg=$ref_sig_args->[$i];
+            		$i++;
+            		if ($call_arg ne $sig_arg) {
+            			print "($call_arg => $sig_arg)\n";
+            		}
+            	}
+            	 }
+            	# create the map
+            }
+        }
+	    }
+	
+} # END of get_argnames_for_calls_in_sub()
+# -----------------------------------------------------------------------------
 sub merge_iodir_info {
 	(my $stref,my $f,my $calledsub) =@_;
+	
 	return $stref;
 }
 # -----------------------------------------------------------------------------
