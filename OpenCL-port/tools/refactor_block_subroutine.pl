@@ -50,37 +50,40 @@ maintains a global state with the following structure:
         CallTree
         Indents
         Subroutines
-            Source
-            Lines
-            Info
-            Blocks  
-            HasBlocks
-            Args
-            Vars    
-            Status
-            ConflictingParams
-            Globals
-            CalledSubs
-            CommonIncludes
-            StringConsts
-            Commons
-            Gotos
-            Program
-            Called
+            Source -- 
+            Lines -- the source per line, split lines have been merged
+            Info -- information about each line            
+            Blocks -- blocks marked for refactoring into subroutines
+            HasBlocks 
+*            Args -- subroutine arguments
             Includes
-            HasCommons            
-            RefactoredArgIODirs
-            RefactoredArgList
-            RefactoredCode
+*            Vars -- all declared variables. FIXME: do this for functions too!
+            CalledSubs --   
+            Status -- 
+*            Globals            
+*            CommonIncludes
+*            Commons
+*            HasCommons            
+            ConflictingParams -- 
+            StringConsts -- string constants are replaced by placeholders            
+            Gotos -- 
+*            Program --
+            Called --
+*            RefactoredArgIODirs
+*            RefactoredArgList
+            RefactoredCode -- refactored source, line by line, long lines are split
         Functions
             Source            
             Lines
             Info
-            Status
-            StringConsts      
-            HasBlocks
-            Called
+            [Blocks]
+            HasBlocks            
             Includes            
+            CalledSubs
+            Status      
+            StringConsts
+            [Gotos]
+            Called
             RefactoredCode      
         Includes
             Source
@@ -88,11 +91,10 @@ maintains a global state with the following structure:
             Info
             Vars            
             Status            
-            Type
-            Root
-            Commons
-            HasBlocks
-            ConflictingGlobals
+*            Type -- Common or Parameter
+*            Root -- highest subroutine in the call tree for every include
+            Commons 
+*            ConflictingGlobals
             RefactoredCode
         BuildSources    
 
@@ -410,7 +412,7 @@ sub main {
 	$stateref = refactor_includes($stateref);
 	$stateref = refactor_called_functions($stateref);
     
-    die Dumper(keys %{$stateref->{'Functions'}{'ran1'}});
+    die Dumper(keys %{$stateref->{'Functions'}{'gammp'}});
     
 	if ( not $call_tree_only ) {
 
