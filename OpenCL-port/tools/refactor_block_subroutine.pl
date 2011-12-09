@@ -8,15 +8,120 @@ use Data::Dumper;
 
 =begin markdown
 
-# FORTRAN Refactoring Tool
+# FORTRAN Refactoring Tool |$VER|
+
+## SYNOPSIS
+
+    |$usage|
+    
+## DESCRIPTION
+
+    The purpose of this tool is to refactor FORTRAN code by automatically performing the following transformations:
+    * Replace all `common` block variables by subroutine arguments.
+    * Factor out marked blocks of code into subroutines
+    * Resolve name conflicts between parameters, local variables and function arguments
+    * Rewrite label-based loops into DO-loops
+    * Normalise the code to lowercase and 6-spaces based layout
+    
+    Furthermore, the tool preforms a number of operations intended to facilitate translation to C:
+    * Replace `continue` statements by calls to a no-op routine
+    * Analyse which `goto`'s can be replaced by `break` statements in C
+    * Analyse the IO direction and type of all subroutine arguments
+     
+    It is designed to work on large FORTRAN programs, split over multiple files, written in a mixture of FORTRAN 77 and FORTRAN 95.        
 
 ## TODOs
   
-* Create intermediate directories for converted files
-*  Determine if a subroutine argument is I, O or I/O => need to do this recursively
 *  Declarations from F2C-ACC are broken, emit our own => OK
 *  But F2C-ACC's function calls are wrong too! They use the non-pointer vars where they should use the pointers! => OK
 *  Put F2C-ACC into our tree, if the license allows it. => OK
+
+## DESIGN
+
+Because the aim of the tool is to refactor the source code, and not to translate or compile it, 
+we don't use a full grammar-based lexer and parser but instead we perform context-free parsing using  
+regular expression. As in many cases we require the context to analysed the parsed data, the program 
+maintains a global state with the following structure:
+
+    State
+        Top
+        Nodes
+        NId
+        CallTree
+        Indents
+        Subroutines
+            Source
+            Lines
+            Info
+            Blocks  
+            HasBlocks
+            Args
+            Vars    
+            Status
+            ConflictingParams
+            Globals
+            CalledSubs
+            CommonIncludes
+            StringConsts
+            Commons
+            Gotos
+            Program
+            Called
+            Includes
+            HasCommons            
+            RefactoredArgIODirs
+            RefactoredArgList
+            RefactoredCode
+        Functions
+            Source            
+            Lines
+            Info
+            Status
+            StringConsts      
+            HasBlocks
+            Called
+            Includes            
+            RefactoredCode      
+        Includes
+            Source
+            Lines
+            Info
+            Vars            
+            Status            
+            Type
+            Root
+            Commons
+            HasBlocks
+            ConflictingGlobals
+            RefactoredCode
+        BuildSources    
+
+### Refactoring 'common' variables into subroutine arguments
+
+FORTRAN's `common` blocks are a mechanism to create global variables:
+
+"The COMMON statement defines a block of main memory storage so that
+different program units can share the same data without using arguments." [F77 ref]
+
+This is problematic for translation of code to OpenCL as of course it is not possible to have
+globals across memory spaces. 
+(Also, I personally think these globals are /evil/ -- as the FLEXPART codebase shows repeatedly:
+e.g. PI is defined in one place as a parameter and in another place as a common variable, which is only assigned
+in a deeply nested subroutine.) 
+
+#### Codebase Inventory 
+
+To refactor 'common' variables into subroutine arguments requires first of all an analysis of the full codebase. 
+Therefore, the first step is to determine which files in a directory are used by the main program. 
+To do so we first create an inventory of all subroutines, functions and include files in the codebase, 
+and then we perform a dependency analysis and build the call tree.    
+The inventory is done by finding all FORTRAN source files (using `File::Find`, and looking in them 
+for subroutine, function and program signatures and include statements.
+
+#### Dependency Analysis and Call Tree
+ 
+Next, we perform a recursive descent on the main program, descending in all subroutine and function calls.
+
 
 
 ## Draft Outline  
@@ -135,8 +240,24 @@ use File::Copy;
 use Digest::MD5;
 
 our $VER = '0.3';
-our $V   = 0;
-our $W   = 0;
+
+our $usage = "
+    $0 [-hvwCTNbB] <toplevel subroutine name> 
+       [<subroutine name for C translation>]
+    -h: help
+    -w: show warnings 
+    -v: verbose (implies -w)
+    -C: Only generate call tree, don't refactor or emit
+    -T: Translate <subroutine name> and dependencies to C 
+    -N: Don't replace CONTINUE by CALL NOOP
+    -b: Generate SCons build script, currently ignored 
+    -B: Build FLEXPART (implies -b)
+    -G: Generate Markdown documentation
+    \n";
+    
+our $V   = 0; # Verbose
+our $W   = 0; # Warnings
+our $I   = 0; # Info
 
 # Instead of FORTRAN's 'continue', we insert a call to a subroutine noop() that does nothing
 # This is because F2C_ACC handles continue incorrectly
@@ -217,18 +338,7 @@ sub main {
 	$W = ( $opts{'w'} or $V ) ? 1 : 0;
 	my $help = ( $opts{'h'} ) ? 1 : 0;
 	if ($help) {
-		die "
-    $0 [-hvwCTNbB] <toplevel subroutine name> [<(extracted) subroutine name>]
-    -h: help
-    -w: show warnings 
-    -v: verbose (implies -w)
-    -C: Only generate call tree, don't refactor or emit
-    -T: Translate <subroutine name> and dependencies to C 
-    -N: Don't replace CONTINUE by CALL NOOP
-    -b: Generate SCons build script, currently ignored 
-    -B: Build FLEXPART (implies -b)
-    -G: Generate Markdown documentation
-    \n";
+		die $usage;
 	}
 	if ( $opts{'G'} ) {
 		print "Generating docs...\n";
@@ -289,7 +399,7 @@ sub main {
 # then us this info to determine the IO direction
 
 	# Now we do the reformatting, block detection etc.
-    $stateref =determine_argument_io_direction_rec($subname,$stateref);
+    $stateref = determine_argument_io_direction_rec($subname,$stateref);
 
 	$stateref = analyse_sources($stateref);
 
@@ -299,7 +409,9 @@ sub main {
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
 	$stateref = refactor_called_functions($stateref);
-
+    
+    die Dumper(keys %{$stateref->{'Functions'}{'ran1'}});
+    
 	if ( not $call_tree_only ) {
 
 		# Emit the refactored source
@@ -490,8 +602,6 @@ sub parse_fortran_src {
 sub analyse_sources {
 	( my $stref ) = @_;
 	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
-
-	 #		print 'ANALYZING <',$f,'> ' ,$stref->{'Subroutines'}{$f}{'Called'},"\n";
 		if (
 			(
 				exists $stref->{'Subroutines'}{$f}{'Called'}
@@ -501,14 +611,9 @@ sub analyse_sources {
 				&& $stref->{'Subroutines'}{$f}{'Program'} == 1 )
 		  )
 		{
-#			$stref = determine_argument_io_direction( $f, $stref );
-
-			#            if ( $stref->{'Subroutines'}{$f}{'HasBlocks'} == 1 ) {
-			#                $stref = separate_blocks_OLD( $f, $stref );
-			#            }
 			$stref = identify_loops_breaks( $f, $stref );
 		} else {
-			print "SKIPPING ANALYSIS for $f:" .. "\n";
+			print "INFO: SKIPPING ANALYSIS for $f\n" if $I;
 		}
 	}
 	for my $f ( keys %{ $stref->{'Functions'} } ) {
@@ -516,7 +621,9 @@ sub analyse_sources {
 			&& $stref->{'Functions'}{$f}{'Called'} == 1 )
 		{
 			$stref = identify_loops_breaks( $f, $stref );
-		}
+		} else {
+            print "INFO: SKIPPING ANALYSIS for $f\n" if $I;
+        }
 	}
 	return $stref;
 }
@@ -1288,7 +1395,9 @@ sub create_refactored_subroutine_signature {
 			my $kind = 'Unknown';
 			if ( exists $maybe_args->{$arg}{'Kind'} ) {
 				$kind = $maybe_args->{$arg}{'Kind'};
-			}
+			} else {
+                print "WARNING: No type info for $arg in $f\n" if $W;
+            }
 			my $ntabs = ' ' x 8;
 			if ( $iodir eq 'In' and $kind eq 'Scalar' ) {
 				$ntabs = '';
@@ -2027,7 +2136,16 @@ sub emit_refactored_subroutine {
 	my $srcref = $stref->{'Subroutines'}{$f}{'RefactoredCode'};
 	if ( defined $srcref ) {
 		my $s = $stref->{'Subroutines'}{$f}{'Source'};
-		print "INFO: emitting refactored code for $f in $s\n" if $V;
+		print "INFO: emitting refactored code for $f in $s\n" if $V;		
+		if ($s=~/\w\/\w/) {
+			# Source resides in subdirectory, create it if required
+			my @dirs=split(/\//,$s); pop @dirs;
+			map { my $targetdir=$_;
+                if ( not -e $targetdir ) {
+                    mkdir $targetdir;
+                }
+			} @dirs; 			
+		}
 		my $mode = '>';
 		if ( -e "$dir/$s" and not $overwrite ) {
 			$mode = '>>';
@@ -2061,7 +2179,7 @@ sub emit_all {
 		  @incs;    # Perl::Critic wants a for-loop, drat it
 
 	} elsif ( not -d $targetdir ) {
-		die "$targetdir exists but is not a directory!\n";
+		die "ERROR: $targetdir exists but is not a directory!\n";
 	} else {
 		my @oldsrcs = glob("$targetdir/*.f");
 		map { unlink $_ } @oldsrcs;
@@ -2089,29 +2207,11 @@ sub emit_all {
 		emit_refactored_include( $f, $targetdir, $stref );
 	}
 	for my $f ( keys %{ $stref->{'Functions'} } ) {
-
-#    	die "# FIXME: the generated source only contains the subroutine, not the functions!";
 		emit_refactored_function( $f, $targetdir, $stref );
 	}
 
-	# copy functions
-	#	my %funcsrcs = ();
-	#	for my $func ( keys %{ $stref->{'Functions'} } ) {
-	#		if ( not exists $funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } ) {
-	#			$funcsrcs{ $stref->{'Functions'}{$func}{'Source'} } = 1;
-	#			$stref->{'BuildSources'}{'F'}
-	#			  { $stref->{'Functions'}{$func}{'Source'} } = 1;
-	#		} else {
-	#			$funcsrcs{ $stref->{'Functions'}{$func}{'Source'} }++;
-	#		}
-	#	}
-	# FIXME: this overwrites the refactored functions!
-	#	for my $funcsrc ( keys %funcsrcs ) {
-	#		if (not -e "$targetdir/$funcsrc") {
-	#		copy( $funcsrc, "$targetdir/$funcsrc" );
-	#		}
-	#	}
 	# NOOP source
+	# Note that we always use the C source
 	if ($noop) {
 		copy( '../OpenCL-port/tools/noop.c', "$targetdir/noop.c" );
 	}
@@ -3684,8 +3784,8 @@ sub determine_argument_io_direction_core {
             
 			# Skip the declarations
 			if ( exists $tags->{'VarDecl'} ) { next; }
-			# Write statements
-            if ($line=~/^\s+write\s*\(\s*(.+)$/) {
+			# Write & File open statements
+            if ($line=~/^\s+(?:write|open)\s*\(\s*(.+)$/) {
             	find_vars( $1, \%args, \&set_io_dir );
             } 
 			if (
@@ -5000,6 +5100,7 @@ sub determine_argument_io_direction_core {
 
 					# Detect and standardise comments
 					$line =~ /^[C\*\!]/i && next;
+					# Find subroutine/program signatures
 					$line =~ /^\s+(subroutine|program)\s+(\w+)/i && do {
 						my $is_prog = $1 eq 'program' ? 1 : 0;
 						if ( $is_prog == 1 ) {
@@ -5035,12 +5136,14 @@ sub determine_argument_io_direction_core {
 							  if $W;
 						}
 					};
+					# Find include statements
 					$line =~ /^\s*include\s+\'(\w+)\'/ && do {
 						my $inc = $1;
 						if ( not exists $stref->{'Includes'}{$inc} ) {
 							$stref->{'Includes'}{$inc}{'Status'} = $UNREAD;
 						}
 					};
+					# Find function signatures
 					$line =~ /^\s*\w*\s+function\s+(\w+)/i && do {
 						my $func = lc($1);
 						$stref->{'Functions'}{$func}{'Source'} = $src;
@@ -5052,7 +5155,30 @@ sub determine_argument_io_direction_core {
 			}
 			return $stref;
 		}    # END of find_subroutines_functions_and_includes()
+ # -----------------------------------------------------------------------------
+        # Quick and dirty way to get the Kinds of all arguments
+        sub get_maybe_args_globs {
+            ( my $stref, my $f ) = @_;
 
+            my @globs      = ();
+            my %maybe_args = ();
+            for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
+                if ( defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc} ) {
+                    @globs = (
+                        @globs,
+                        @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
+                    );
+                }
+                if ( defined $stref->{'Includes'}{$inc}{'Vars'} ) {
+                    %maybe_args =
+                      ( %maybe_args, %{ $stref->{'Includes'}{$inc}{'Vars'} } );
+                }
+            }
+            %maybe_args =
+              ( %{ $stref->{'Subroutines'}{$f}{'Vars'} }, %maybe_args );
+            my %globals = map { $_ => 1 } @globs;
+            return ( \%maybe_args, \%globals );
+        }
  # -----------------------------------------------------------------------------
 		sub sub_func_or_incl {
 			( my $f, my $stref ) = @_;
@@ -5347,19 +5473,15 @@ ratio="fill";
 			close $DOT;
 		}
 
- # -----------------------------------------------------------------------------
- # Like Haskell's findWithDefault
-		sub lookup {
-
-		}
 
  # -----------------------------------------------------------------------------
 
 		sub generate_docs {
 			my $scriptsrc   = $0;
-			my $markdownsrc = $scriptsrc;
-			$markdownsrc =~ s/^.*\///;
-			$markdownsrc =~ s/\.pl$/.markdown/;
+			my $src=$scriptsrc;
+			$src=~s/\.pl//;
+			$src =~ s/^.*\///;   
+			my $markdownsrc = $src.'.markdown';
 			open my $PL, '<', $scriptsrc;
 			open my $MD, '>', $markdownsrc;
 			my $md = 0;
@@ -5374,20 +5496,25 @@ ratio="fill";
 				};
 
 				if ( $md == 1 ) {
-
-					#my $el;eval("\$el= q($_)");
-					print $MD $_;    #$el;
+                    my $el=$_;
+					while ($el=~/\|(\$\w+)\|/) {
+						my $var=$1;	# so this is a '$' and then some \w's	
+						my $evar='';				  
+						eval("\$evar= $var");
+						warn $var,'=',$evar;
+						my $svar="\\|\\$var\\|";
+						$el=~s/$svar/$evar/;						
+					}					
+					print $MD $el;    
 				}
 			}
 			close $PL;
 			close $MD;
-			my $tex_src_in = $markdownsrc;
-			$tex_src_in =~ s/\.markdown/_in.tex/;
+			my $tex_src_in = $src.'_in.tex';			
 			system("pandoc -f markdown -t latex $markdownsrc > $tex_src_in ");
 
-			my $tex_src_out = $tex_src_in;
+			my $tex_src_out = $src.'.tex';
 
-			$tex_src_out =~ s/_in\././;
 			open my $TEXIN,  '<', $tex_src_in;
 			open my $TEXOUT, '>', $tex_src_out;
 			print $TEXOUT <<'ENDH';
@@ -5425,29 +5552,15 @@ ENDH
 			print $TEXOUT '\end{document}' . "\n";
 			close $TEXOUT;
 			system("pdflatex $tex_src_out");
+			my @exts=qw(
+			_in.tex
+            .toc
+            .log
+            .idx
+            .aux
+            );
+            map { unlink $src.$_ } @exts;
 
 		}
 
-		# Quick and dirty way to get the Kinds of all arguments
-		sub get_maybe_args_globs {
-			( my $stref, my $f ) = @_;
 
-			my @globs      = ();
-			my %maybe_args = ();
-			for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
-				if ( defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc} ) {
-					@globs = (
-						@globs,
-						@{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
-					);
-				}
-				if ( defined $stref->{'Includes'}{$inc}{'Vars'} ) {
-					%maybe_args =
-					  ( %maybe_args, %{ $stref->{'Includes'}{$inc}{'Vars'} } );
-				}
-			}
-			%maybe_args =
-			  ( %{ $stref->{'Subroutines'}{$f}{'Vars'} }, %maybe_args );
-			my %globals = map { $_ => 1 } @globs;
-			return ( \%maybe_args, \%globals );
-		}
