@@ -4,7 +4,19 @@ use strict;
 use Carp;
 use Data::Dumper;
 
-=pod
+=head1 SYNOPSIS
+
+Run the script with -G and read the generated PDF documentation
+
+=head1 TODOs
+
+*  Subroutine args marked as InOut can actually be In if the value is never used. We should check that!
+  
+*  Declarations from F2C-ACC are broken, emit our own => OK
+
+*  But F2C-ACC's function calls are wrong too! They use the non-pointer vars where they should use the pointers! => OK
+
+*  Put F2C-ACC into our tree, if the license allows it. => OK
 
 =begin markdown
 
@@ -29,12 +41,6 @@ use Data::Dumper;
     * Analyse the IO direction and type of all subroutine arguments
      
     It is designed to work on large FORTRAN programs, split over multiple files, written in a mixture of FORTRAN 77 and FORTRAN 95.        
-
-## TODOs
-  
-*  Declarations from F2C-ACC are broken, emit our own => OK
-*  But F2C-ACC's function calls are wrong too! They use the non-pointer vars where they should use the pointers! => OK
-*  Put F2C-ACC into our tree, if the license allows it. => OK
 
 ## DESIGN
 
@@ -410,7 +416,7 @@ sub main {
 	$stateref = refactor_includes($stateref);
 	$stateref = refactor_called_functions($stateref);
     
-    die Dumper(keys %{$stateref->{'Functions'}{'ran1'}});
+#    die Dumper(keys %{$stateref->{'Functions'}{'ran1'}});
     
 	if ( not $call_tree_only ) {
 
@@ -557,7 +563,7 @@ sub parse_fortran_src {
 	my $is_func = exists $stref->{'Functions'}{$f} ? 1 : 0;
 
 # 2. Parse the type declarations in the source, create a per-target table Vars and a per-line VarDecl list
-# We don't do this in functions at the moment, because we don't need to? FIXME?
+# We don't do this in functions at the moment, because we don't need to? NO! FIXME!
 	if ( not $is_func ) {
 		$stref = get_var_decls( $f, $stref );
 	}
@@ -1393,8 +1399,10 @@ sub create_refactored_subroutine_signature {
 			my $iodir =
 			  $stref->{'Subroutines'}{$f}{'RefactoredArgIODirs'}{$arg};
 			my $kind = 'Unknown';
+			my $type = 'Unknown';
 			if ( exists $maybe_args->{$arg}{'Kind'} ) {
 				$kind = $maybe_args->{$arg}{'Kind'};
+				$type = $maybe_args->{$arg}{'Type'};
 			} else {
                 print "WARNING: No type info for $arg in $f\n" if $W;
             }
@@ -1404,7 +1412,7 @@ sub create_refactored_subroutine_signature {
 			} elsif ( $iodir eq 'Out' ) {
 				$ntabs = ' ' x 4;
 			}
-			my $comment = "C      $ntabs$arg:\t$iodir, $kind";
+			my $comment = "C      $ntabs$arg:\t$iodir, $kind, $type";
 			push @${rlines}, [ $comment, { 'Comment' => 1 } ];
 		} else {
 			print "WARNING: No IO info for $arg in $f\n" if $W;
@@ -2078,14 +2086,6 @@ sub emit_refactored_include {
 }
 
 # -----------------------------------------------------------------------------
-
-=head2 Info functions
-
-We need to refactor all called functions in the tree.
-In principle, there's no need to refactor functions that are never called.
-So we make a list of called functions and refactor them
-
-=cut
 
 sub emit_refactored_function {
 	( my $f, my $dir, my $stref ) = @_;
@@ -3801,7 +3801,8 @@ sub determine_argument_io_direction_core {
 								if ( $args{$var} eq 'Unknown' ) {
 									$args{$var} = 'In';
 								} elsif ( $args{$var} eq 'Out' ) {
-									$args{$var} = 'InOut';
+# if the parent arg is Out and the child arg is In, parent arg stays Out!
+									$args{$var} = 'Out';
 								}
 							} elsif ( $iodirs->{$var} eq 'InOut' ) {
 								if ( $args{$var} eq 'Unknown' ) {
@@ -4175,9 +4176,9 @@ sub determine_argument_io_direction_core {
 			( my $f, my $stref ) = @_;
 
 			my $is_incl = exists $stref->{'Includes'}{$f} ? 1 : 0;
-			my $sub_or_incl = $is_incl ? 'Includes' : 'Subroutines';
-
-			my $srcref = $stref->{$sub_or_incl}{$f}{'Lines'};
+#			my $sub_or_incl = $is_incl ? 'Includes' : 'Subroutines';
+            my $sub_func_incl = sub_func_or_incl($f,$stref);
+			my $srcref = $stref->{$sub_func_incl}{$f}{'Lines'};
 			if ( defined $srcref ) {
 				print "\nVAR DECLS in $f:\n" if $V;
 				my %vars  = ();
@@ -4189,16 +4190,16 @@ sub determine_argument_io_direction_core {
 						next;
 					}
 					if ( $line =~ /^\!\s/ ) {
-						$stref->{$sub_or_incl}{$f}{'Info'}
+						$stref->{$sub_func_incl}{$f}{'Info'}
 						  ->[$index]{'TrailingComments'} = {};
 						next;
 					}
 					if ( $line =~ /implicit\s+none/ ) {
 
 						#            	print "INFO: $f has 'implicit none'\n";
-						$stref->{$sub_or_incl}{$f}{'Info'}
+						$stref->{$sub_func_incl}{$f}{'Info'}
 						  ->[$index]{'ImplicitNone'} = {};
-						$stref->{$sub_or_incl}{$f}{'ImplicitNone'} = $index;
+						$stref->{$sub_func_incl}{$f}{'ImplicitNone'} = $index;
 					}
 					if ( $line =~
 /(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
@@ -4259,16 +4260,16 @@ sub determine_argument_io_direction_core {
 						print "\t", join( ',', @varnames ), "\n" if $V;
 
 						#warn "VARDECL in $f: ",join(',',@varnames)."\n";
-						$stref->{$sub_or_incl}{$f}{'Info'}
+						$stref->{$sub_func_incl}{$f}{'Info'}
 						  ->[$index]{'VarDecl'} = \@varnames;
 						if ($first) {
 							$first = 0;
-							$stref->{$sub_or_incl}{$f}{'Info'}
+							$stref->{$sub_func_incl}{$f}{'Info'}
 							  ->[$index]{'ExGlobVarDecls'} = {};
 						}
 					}
 				}
-				$stref->{$sub_or_incl}{$f}{'Vars'} = \%vars;
+				$stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;
 			}
 			return $stref;
 		}    # END of get_var_decls()
