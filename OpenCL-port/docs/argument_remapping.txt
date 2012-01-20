@@ -1,0 +1,175 @@
+# Fortran refactoring: reducing subroutine arguments
+
+In OpenCL, every argument of a kernel is copied separately to the device memory.
+Fortran routines such as the core of FlexPart can have hundreds of arguments, so copying them separately
+might result in a large overhead. Therefore, we need to refractor the code to merge the arguments.
+
+The basic pattern is:
+
+* In the host code: group all arguments into a fixed set of arrays
+
+The basic Fortran code for this is:
+
+  integer, dimension(:), allocatable :: c
+  allocate(c(size(a)+size(b)))
+  c(1:size(a)) = a
+  c(size(a)+1:size(a)+size(b)) = b
+
+or if all bounds are static:
+
+	integer :: a(N_A)
+	integer :: b(N_B)
+	integer :: c(N_A+N_B)
+	c(1:N_A)=a
+	c(N_A+1:N_B)=b
+
+and for scalars of course simply:
+
+	c(1)=a
+	c(2)=b
+
+* Create the subroutine signature for using the new array types
+
+* Call the subroutine with the new arrays as arguments
+
+* On the device side, i.e. in the called subroutine:
+
+	! all argument declarations first 
+	integer :: a(N_A)
+	integer :: b(N_B)
+	integer :: c(N_A+N_B)
+	a=c(1:N_A)
+	b=c(N_A+1:N_B)
+
+and for scalars of course simply:
+
+	integer :: a,b
+	a=c(1)
+	b=c(2)
+
+* Reshaping
+
+If the original arrays are not 1-D, we need to reshape them, which means that we need to retrieve and store the information about the dimensions and their sizes.
+Thanks to Fortran's `shape()` feature we can flatten anything 
+
+          real,dimension(SZ1,SZ2,SZ3) :: array
+          real, dimension(size(array)):: array1d 
+          array1d = reshape(array,shape(array1d))
+
+Inside the subroutine, we need to do the reverse operation. This is fine in Fortran, but in C/OpenCL it will be more difficult.
+
+          real,dimension(3) :: ashape = (/ SZ1,SZ2,SZ3 /)
+          real,dimension(SZ1,SZ2,SZ3) :: array
+          real, dimension(size(array)):: array1d 
+          array1d = reshape(array,shape(array1d))
+
+* Array bounds
+
+By writing code such as
+
+	 real cbaseflux(0:nxmax-1,0:nymax-1)
+
+the starting index can be defined. That means that the shape needs to store both indices rather than the size!
+If there is no `:` then the starting index is 1.
+
+We need a separate array for every type and IO dir, and for scalars and arrays. 
+
+We remap as follows:
+
+ Kind
+ - Scalar => 0, Array => 1
+ IODir
+ - In => 1
+ - Out => 0
+ - InOut => 2
+ Type
+    float
+    double 
+    char
+    short
+    int 
+    long
+
+We use four arrays: int, long, float, double and we have 2 bits extra to indicate if it is char (1=>0),short (2=>1) or int (4=>3), for use in the wrap/unwrap code.
+ 
+So the encoding is:
+ 
+	Kind(1)|IODir(2)|Type(2)|Subtype(2)|Index(9)
+
+The 9 is arbitrary, just to make up 16 bits
+      
+The actual remapped argument list consists of the arrays for both Arrays and Scalars, for all 4 Types and all 3 IODirs, so in the worst case 24 arguments, all of them arrays.
+
+The steps to follow are:
+
+1. Identify the types, kinds and IO directions of all arguments.
+2. Create the encoding.
+3. Using this encoding, remap the arguments. 
+
+ sub remap_args { (my $stref, my$f) =@_;
+ 	
+ 	my $subtype;
+ 	my @index=();
+    my $refargs=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'List'};
+
+    my $aidx=24; # {Scalar,Array}{In,Out,InOut}x{int,long,float,double} 
+    my $code=0;	
+    my $remapped_args=[];
+ 	for my $refarg (@{$refargs}) {
+ 		my $kind=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Kind'};
+# If it's an array, we need the dimensions as well!
+ 		my $type=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Type'};
+ 		my $iodir=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'IODir'};
+ 		my $k=($kind eq 'Scalar')?0:1;
+ 		my $i= $iodir eq 'In' ? 1 : ($iodir eq 'Out' ? 0 : 2);
+ 		(my $t,my $s)=get_typecode($refarg,$type);
+ 		if ($t==-1) { # Unknown type, don't remap
+ 		 $k=1; die "remap_args(): Unknown type $t, can't remap!\n";
+ 		} else { 		
+ 		 if (defined $index[$i][$t]) { 
+ 		 	$index[$i][$t]++ 
+ 		 } else {
+ 			$index[$i][$t]=0;
+ 		 }
+ 		}
+ 		if ($k==1) {
+ 			# 1|_______|xxxxxxxx
+ 			$code=(1 << 15)+($aidx & 0xFF);
+ 			$remapped_args->[$aidx]=$refarg;
+ 			$aidx++;
+ 		} else {
+ 			# 0|xx|xx|xx|_|xxxxxxxx
+ 			$code=(0 << 15)+($i << 13)+($t << 11)+($s << 9)+ ($index[$i][$t] & 0xFF);
+ 			$remapped_args->[$i*4+$t]='scalars_'.toCType($type).'_'.lc($iodir);
+ 		}
+ 		$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Remapped'}=$code;
+ 	}
+ 	@{ $remapped_args }=grep {defined $_} @{ $remapped_args };
+ 	  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'RemappedList'}=$remapped_args;
+
+    return $stref;	
+ 	
+ }
+ # -----------------------------------------------------------------------------
+
+ sub get_typecode { (my $var,my $ftype)=@_;
+ 	my $t=0;my $s=0;    
+    my %corr = (
+        'logical'          => [0,3],
+        'integer'          => [0,3],
+        'real'             => [2,0],
+        'double precision' => [3,0],
+        'doubleprecision'  => [3,0],
+        'character'        => [0,1],
+        'integer*1'          => [0,0],
+        'integer*2'          => [0,1],
+        'integer*4'          => [0,2],
+        'integer*8'          => [1,0]
+    );
+    if ( exists( $corr{$ftype} ) ) {
+        return @{$corr{$ftype}};
+    } else {
+        print "WARNING: NO TYPE for $var $ftype\n" if $W;
+        return (-1,-1);
+    } 	 	
+ }

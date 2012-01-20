@@ -20,7 +20,8 @@ As I am interested in factored-out routines, I will focus on single-call routine
         1. determine it's a local variable, i.e. not in the caller argument list. OK
         2. look if it occurs after the call to the subroutine => need to parse all lines
 
-* Remap scalar arguments into arrays to have fewer arguments to pass
+* Remap scalar arguments into arrays to have fewer arguments to pass -> mostly done, but not complete
+What is needed is not just a merge for scalars, but also for arrays    
 
 * Deal with OFRTRAN's arcane KIND approach 
   
@@ -3387,11 +3388,36 @@ sub determine_argument_io_direction_core {
 							$var =~ s/^\s+//;
 							$var =~ s/\s+$//;
 							my $tvar = $var;
-							$tvar =~ s/\(.*?\)/(0)/g;
+							$tvar =~ s/\((.*?)\)/(0)/g; # get rid of array shape
+							my $shapestr =$1;
+							my @shape=();
+							if (defined $shapestr) {
+								if ( $shapestr=~/;/) {
+								my @elts = split(/;/,$shapestr);
+									for my $elt (@elts) {
+										my @tup=();
+										if ($elt=~/:/) {
+											@tup = split(/;/,$shapestr);
+										} else {
+											@tup=(1,$elt);
+										}
+										@shape=(@shape,@tup);
+									} 
+															
+							     } else { 
+							     	if ($shapestr=~/:/) {
+                                            @shape = split(/;/,$shapestr);
+							     	} else {
+								    @shape=(1,$shapestr);
+							     	}
+							     }
+							} 
+							warn "$line => $tvar\t[",join(',',@shape),"]\n";
 							if ( $tvar =~ s/\(.*?\)// ) {
 								$tvar =~ s/\*\d+//
 								  ; # FIXME: char string handling is not correct!
 								$vars{$tvar}{'Kind'} = 'Array';
+								$vars{$tvar}{'Shape'} = [];
 								$p = '()';
 							} else {
 								$vars{$tvar}{'Kind'} = 'Scalar';
@@ -3430,6 +3456,7 @@ sub determine_argument_io_direction_core {
 				}
 				$stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;
 			}
+			die "FIXME: shapes not correct!";
 			return $stref;
 		}    # END of get_var_decls()
 
@@ -4220,9 +4247,13 @@ print $f.':'.scalar @{ $refargs }," => ";
     my $remapped_args=[];
  	for my $refarg (@{$refargs}) {
  		my $kind=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Kind'};
+ 		
  		my $type=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Type'};
  		my $iodir=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'IODir'};
  		my $k=($kind eq 'Scalar')?0:1;
+ 		if ($k==1) {
+ 			# If it's an array, we need the dimensions as well!
+ 		}
  		my $i= $iodir eq 'In' ? 1 : ($iodir eq 'Out' ? 0 : 2);
  		(my $t,my $s)=get_typecode($refarg,$type);
  		if ($t==-1) { # Unknown type, don't remap
