@@ -1,12 +1,11 @@
 # Fortran refactoring: reducing subroutine arguments
 
 In OpenCL, every argument of a kernel is copied separately to the device memory.
-Fortran routines such as the core of FlexPart can have hundreds of arguments, so copying them separately
-might result in a large overhead. Therefore, we need to refractor the code to merge the arguments.
+Fortran routines such as the core of FlexPart can have hundreds of arguments, so copying them separately might result in a large overhead. Therefore, we need to refractor the code to merge the arguments.
 
 The basic pattern is:
 
-* In the host code: group all arguments into a fixed set of arrays
+* In the host code, i.e. the caller: group all arguments into a fixed set of arrays
 
 The basic Fortran code for this is:
 
@@ -28,11 +27,13 @@ and for scalars of course simply:
 	c(1)=a
 	c(2)=b
 
-* Create the subroutine signature for using the new array types
-
 * Call the subroutine with the new arrays as arguments
+- determine which arrays are present,
+- create a signature with their names in order
 
 * On the device side, i.e. in the called subroutine:
+- Create the subroutine signature for using the new array types
+- Map the new arrays to the old ones
 
 	! all argument declarations first 
 	integer :: a(N_A)
@@ -52,16 +53,25 @@ and for scalars of course simply:
 If the original arrays are not 1-D, we need to reshape them, which means that we need to retrieve and store the information about the dimensions and their sizes.
 Thanks to Fortran's `shape()` feature we can flatten anything 
 
-          real,dimension(SZ1,SZ2,SZ3) :: array
-          real, dimension(size(array)):: array1d 
-          array1d = reshape(array,shape(array1d))
+	! The original array
+	real,dimension(SZ1,SZ2,SZ3) :: array
+	! Corresponding 1-D array
+	real, dimension(size(array)):: array1d 
+	! reshaping
+	array1d = reshape(array,shape(array1d))
+
+So we need to generate the 2nd and 3rd statement for every array
 
 Inside the subroutine, we need to do the reverse operation. This is fine in Fortran, but in C/OpenCL it will be more difficult.
 
-          real,dimension(3) :: ashape = (/ SZ1,SZ2,SZ3 /)
-          real,dimension(SZ1,SZ2,SZ3) :: array
-          real, dimension(size(array)):: array1d 
-          array1d = reshape(array,shape(array1d))
+	! The shape of the original array, not needed?
+        real,dimension(3) :: ashape = (/ SZ1,SZ2,SZ3 /)
+	! The declaration of the original array, just keep it
+        real,dimension(SZ1,SZ2,SZ3) :: array
+	!  The 1-D array extracted from the argument array
+        real, dimension(size(array)):: array1d 
+	! Reshape array1d into array
+        array = reshape(array1d,shape(array)) 
 
 * Array bounds
 
@@ -69,7 +79,7 @@ By writing code such as
 
 	 real cbaseflux(0:nxmax-1,0:nymax-1)
 
-the starting index can be defined. That means that the shape needs to store both indices rather than the size!
+the starting index can be defined. That means that the shape needs to store both indices rather than the size! This is strange as the Fortran shape function does not support this.
 If there is no `:` then the starting index is 1.
 
 We need a separate array for every type and IO dir, and for scalars and arrays. 
@@ -102,7 +112,7 @@ The actual remapped argument list consists of the arrays for both Arrays and Sca
 
 The steps to follow are:
 
-1. Identify the types, kinds and IO directions of all arguments.
+1. Identify the types, kinds, shapes and IO directions of all arguments.
 2. Create the encoding.
 3. Using this encoding, remap the arguments. 
 
@@ -173,3 +183,15 @@ The steps to follow are:
         return (-1,-1);
     } 	 	
  }
+
+* We need to combine remapping and reshaping. For every array: 
+
+- reshape to 1-D (unless it is 1-D and starting with 1)
+- remap
+
+- unmap
+- reshape to original shape
+
+The only complication is that the declarations must be inserted after the other declarations, both in the caller and the called sub.
+In the caller, the reshaping & remapping code comes just before the subroutine call so it can be part of it.
+In the called function, the reshaping & remapping code comes just after the declarations.

@@ -276,10 +276,10 @@ our $usage = "
     -B: Build FLEXPART (implies -b)
     -G: Generate Markdown documentation
     \n";
-    
-our $V   = 0; # Verbose
-our $W   = 0; # Warnings
-our $I   = 0; # Info
+
+our $V = 0;    # Verbose
+our $W = 0;    # Warnings
+our $I = 0;    # Info
 
 # Instead of FORTRAN's 'continue', we insert a call to a subroutine noop() that does nothing
 # This is because F2C_ACC handles continue incorrectly
@@ -370,7 +370,7 @@ sub main {
 	}
 	if ( $opts{'C'} ) {
 		$call_tree_only = 1;
-		$main_tree      = $ARGV[1] ? 0 : 1;
+		$main_tree = $ARGV[1] ? 0 : 1;
 
 	}
 	if ( $opts{'T'} ) {
@@ -422,7 +422,7 @@ sub main {
 # then us this info to determine the IO direction
 
 	# Now we do the reformatting, block detection etc.
-    $stateref = determine_argument_io_direction_rec($subname,$stateref);
+	$stateref = determine_argument_io_direction_rec( $subname, $stateref );
 
 	$stateref = analyse_sources($stateref);
 
@@ -432,7 +432,7 @@ sub main {
 	$stateref = refactor_all_subroutines($stateref);
 	$stateref = refactor_includes($stateref);
 	$stateref = refactor_called_functions($stateref);
-    
+
 	if ( not $call_tree_only ) {
 
 		# Emit the refactored source
@@ -586,7 +586,8 @@ sub analyse_sources {
 		{
 			$stref = identify_loops_breaks( $f, $stref );
 		} else {
-			print "INFO: Subroutine $f is never called, skipping analysis\n" if $I;
+			print "INFO: Subroutine $f is never called, skipping analysis\n"
+			  if $I;
 		}
 	}
 	for my $f ( keys %{ $stref->{'Functions'} } ) {
@@ -595,8 +596,9 @@ sub analyse_sources {
 		{
 			$stref = identify_loops_breaks( $f, $stref );
 		} else {
-            print "INFO: Function $f is never called, skipping analysis\n" if $I;
-        }
+			print "INFO: Function $f is never called, skipping analysis\n"
+			  if $I;
+		}
 	}
 	return $stref;
 }
@@ -775,10 +777,9 @@ sub refactor_globals {
 
 	print "REFACTORING GLOBALS in $f\n"
 	  if $V; #die Dumper( $stref->{'Subroutines'}{$f}{'Args'}) if $f=~/advance/;
-	my $rlines      = [];
-	my $s           = $stref->{'Subroutines'}{$f}{'Source'};
-	my $is_C_target = exists $stref->{'BuildSources'}{'C'}{$s} ? 1 : 0;
-	my $var_decl_hook = 0;
+	my $rlines        = [];
+	my $s             = $stref->{'Subroutines'}{$f}{'Source'};
+	my $is_C_target   = exists $stref->{'BuildSources'}{'C'}{$s} ? 1 : 0;	
 	my $idx           = 0;
 	for my $annline ( @{$annlines} ) {
 		my $line      = $annline->[0] || '';
@@ -789,8 +790,7 @@ sub refactor_globals {
 		my $skip = 0;
 
 		if ( exists $tags{'Signature'} ) {
-			$stref =
-			  refactor_subroutine_signature( $stref, $f )
+			$stref = refactor_subroutine_signature( $stref, $f )
 			  ;    # Do this before the analysis for RefactoredArgs!
 			$rlines =
 			  create_refactored_subroutine_signature( $stref, $f, $annline,
@@ -810,22 +810,24 @@ sub refactor_globals {
 			$rlines =
 			  create_new_include_statements( $stref, $f, $annline, $rlines );
 
-		   # Then generate declarations for ex-globals
+			# Then generate declarations for ex-globals
 			$rlines =
 			  create_exglob_var_declarations( $stref, $f, $annline, $rlines );
+			  
+			# While we're here, might as well generate the declarations for remapping and reshaping.
+			# If the subroutine contains a call to a function that requires this, of course.
+			# Executive decision: do this only for the routines to be translated to C/OpenCL
 
 		}
 		if ( exists $tags{'VarDecl'} ) {
-			$rlines =
-			  create_refactored_vardecls( $stref, $f, $annline, $rlines,
+			$rlines = create_refactored_vardecls( $stref, $f, $annline, $rlines,
 				$is_C_target );
 			$skip = 1;
 		}
 		if ( exists $tags{'SubroutineCall'} ) {
 
 			# simply tag the common vars onto the arguments
-			$rlines =
-			  create_refactored_subroutine_call( $stref, $f, $annline,
+			$rlines = create_refactored_subroutine_call( $stref, $f, $annline,
 				$rlines );
 			$skip = 1;
 		}
@@ -887,7 +889,8 @@ sub refactor_subroutine_signature {
 "WARNING: CONFLICT in arguments for $f, renamed $var to ${var}_GLOB\n"
 			  if $W;
 			push @nexglobs, $conflicting_params->{$var};
-			$stref->{'Subroutines'}{$f}{'Vars'}{$conflicting_params->{$var}}=$stref->{'Subroutines'}{$f}{'Vars'}{$var};
+			$stref->{'Subroutines'}{$f}{'Vars'}{ $conflicting_params->{$var} } =
+			  $stref->{'Subroutines'}{$f}{'Vars'}{$var};
 		} else {
 			push @nexglobs, $var;
 		}
@@ -901,8 +904,8 @@ sub refactor_subroutine_signature {
 # --------------------------------------------------------------------------------
 sub rename_conflicting_locals {
 	( my $stref, my $f, my $annline, my $rlines ) = @_;
-	my $line      = $annline->[0] || '';
-	my $tags_lref = $annline->[1];
+	my $line               = $annline->[0] || '';
+	my $tags_lref          = $annline->[1];
 	my %conflicting_locals = ();
 	if ( exists $stref->{'Subroutines'}{$f}{'ConflictingGlobals'} ) {
 		%conflicting_locals =
@@ -965,7 +968,8 @@ sub create_refactored_vardecls {
 		                           # NEW code
 		my $spaces = $line;
 		$spaces =~ s/[^\s].*$//;
-		$rline = $spaces
+		$rline =
+		    $spaces
 		  . $stref->{'Subroutines'}{$f}{'Vars'}{ $vars[0] }{'Type'} . ' '
 		  . join( ',', @nvars ) . "\n";
 	}
@@ -1099,17 +1103,25 @@ sub create_refactored_subroutine_signature {
 
 	# IO direction information
 	for my $arg ( @{$args_ref} ) {
-		if ( exists $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'IODir'} ) {
+		if (
+			exists $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}
+			{'IODir'} )
+		{
 			my $iodir =
 			  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'IODir'};
-			my $kind = $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'Kind'};#Unknown';
-			my $type = $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'Type'};#Unknown';
-#			if ( exists $maybe_args->{$arg}{'Kind'} ) {
-#				$kind = $maybe_args->{$arg}{'Kind'};
-#				$type = $maybe_args->{$arg}{'Type'};
-#			} else {
-#                print "WARNING: No type info for $arg in $f\n" if $W;
-#            }
+			my $kind =
+			  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}
+			  {'Kind'};    #Unknown';
+			my $type =
+			  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}
+			  {'Type'};    #Unknown';
+
+		  #			if ( exists $maybe_args->{$arg}{'Kind'} ) {
+		  #				$kind = $maybe_args->{$arg}{'Kind'};
+		  #				$type = $maybe_args->{$arg}{'Type'};
+		  #			} else {
+		  #                print "WARNING: No type info for $arg in $f\n" if $W;
+		  #            }
 			my $ntabs = ' ' x 8;
 			if ( $iodir eq 'In' and $kind eq 'Scalar' ) {
 				$ntabs = '';
@@ -1280,7 +1292,7 @@ sub refactor_blocks_OLD {
 	for my $annline ( @{$annlines} ) {
 		my $line      = $annline->[0];
 		my $tags_lref = $annline->[1];
-		my %tags      =
+		my %tags =
 		  ( defined $tags_lref )
 		  ? %{$tags_lref}
 		  : ( 'Nil' => [] );    # FIXME: needed?
@@ -1314,11 +1326,11 @@ sub refactor_blocks_OLD {
 		$stref = create_subroutine_source_from_block( $name, $f, $stref );
 
 		# Now we must parse this source
-		$stref = get_var_decls( $name,                       $stref );
-		$stref = parse_includes( $name,                      $stref );
+		$stref = get_var_decls( $name, $stref );
+		$stref = parse_includes( $name, $stref );
 		$stref = parse_subroutine_and_function_calls( $name, $stref );
 		$stref = identify_globals_used_in_subroutine( $name, $stref );
-		$stref = determine_argument_io_direction( $name,     $stref );
+		$stref = determine_argument_io_direction( $name, $stref );
 
 		# Now we're ready to refactor this source
 		$stref = refactor_subroutine( $name, $stref );    # shiver!
@@ -1330,7 +1342,7 @@ sub refactor_blocks_OLD {
 	for my $annline ( @{$rlines} ) {
 		my $line      = $annline->[0];
 		my $tags_lref = $annline->[1];
-		my %tags      =
+		my %tags =
 		  ( defined $tags_lref )
 		  ? %{$tags_lref}
 		  : ( 'Nil' => [] );                              # FIXME: needed?
@@ -1391,7 +1403,7 @@ sub create_refactored_source {
 	for my $annline ( @{$annlines} ) {
 		my $line = $annline->[0] || '';    # FIXME: why would line be undefined?
 		my $tags_lref = $annline->[1] || {};
-		my %tags      = %{$tags_lref};
+		my %tags = %{$tags_lref};
 
 		# BeginDo: just remove the label
 		if ( exists $tags{'BeginDo'} ) {
@@ -1503,7 +1515,7 @@ sub refactor_subroutine {
 	print "REFACTORING SUBROUTINE $f\n" if $V;
 
 	my @lines = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
-	my @info  =
+	my @info =
 	  defined $stref->{'Subroutines'}{$f}{'Info'}
 	  ? @{ $stref->{'Subroutines'}{$f}{'Info'} }
 	  : ();
@@ -1551,7 +1563,7 @@ sub refactor_all_subroutines {
 
 			#			warn "Not parsed: $f\n";
 			next;
-		}    if $stref->{'Subroutines'}{$f}{'Status'} == $READ;
+		} if $stref->{'Subroutines'}{$f}{'Status'} == $READ;
 		next if $stref->{'Subroutines'}{$f}{'Status'} == $FROM_BLOCK;
 		$stref = refactor_subroutine( $f, $stref );
 	}
@@ -1638,7 +1650,7 @@ sub refactor_include {
 	}
 
 	my @lines = @{ $stref->{'Includes'}{$f}{'Lines'} };
-	my @info  =
+	my @info =
 	  defined $stref->{'Includes'}{$f}{'Info'}
 	  ? @{ $stref->{'Includes'}{$f}{'Info'} }
 	  : ();
@@ -1806,15 +1818,18 @@ sub emit_refactored_subroutine {
 	my $srcref = $stref->{'Subroutines'}{$f}{'RefactoredCode'};
 	if ( defined $srcref ) {
 		my $s = $stref->{'Subroutines'}{$f}{'Source'};
-		print "INFO: emitting refactored code for $f in $s\n" if $V;		
-		if ($s=~/\w\/\w/) {
+		print "INFO: emitting refactored code for $f in $s\n" if $V;
+		if ( $s =~ /\w\/\w/ ) {
+
 			# Source resides in subdirectory, create it if required
-			my @dirs=split(/\//,$s); pop @dirs;
-			map { my $targetdir=$_;
-                if ( not -e $targetdir ) {
-                    mkdir $targetdir;
-                }
-			} @dirs; 			
+			my @dirs = split( /\//, $s );
+			pop @dirs;
+			map {
+				my $targetdir = $_;
+				if ( not -e $targetdir ) {
+					mkdir $targetdir;
+				}
+			} @dirs;
 		}
 		my $mode = '>';
 		if ( -e "$dir/$s" and not $overwrite ) {
@@ -2011,7 +2026,8 @@ sub postprocess_C {
 					my $ftype = $vars{$var}{'Type'};
 					my $ctype = toCType($ftype);
 					my $iodir =
-					  $stref->{'Subroutines'}{$sub}{'RefactoredArgs'}{$var}{'IODir'};
+					  $stref->{'Subroutines'}{$sub}{'RefactoredArgs'}{$var}
+					  {'IODir'};
 					my $kind = $vars{$var}{'Kind'};
 
 #                    print "ARG $var\n" if ( $iodir eq 'In' and $kind eq 'Scalar');
@@ -2048,9 +2064,10 @@ sub postprocess_C {
 
 		$line =~ /(\w+)=\*(\w+)__G;/ && do {
 			if ( $1 eq $2 ) {
-				my $var   = $1;
+				my $var = $1;
 				my $iodir =
-				  $stref->{'Subroutines'}{$sub}{'RefactoredArgs'}{$var}{'IODir'};
+				  $stref->{'Subroutines'}{$sub}{'RefactoredArgs'}{$var}
+				  {'IODir'};
 				my $kind = $vars{$var}{'Kind'};
 				if ( $iodir eq 'In' and $kind eq 'Scalar' ) {
 					$line =~ s|^|\/\/|;
@@ -2195,10 +2212,9 @@ sub postprocess_C {
 				my $maybe_if  = $1;
 				my $calledsub = $2;
 				my $argstr    = $3;
-				my @args      =
-				  split( /\s*\,\s*/, $argstr )
+				my @args      = split( /\s*\,\s*/, $argstr )
 				  ; # FIXME: this will split things like v1,indzindicator[FTNREF1D(i,1)],v3
-				my $ii              = 0;
+				my $ii = 0;
 				my $called_sub_args =
 				  $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{'List'};
 				my @nargs = ();
@@ -2210,8 +2226,8 @@ sub postprocess_C {
 					my $is_input_scalar =
 					  ( $stref->{'Subroutines'}{$calledsub}{'Vars'}
 						  {$called_sub_arg}{'Kind'} eq 'Scalar' )
-					  && ( $stref->{'Subroutines'}{$calledsub}
-						{'RefactoredArgs'}{$called_sub_arg}{'IODir'} eq 'In' )
+					  && ( $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}
+						{$called_sub_arg}{'IODir'} eq 'In' )
 					  ? 1
 					  : 0;
 
@@ -2367,7 +2383,7 @@ sub create_build_script {
 		}
 	}
 	my @fsourcelst = sort keys %{ $stref->{'BuildSources'}{'F'} };
-	my $fsources   = join( ',', map { "'" . $_ . "'" } @fsourcelst );
+	my $fsources = join( ',', map { "'" . $_ . "'" } @fsourcelst );
 
 	my $csources = '';
 	if ($noop) {
@@ -2416,7 +2432,7 @@ sub build_flexpart {
 sub parse_subroutine_and_function_calls {
 	( my $f, my $stref ) = @_;
 	print "PARSING SUBROUTINE/FUNCTION CALLS in $f\n" if $V;
-	my $pnid        = $stref->{'NId'};
+	my $pnid = $stref->{'NId'};
 	my $sub_or_func = sub_func_or_incl( $f, $stref );
 
 	# For C translation and call tree generation
@@ -2428,7 +2444,7 @@ sub parse_subroutine_and_function_calls {
 			$stref = add_to_call_tree( $f, $stref );
 		}    # else {
 		if ( $translate == $GO ) {
-			$stref = add_to_C_build_sources( $f, $stref )
+			$stref = add_to_C_build_sources( $f, $stref );
 		}
 	}
 	my $srcref = $stref->{$sub_or_func}{$f}{'Lines'};
@@ -2458,11 +2474,13 @@ sub parse_subroutine_and_function_calls {
 				}
 
 				$stref->{'Subroutines'}{$name}{'Called'} = 1;
-                $stref->{'Subroutines'}{$name}{'Callers'}{$f}++;
+				$stref->{'Subroutines'}{$name}{'Callers'}{$f}++;
+
 				#                $called_subs{$name} = $name;
 				$stref->{$sub_or_func}{$f}{'Info'}
 				  ->[$index]{'SubroutineCall'}{'Args'} = $argstr;
 				my $tvarlst = $argstr;
+
 				# replace , by ; in array indices and nested function calls
 				if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
 					while ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
@@ -2473,7 +2491,7 @@ sub parse_subroutine_and_function_calls {
 						substr( $tvarlst, $pos, length($chunk), $chunkr );
 					}
 				}
-                
+
 				my @tvars   = split( /\s*\,\s*/, $tvarlst );
 				my $p       = '';
 				my @argvars = ();
@@ -2858,13 +2876,12 @@ sub determine_argument_io_direction_rec {
 # This is more tricky than it seems because a sub can be called multiple times with different arguments.
 # So first we need to determine the argument of the call, then map them to the arguments of the sub
 	$stref = refactor_subroutine_signature( $stref, $f );
-    $stref = determine_argument_io_direction_core($stref, $f );
+	$stref = determine_argument_io_direction_core( $stref, $f );
 
 	return $stref;
 }    # determine_argument_io_direction_rec()
 
 # -----------------------------------------------------------------------------
-
 
 # -----------------------------------------------------------------------------
 sub get_iodirs_from_subcall {
@@ -2875,7 +2892,8 @@ sub get_iodirs_from_subcall {
 	my $tags = $stref->{'Subroutines'}{$f}{'Info'}->[$index];
 	my $name = $tags->{'SubroutineCall'}{'Name'};
 	my %args =
-	  map { $_ => 1 } @{ $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'List'} };
+	  map { $_ => 1 }
+	  @{ $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'List'} };
 	my $called_arg_iodirs = {};
 
 	# Now get the RefactoredArgs
@@ -2899,303 +2917,346 @@ sub get_iodirs_from_subcall {
 		for my $call_arg ( @{$ref_call_args} ) {
 			my $sig_arg = $ref_sig_args->[$i];
 
-                  # int is a FORTRAN primitive converting float to int
-                  # int2|short is a FORTRAN primitive converting float to int
-                  # int8|long is a FORTRAN primitive converting float to int
-                  # float is a FORTRAN primitive converting int to float
-                  # dfloat|dble is a FORTRAN primitive converting int to float
-                  # sngl is a FORTRAN primitive converting double to float
-            $call_arg =~ s/(^|\W)(?:int|int2|int8|short|long|sngl|dfloat|dble|float)\(// && $call_arg =~ s/\)$// ;
+			# int is a FORTRAN primitive converting float to int
+			# int2|short is a FORTRAN primitive converting float to int
+			# int8|long is a FORTRAN primitive converting float to int
+			# float is a FORTRAN primitive converting int to float
+			# dfloat|dble is a FORTRAN primitive converting int to float
+			# sngl is a FORTRAN primitive converting double to float
+			$call_arg =~
+			  s/(^|\W)(?:int|int2|int8|short|long|sngl|dfloat|dble|float)\(//
+			  && $call_arg =~ s/\)$//;
+
 			# Clean up call args for comparison
 			$call_arg =~ s/(\w+)\(.*?\)/$1/g;
 			$i++;
 			if ( exists $args{$call_arg} ) {
-                # This means that $call_arg is an argument of the caller $f
+
+				# This means that $call_arg is an argument of the caller $f
 				# look up the IO direction for the corresponding $sig_arg
 				$called_arg_iodirs->{$call_arg} =
-				  $stref->{'Subroutines'}{$name}{'RefactoredArgs'}{$sig_arg}{'IODir'};
+				  $stref->{'Subroutines'}{$name}{'RefactoredArgs'}{$sig_arg}
+				  {'IODir'};
 			} else {
-    			if ($call_arg =~/\W/) {
-	       			print "INFO: ARG $call_arg in call to $name in $f is an expression\n" if $V;
-	       			my @maybe_args=split(/\W+/,$call_arg);
-	       			for my $maybe_arg (@maybe_args) {	       				
-	       				if ( exists $args{$maybe_arg} and not exists $called_arg_iodirs->{$maybe_arg}) {
-	       					print "INFO: Setting IO dir for $maybe_arg in call to $name in $f to In\n" if $V; 
-	       					 $called_arg_iodirs->{$maybe_arg}='In';
-	       					 if  (scalar keys %{ $stref->{'Subroutines'}{$name}{'Callers'} }==1
-	       					 	and $stref->{'Subroutines'}{$name}{'Callers'}{$f}==1
-	       					 	and $stref->{'Subroutines'}{$name}{'RefactoredArgs'}{$sig_arg}{'IODir'} ne 'In'
-	       					 	){
-	       					 		print "INFO: $name in $f is called only once; $sig_arg is an expression, setting IODir to 'In'\n" if $I;  
-	       					 	    $stref->{'Subroutines'}{$name}{'RefactoredArgs'}{$sig_arg}{'IODir'}='In';
-	       					 }
-	       				}
-	       			}
-    			} elsif ( $call_arg=~/^\s*[\d\.]+\s*$/) {
-                             if  (scalar keys %{ $stref->{'Subroutines'}{$name}{'Callers'} }==1
-                                and $stref->{'Subroutines'}{$name}{'Callers'}{$f}==1
-                                and $stref->{'Subroutines'}{$name}{'RefactoredArgs'}{$sig_arg}{'IODir'} ne 'In'
-                                ){
-                                    print "INFO: $name in $f is called only once; $sig_arg is a numeric constant, setting IODir to 'In'\n" if $I;  
-                                    $stref->{'Subroutines'}{$name}{'RefactoredArgs'}{$sig_arg}{'IODir'}='In';
-                             }    				
+				if ( $call_arg =~ /\W/ ) {
+					print
+"INFO: ARG $call_arg in call to $name in $f is an expression\n"
+					  if $V;
+					my @maybe_args = split( /\W+/, $call_arg );
+					for my $maybe_arg (@maybe_args) {
+						if ( exists $args{$maybe_arg}
+							and not exists $called_arg_iodirs->{$maybe_arg} )
+						{
+							print
+"INFO: Setting IO dir for $maybe_arg in call to $name in $f to In\n"
+							  if $V;
+							$called_arg_iodirs->{$maybe_arg} = 'In';
+							if (
+								scalar keys
+								%{ $stref->{'Subroutines'}{$name}{'Callers'} }
+								== 1
+								and
+								$stref->{'Subroutines'}{$name}{'Callers'}{$f} ==
+								1
+								and
+								$stref->{'Subroutines'}{$name}{'RefactoredArgs'}
+								{$sig_arg}{'IODir'} ne 'In' )
+							{
+								print
+"INFO: $name in $f is called only once; $sig_arg is an expression, setting IODir to 'In'\n"
+								  if $I;
+								$stref->{'Subroutines'}{$name}{'RefactoredArgs'}
+								  {$sig_arg}{'IODir'} = 'In';
+							}
+						}
+					}
+				} elsif ( $call_arg =~ /^\s*[\d\.]+\s*$/ ) {
+					if (
+						scalar
+						keys %{ $stref->{'Subroutines'}{$name}{'Callers'} } == 1
+						and $stref->{'Subroutines'}{$name}{'Callers'}{$f} == 1
+						and $stref->{'Subroutines'}{$name}{'RefactoredArgs'}
+						{$sig_arg}{'IODir'} ne 'In' )
+					{
+						print
+"INFO: $name in $f is called only once; $sig_arg is a numeric constant, setting IODir to 'In'\n"
+						  if $I;
+						$stref->{'Subroutines'}{$name}{'RefactoredArgs'}
+						  {$sig_arg}{'IODir'} = 'In';
+					}
 				} else {
-					# This means the call argument must be a local variable of $f
-#					print "LOCAL $call_arg for call to $name in $f\n";
-					  $called_arg_iodirs->{$call_arg} =
-                  $stref->{'Subroutines'}{$name}{'RefactoredArgs'}{$sig_arg}{'IODir'};
-                            if ($called_arg_iodirs->{$call_arg} eq 'InOut') {
-                $called_arg_iodirs->{$call_arg} = 'InMaybeOut';
-            }
-                  
+
+				   # This means the call argument must be a local variable of $f
+				   #					print "LOCAL $call_arg for call to $name in $f\n";
+					$called_arg_iodirs->{$call_arg} =
+					  $stref->{'Subroutines'}{$name}{'RefactoredArgs'}{$sig_arg}
+					  {'IODir'};
+					if ( $called_arg_iodirs->{$call_arg} eq 'InOut' ) {
+						$called_arg_iodirs->{$call_arg} = 'InMaybeOut';
+					}
+
 				}
 			}
 		}
 	}
-	return ($called_arg_iodirs,$stref);
+	return ( $called_arg_iodirs, $stref );
 }    # END of get_iodirs_from_subcall()
 
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
 sub determine_argument_io_direction_core {
-	( my $stref, my $f) = @_;
+	( my $stref, my $f ) = @_;
 	my $srcref  = $stref->{'Subroutines'}{$f}{'Lines'};
 	my $tagsref = $stref->{'Subroutines'}{$f}{'Info'};
 
 	#   local $V=1 if $f=~/advance/;
 	print "DETERMINE IO DIR FOR SUB $f\n" if $V;
-	my $ref_sig_args = $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'List'};
-	my %args         = map { $_ => 'Unknown' } @{$ref_sig_args};
-    my $called_sub_args = {};
-    my $called_sub="";
+	my $ref_sig_args    = $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'List'};
+	my %args            = map { $_ => 'Unknown' } @{$ref_sig_args};
+	my $called_sub_args = {};
+	my $called_sub      = "";
+
 	# Then for each of these, we go through the args.
 	# If an arg has a non-'U' value, we overwrite it.
 
 	if ( defined $srcref ) {
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $line = $srcref->[$index];
-			
+
 			my $tags = $tagsref->[$index];
 			if ( $line =~ /^C\s+/ ) {
 				next;
 			}
-            
+
 			# Skip the declarations
 			if ( exists $tags->{'VarDecl'} ) { next; }
-			# Write & File open statements
-            if ($line=~/^\s+(?:write|open)\s*\(\s*(.+)$/) {
-            	find_vars( $1, \%args, \&set_io_dir );
-                            for my $csub (keys %{ $called_sub_args }) {   
-                                if(%{ $called_sub_args->{$csub} }) {
-                                    find_vars( $1, $called_sub_args->{$csub}, \&set_io_dir );   
-                                }                                       
-                            }               
 
-            } 
-			if (
-				exists $tags->{'SubroutineCall'})
-					{
-						my $name=$tags->{'SubroutineCall'}{'Name'};
+			# Write & File open statements
+			if ( $line =~ /^\s+(?:write|open)\s*\(\s*(.+)$/ ) {
+				find_vars( $1, \%args, \&set_io_dir );
+				for my $csub ( keys %{$called_sub_args} ) {
+					if ( %{ $called_sub_args->{$csub} } ) {
+						find_vars( $1, $called_sub_args->{$csub},
+							\&set_io_dir );
+					}
+				}
+
+			}
+			if ( exists $tags->{'SubroutineCall'} ) {
+				my $name = $tags->{'SubroutineCall'}{'Name'};
+
 #						print "\n\nLINE:$line\n";
 #						print "CALLING $name:\n",join(',',@{ $stref->{'Subroutines'}{$name}{'RefactoredArgs'}{'List'} }),"\n\n";
-						(my $iodirs,$stref) =
-						  get_iodirs_from_subcall( $stref, $f, $index );
-						for my $var ( keys %{$iodirs} ) {
-							if (exists $args{$var}) {
-							if ( $iodirs->{$var} eq 'In' ) {
-								if ( $args{$var} eq 'Unknown' ) {
-									$args{$var} = 'In';
-								} elsif ( $args{$var} eq 'Out' ) {
-# if the parent arg is Out and the child arg is In, parent arg stays Out!
-									$args{$var} = 'Out';
-								}
-							} elsif ( $iodirs->{$var} eq 'InOut' ) {
-								if ( $args{$var} eq 'Unknown' ) {
-									$args{$var} = 'InOut';
-								} elsif ( $args{$var} eq 'Out' ) {
-									$args{$var} = 'Out';
-								}                            							
-							} elsif ( $iodirs->{$var} eq 'Out' ) {
-								if ( $args{$var} eq 'Unknown' ) {
-									$args{$var} = 'Out';
-								} elsif ( $args{$var} eq 'In' ) {
-									$args{$var} = 'InOut';
-								}
-							} else {								
-								  print "WARNING: IO direction for $var in call to $name in $f is Unknown\n" if $W;
-							}
-							} else {
-#								print "$var is LOCAL".$iodirs->{$var}."\n";
-							}
-						}
-						if  (scalar keys %{ $stref->{'Subroutines'}{$name}{'Callers'} }==1
-                                and $stref->{'Subroutines'}{$name}{'Callers'}{$f}==1
-						) {
-							$called_sub=$name;
-						} else {
-							$called_sub="";
-						}
-						if ( $line =~ /^\s*if\s*\((.+)\)\s+call\s+/ ) {
-                            my $cond = $1;
-                            $cond=~s/[\(\)]+//g;
-                            $cond=~s/\.(eq|ne|gt|ge|lt|le|and|or|not|eqv|neqv)\./ /;                                                          
-                            find_vars( $cond, \%args, \&set_io_dir );
-                            for my $csub (keys %{ $called_sub_args }) {   
-                                if(%{ $called_sub_args->{$csub} }) {
-                                    find_vars( $cond, $called_sub_args->{$csub}, \&set_io_dir );   
-                                }                                       
-                            }               
-                        }
-                        if ($called_sub ne "") {
-                            $called_sub_args->{$called_sub}=$iodirs;
-                        }
-						next;
-					}
-
-					# Encounter Assignment
-					if (    $line =~ /\s+(\w+)(?:\([^=]*\))?\s*=\s*(.+?)\s*$/
-						and $line !~ /^\s*do\s+.+\s*=/ )
-					{    # Assignment, but not a loop. FIXME: This is weak!
-						my $var = $1;
-						my $rhs = $2;
-						if ( exists $args{$var} ) {
-
+				( my $iodirs, $stref ) =
+				  get_iodirs_from_subcall( $stref, $f, $index );
+				for my $var ( keys %{$iodirs} ) {
+					if ( exists $args{$var} ) {
+						if ( $iodirs->{$var} eq 'In' ) {
 							if ( $args{$var} eq 'Unknown' ) {
-								print "LINE: $line\n"     if $V;
-								print "ARG $var: 'Out'\n" if $V;
+								$args{$var} = 'In';
+							} elsif ( $args{$var} eq 'Out' ) {
+
+	   # if the parent arg is Out and the child arg is In, parent arg stays Out!
+								$args{$var} = 'Out';
+							}
+						} elsif ( $iodirs->{$var} eq 'InOut' ) {
+							if ( $args{$var} eq 'Unknown' ) {
+								$args{$var} = 'InOut';
+							} elsif ( $args{$var} eq 'Out' ) {
+								$args{$var} = 'Out';
+							}
+						} elsif ( $iodirs->{$var} eq 'Out' ) {
+							if ( $args{$var} eq 'Unknown' ) {
 								$args{$var} = 'Out';
 							} elsif ( $args{$var} eq 'In' ) {
-								print "LINE: $line\n"       if $V;
-								print "ARG $var: 'InOut'\n" if $V;
 								$args{$var} = 'InOut';
 							}
+						} else {
+							print
+"WARNING: IO direction for $var in call to $name in $f is Unknown\n"
+							  if $W;
 						}
-						if ( $line =~ /^\s*if/ ) {
-							( my $cond, my $rest ) =
-							  split( /\s+(\w+)(?:\([^=]*\))?\s*=\s*/, $line );
-							find_vars( $cond, \%args, \&set_io_dir );
-                            for my $csub (keys %{ $called_sub_args }) {   
-                                if(%{ $called_sub_args->{$csub} }) {
-                                    find_vars( $cond, $called_sub_args->{$csub}, \&set_io_dir );   
-                                }                                       
-                            }               
-							
-						}
-						find_vars( $rhs, \%args, \&set_io_dir );
-                            for my $csub (keys %{ $called_sub_args }) {   
-                                if(%{ $called_sub_args->{$csub} }) {
-                                    find_vars( $rhs, $called_sub_args->{$csub}, \&set_io_dir );   
-                                }                                       
-                            }               
+					} else {
 
-					} else {    # not an assignment, do as before
-						print "LINE: $line\n" if $V;
-						find_vars( $line, \%args, \&set_io_dir );
-                            for my $csub (keys %{ $called_sub_args }) {   
-                                if(%{ $called_sub_args->{$csub} }) {
-                                    find_vars( $line, $called_sub_args->{$csub}, \&set_io_dir );   
-                                }                                       
-                            }               
-						
+						#								print "$var is LOCAL".$iodirs->{$var}."\n";
 					}
-				} 
-	      } 
-	      for my $csub (keys %{ $called_sub_args }) {
-	      	for my $arg (keys %{ $called_sub_args->{$csub} }) {
-	      		if ($called_sub_args->{$csub}{$arg} eq 'InMaybeOut') {
-#	      			print "ARG $arg for call to $csub in $f is actually 'In'\n";
-#	      			$called_sub_args->{$csub}{$arg}='In';
-	      			$stref->{'Subroutines'}{$csub}{'RefactoredArgs'}{$arg}{'IODir'}='In';
-	      		}
-	      	}
-	      };
-	      
-	      
-	      ( my $maybe_args, my $globals ) = get_maybe_args_globs( $stref, $f );
-	      for my $arg (keys %args) {
-	      	$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'IODir'} = $args{$arg};
-            my $kind = 'Unknown';
-            my $type = 'Unknown';
-            if ( exists $maybe_args->{$arg}{'Type'} ) {
-            	$kind = $maybe_args->{$arg}{'Kind'};
-                $type = $maybe_args->{$arg}{'Type'};
-            } else {
-                print "WARNING: No kind/type info for $arg in $f\n" if $W;
-            }	      	
-
-	      	$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'Kind'} = $kind;
-	      	$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'Type'} = $type;
-	      }
-	      $stref=remap_args( $stref,$f);	      
-			return $stref;
-		}    # determine_argument_io_direction_core()
-
- # -----------------------------------------------------------------------------
- # To determine if a subroutine argument is I, O or IO:
- # if it appears only on the LHS of an '=' => O
- # if does not appear on the LHS of an '=' => I
- # otherwise => IO
- # So start by setting them all to 'I'
- # so, look for '=' and split in LHS/RHS
-
-
- # -----------------------------------------------------------------------------
- # This function works on RHS variables, i.e. variables being read
- # The rules are
- # Read =>
- #   Unknown => In
- #   Out => InOut
- # Write =>
- #   Out
-		sub set_io_dir {
-			( my $mvar, my $args_ref ) = @_;
-			if ( $args_ref->{$mvar} eq 'Out' or $args_ref->{$mvar} eq 'InMaybeOut') {
-				print "FOUND InOut ARG $mvar\n" if $V;
-#				warn "$mvar is InMaybeOut\n";				
-				$args_ref->{$mvar} = 'InOut';
-			} elsif ( $args_ref->{$mvar} eq 'Unknown' ) {
-				print "FOUND In ARG $mvar\n" if $V;
-				$args_ref->{$mvar} = 'In';
+				}
+				if (
+					scalar
+					keys %{ $stref->{'Subroutines'}{$name}{'Callers'} } == 1
+					and $stref->{'Subroutines'}{$name}{'Callers'}{$f} == 1 )
+				{
+					$called_sub = $name;
+				} else {
+					$called_sub = "";
+				}
+				if ( $line =~ /^\s*if\s*\((.+)\)\s+call\s+/ ) {
+					my $cond = $1;
+					$cond =~ s/[\(\)]+//g;
+					$cond =~ s/\.(eq|ne|gt|ge|lt|le|and|or|not|eqv|neqv)\./ /;
+					find_vars( $cond, \%args, \&set_io_dir );
+					for my $csub ( keys %{$called_sub_args} ) {
+						if ( %{ $called_sub_args->{$csub} } ) {
+							find_vars( $cond, $called_sub_args->{$csub},
+								\&set_io_dir );
+						}
+					}
+				}
+				if ( $called_sub ne "" ) {
+					$called_sub_args->{$called_sub} = $iodirs;
+				}
+				next;
 			}
-			return $args_ref;
+
+			# Encounter Assignment
+			if (    $line =~ /\s+(\w+)(?:\([^=]*\))?\s*=\s*(.+?)\s*$/
+				and $line !~ /^\s*do\s+.+\s*=/ )
+			{    # Assignment, but not a loop. FIXME: This is weak!
+				my $var = $1;
+				my $rhs = $2;
+				if ( exists $args{$var} ) {
+
+					if ( $args{$var} eq 'Unknown' ) {
+						print "LINE: $line\n"     if $V;
+						print "ARG $var: 'Out'\n" if $V;
+						$args{$var} = 'Out';
+					} elsif ( $args{$var} eq 'In' ) {
+						print "LINE: $line\n"       if $V;
+						print "ARG $var: 'InOut'\n" if $V;
+						$args{$var} = 'InOut';
+					}
+				}
+				if ( $line =~ /^\s*if/ ) {
+					( my $cond, my $rest ) =
+					  split( /\s+(\w+)(?:\([^=]*\))?\s*=\s*/, $line );
+					find_vars( $cond, \%args, \&set_io_dir );
+					for my $csub ( keys %{$called_sub_args} ) {
+						if ( %{ $called_sub_args->{$csub} } ) {
+							find_vars( $cond, $called_sub_args->{$csub},
+								\&set_io_dir );
+						}
+					}
+
+				}
+				find_vars( $rhs, \%args, \&set_io_dir );
+				for my $csub ( keys %{$called_sub_args} ) {
+					if ( %{ $called_sub_args->{$csub} } ) {
+						find_vars( $rhs, $called_sub_args->{$csub},
+							\&set_io_dir );
+					}
+				}
+
+			} else {    # not an assignment, do as before
+				print "LINE: $line\n" if $V;
+				find_vars( $line, \%args, \&set_io_dir );
+				for my $csub ( keys %{$called_sub_args} ) {
+					if ( %{ $called_sub_args->{$csub} } ) {
+						find_vars( $line, $called_sub_args->{$csub},
+							\&set_io_dir );
+					}
+				}
+
+			}
+		}
+	}
+	for my $csub ( keys %{$called_sub_args} ) {
+		for my $arg ( keys %{ $called_sub_args->{$csub} } ) {
+			if ( $called_sub_args->{$csub}{$arg} eq 'InMaybeOut' ) {
+
+		 #	      			print "ARG $arg for call to $csub in $f is actually 'In'\n";
+		 #	      			$called_sub_args->{$csub}{$arg}='In';
+				$stref->{'Subroutines'}{$csub}{'RefactoredArgs'}{$arg}
+				  {'IODir'} = 'In';
+			}
+		}
+	}
+
+	( my $maybe_args, my $globals ) = get_maybe_args_globs( $stref, $f );
+	for my $arg ( keys %args ) {
+		$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'IODir'} =
+		  $args{$arg};
+		my $kind = 'Unknown';
+		my $type = 'Unknown';
+		if ( exists $maybe_args->{$arg}{'Type'} ) {
+			$kind = $maybe_args->{$arg}{'Kind'};
+			$type = $maybe_args->{$arg}{'Type'};
+		} else {
+			print "WARNING: No kind/type info for $arg in $f\n" if $W;
 		}
 
- # -----------------------------------------------------------------------------
-		sub find_vars {
-			( my $line, my $args_ref, my $subref ) = @_;
-			my %args = %{$args_ref};
-			my @chunks = split( /\W+/, $line );
-			for my $mvar (@chunks) {
-				if ( exists $args{$mvar} ) {
-					$args_ref = $subref->( $mvar, $args_ref );
-				}
+		$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'Kind'} = $kind;
+		$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'Type'} = $type;
+	}
+	$stref = remap_args( $stref, $f );
+	return $stref;
+}    # determine_argument_io_direction_core()
+
+# -----------------------------------------------------------------------------
+# To determine if a subroutine argument is I, O or IO:
+# if it appears only on the LHS of an '=' => O
+# if does not appear on the LHS of an '=' => I
+# otherwise => IO
+# So start by setting them all to 'I'
+# so, look for '=' and split in LHS/RHS
+
+# -----------------------------------------------------------------------------
+# This function works on RHS variables, i.e. variables being read
+# The rules are
+# Read =>
+#   Unknown => In
+#   Out => InOut
+# Write =>
+#   Out
+sub set_io_dir {
+	( my $mvar, my $args_ref ) = @_;
+	if ( $args_ref->{$mvar} eq 'Out' or $args_ref->{$mvar} eq 'InMaybeOut' ) {
+		print "FOUND InOut ARG $mvar\n" if $V;
+
+		#				warn "$mvar is InMaybeOut\n";
+		$args_ref->{$mvar} = 'InOut';
+	} elsif ( $args_ref->{$mvar} eq 'Unknown' ) {
+		print "FOUND In ARG $mvar\n" if $V;
+		$args_ref->{$mvar} = 'In';
+	}
+	return $args_ref;
+}
+
+# -----------------------------------------------------------------------------
+sub find_vars {
+	( my $line, my $args_ref, my $subref ) = @_;
+	my %args = %{$args_ref};
+	my @chunks = split( /\W+/, $line );
+	for my $mvar (@chunks) {
+		if ( exists $args{$mvar} ) {
+			$args_ref = $subref->( $mvar, $args_ref );
+		}
+	}
+	return $args_ref;
+}    # END of find_vars()
+
+# -----------------------------------------------------------------------------
+sub detect_blocks {
+	( my $s, my $stref ) = @_;
+	print "CHECKING BLOCKS in $s\n" if $V;
+	my $sub_func_incl = sub_func_or_incl( $s, $stref );
+	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
+	my $srcref = $stref->{$sub_func_incl}{$s}{'Lines'};
+	for my $line ( @{$srcref} ) {
+		if ( $line =~ /^C\s/i ) {
+			if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
+				$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 1;
+				my $tgt = uc( substr( $sub_func_incl, 0, 3 ) );
+
+				#				warn "$tgt $s HAS BLOCK: $1\n" if $V;
+				print "$tgt $s HAS BLOCK: $1\n" if $V;
+				last;
 			}
-			return $args_ref;
-		}    # END of find_vars()
+		}
+	}
+	return $stref;
+}    # END of detect_blocks()
 
- # -----------------------------------------------------------------------------
-		sub detect_blocks {
-			( my $s, my $stref ) = @_;
-			print "CHECKING BLOCKS in $s\n" if $V;
-			my $sub_func_incl = sub_func_or_incl( $s, $stref );
-			$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
-			my $srcref = $stref->{$sub_func_incl}{$s}{'Lines'};
-			for my $line ( @{$srcref} ) {
-				if ( $line =~ /^C\s/i ) {
-					if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
-						$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 1;
-						my $tgt = uc( substr( $sub_func_incl, 0, 3 ) );
-
-						#				warn "$tgt $s HAS BLOCK: $1\n" if $V;
-						print "$tgt $s HAS BLOCK: $1\n" if $V;
-						last;
-					}
-				}
-			}
-			return $stref;
-		}    # END of detect_blocks()
-
- # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 #		sub create_subroutine_source_from_block_OLD {
 #			( my $f, my $p, my $stref ) = @_;
 #			print "CREATING SOURCE for $f\n" if $V;
@@ -3290,919 +3351,905 @@ sub determine_argument_io_direction_core {
 # For every 'include' statement in a subroutine (and I assume functions don't have includes, don't be evil!)
 # the filename is entered in 'Includes' and in Info->[$index]{'Include'}
 # If the include was not yet read, do it now.
-		sub parse_includes {
-			( my $f, my $stref ) = @_;
-			print "PARSING INCLUDES for $f\n" if $V;
-			my $sub_or_func = sub_func_or_incl( $f, $stref );
+sub parse_includes {
+	( my $f, my $stref ) = @_;
+	print "PARSING INCLUDES for $f\n" if $V;
+	my $sub_or_func = sub_func_or_incl( $f, $stref );
 
-			my $srcref = $stref->{$sub_or_func}{$f}{'Lines'};
-			for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-				my $line = $srcref->[$index];
-				if ( $line =~ /^C\s+/ or $line =~ /^\!\s/ ) {
-					next;
-				}
+	my $srcref = $stref->{$sub_or_func}{$f}{'Lines'};
+	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+		my $line = $srcref->[$index];
+		if ( $line =~ /^C\s+/ or $line =~ /^\!\s/ ) {
+			next;
+		}
 
-				if ( $line =~ /^\s*include\s+\'(\w+)\'/ )
-				{    # TODO: nested includes not supported!
+		if ( $line =~ /^\s*include\s+\'(\w+)\'/ )
+		{    # TODO: nested includes not supported!
 
-					my $name = $1;
-					print "FOUND include $name in $f\n" if $V;
-					$stref->{$sub_or_func}{$f}{'Includes'}{$name} = $index;
-					$stref->{$sub_or_func}{$f}{'Info'}
-					  ->[$index]{'Include'}{'Name'} = $name;
-					if ( $stref->{'Includes'}{$name}{'Status'} == $UNREAD ) {
-						print $line, "\n" if $V;
+			my $name = $1;
+			print "FOUND include $name in $f\n" if $V;
+			$stref->{$sub_or_func}{$f}{'Includes'}{$name} = $index;
+			$stref->{$sub_or_func}{$f}{'Info'}->[$index]{'Include'}{'Name'} =
+			  $name;
+			if ( $stref->{'Includes'}{$name}{'Status'} == $UNREAD ) {
+				print $line, "\n" if $V;
 
-						# Initial guess for Root. OK? FIXME?
-						$stref->{'Includes'}{$name}{'Root'}      = $f;
-						$stref->{'Includes'}{$name}{'HasBlocks'} = 0;
-						$stref = parse_fortran_src( $name, $stref );
-					} else {
-						print $line, " already processed\n" if $V;
-					}
-				}
+				# Initial guess for Root. OK? FIXME?
+				$stref->{'Includes'}{$name}{'Root'}      = $f;
+				$stref->{'Includes'}{$name}{'HasBlocks'} = 0;
+				$stref = parse_fortran_src( $name, $stref );
+			} else {
+				print $line, " already processed\n" if $V;
 			}
+		}
+	}
 
-			return $stref;
-		}    # END of parse_includes()
+	return $stref;
+}    # END of parse_includes()
 
 # -----------------------------------------------------------------------------
 # Create a table of all variables declared in the target, and a list of all the var names occuring on each line.
 # We record the type of the var and whether it's a scalar or array, because we need that information for translation to C.
 # Also check if the variable happens to be a function. If that is the case, mark that function as 'Called'; if we have not yet parsed its source, do it now.
 
-		sub get_var_decls {
-			( my $f, my $stref ) = @_;
+sub get_var_decls {
+	( my $f, my $stref ) = @_;
 
-			my $is_incl = exists $stref->{'Includes'}{$f} ? 1 : 0;
-#			my $sub_or_incl = $is_incl ? 'Includes' : 'Subroutines';
-            my $sub_func_incl = sub_func_or_incl($f,$stref);
-			my $srcref = $stref->{$sub_func_incl}{$f}{'Lines'};
-			if ( defined $srcref ) {
-				print "\nVAR DECLS in $f:\n" if $V;
-				my %vars  = ();
-				my $first = 1;
-				for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-					my $line = $srcref->[$index];
+	my $is_incl = exists $stref->{'Includes'}{$f} ? 1 : 0;
 
-					if ( $line =~ /^C\s+/ ) {
-						next;
-					}
-					if ( $line =~ /^\!\s/ ) {
-						$stref->{$sub_func_incl}{$f}{'Info'}
-						  ->[$index]{'TrailingComments'} = {};
-						next;
-					}
-					if ( $line =~ /implicit\s+none/ ) {
+	#			my $sub_or_incl = $is_incl ? 'Includes' : 'Subroutines';
+	my $sub_func_incl = sub_func_or_incl( $f, $stref );
+	my $srcref = $stref->{$sub_func_incl}{$f}{'Lines'};
+	if ( defined $srcref ) {
+		print "\nVAR DECLS in $f:\n" if $V;
+		my %vars  = ();
+		my $first = 1;
+		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+			my $line = $srcref->[$index];
 
-						#            	print "INFO: $f has 'implicit none'\n";
-						$stref->{$sub_func_incl}{$f}{'Info'}
-						  ->[$index]{'ImplicitNone'} = {};
-						$stref->{$sub_func_incl}{$f}{'ImplicitNone'} = $index;
-					}
-					if ( $line =~
+			if ( $line =~ /^C\s+/ ) {
+				next;
+			}
+			if ( $line =~ /^\!\s/ ) {
+				$stref->{$sub_func_incl}{$f}{'Info'}
+				  ->[$index]{'TrailingComments'} = {};
+				next;
+			}
+			if ( $line =~ /implicit\s+none/ ) {
+
+				#            	print "INFO: $f has 'implicit none'\n";
+				$stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'ImplicitNone'} =
+				  {};
+				$stref->{$sub_func_incl}{$f}{'ImplicitNone'} = $index;
+			}
+			if ( $line =~
 /(logical|integer|real|double\s+precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
-					  )
-					{
-						my $type    = $1;
-						my $varlst  = $2;
-						my $tvarlst = $varlst;
+			  )
+			{
+				my $type    = $1;
+				my $varlst  = $2;
+				my $tvarlst = $varlst;
 
-						if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
-							while (
-								$tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ )
-							{
-								my $chunk  = $1;
-								my $chunkr = $chunk;
-								$chunkr =~ s/,/;/g;
-								my $pos = index( $tvarlst, $chunk );
-								substr( $tvarlst, $pos, length($chunk),
-									$chunkr );
-							}
-						}
+				if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
+					while ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
+						my $chunk  = $1;
+						my $chunkr = $chunk;
+						$chunkr =~ s/,/;/g;
+						my $pos = index( $tvarlst, $chunk );
+						substr( $tvarlst, $pos, length($chunk), $chunkr );
+					}
+				}
 
-						my @tvars    = split( /\s*\,\s*/, $tvarlst );
-						my $p        = '';
-						my @varnames = ();
-						for my $var (@tvars) {
-							$var =~ s/^\s+//;
-							$var =~ s/\s+$//;
-							my $tvar = $var;
-							$tvar =~ s/\((.*?)\)/(0)/g; # get rid of array shape
-							my $shapestr =$1;
-							my @shape=();
-							if (defined $shapestr) {
-								if ( $shapestr=~/;/) {
-								my @elts = split(/;/,$shapestr);
-									for my $elt (@elts) {
-										my @tup=();
-										if ($elt=~/:/) {
-											@tup = split(/;/,$shapestr);
-										} else {
-											@tup=(1,$elt);
-										}
-										@shape=(@shape,@tup);
-									} 
-															
-							     } else { 
-							     	if ($shapestr=~/:/) {
-                                            @shape = split(/;/,$shapestr);
-							     	} else {
-								    @shape=(1,$shapestr);
-							     	}
-							     }
-							} 
-							warn "$line => $tvar\t[",join(',',@shape),"]\n";
-							if ( $tvar =~ s/\(.*?\)// ) {
-								$tvar =~ s/\*\d+//
-								  ; # FIXME: char string handling is not correct!
-								$vars{$tvar}{'Kind'} = 'Array';
-								$vars{$tvar}{'Shape'} = [];
-								$p = '()';
-							} else {
-								$vars{$tvar}{'Kind'} = 'Scalar';
-							}
-							$vars{$tvar}{'Type'} = $type;
-							$var =~ s/;/,/g;
-							$vars{$tvar}{'Decl'} =
-							  "        $type $var"
-							  ; # TODO: this should maybe not be a textual representation
-							if ( exists $stref->{'Functions'}{$tvar} ) {
-
-#                   warn "FOUND FUNCTION $var in $f\n";
-#                       $stref->{'Subroutines'}{$f}{'CalledFunctions'}{$tvar}=1;
-								$stref->{'Functions'}{$tvar}{'Called'} = 1;
-								$stref->{'Functions'}{$tvar}{'Callers'}{$f}++;
-								if (
-									not exists $stref->{'Functions'}{$tvar}
-									{'Lines'} )
-								{
-									$stref = read_fortran_src( $tvar, $stref );
+				my @tvars    = split( /\s*\,\s*/, $tvarlst );
+				my $p        = '';
+				my @varnames = ();
+				for my $var (@tvars) {
+					$var =~ s/^\s+//;
+					$var =~ s/\s+$//;
+					my $tvar = $var;					
+					my $shapestr = '';
+					$tvar =~ /\((.*?)\)/ && do {
+						$shapestr = $1;
+						$tvar =~ s/\(.*?\)/(0)/g;    # get rid of array shape
+					};
+					my @shape = ();
+					if ( $shapestr ne '' ) {						
+						if ( $shapestr =~ /;/ ) {
+							my @elts = split( /;/, $shapestr );
+							for my $elt (@elts) {
+								my @tup = ();
+								if ( $elt =~ /:/ ) {
+									@tup = split( /:/, $shapestr );
+								} else {
+									@tup = ( 1, $elt );
 								}
+								@shape = ( @shape, @tup );
 							}
-							push @varnames, $tvar;
-						}
-						print "\t", join( ',', @varnames ), "\n" if $V;
-
-						#warn "VARDECL in $f: ",join(',',@varnames)."\n";
-						$stref->{$sub_func_incl}{$f}{'Info'}
-						  ->[$index]{'VarDecl'} = \@varnames;
-						if ($first) {
-							$first = 0;
-							$stref->{$sub_func_incl}{$f}{'Info'}
-							  ->[$index]{'ExGlobVarDecls'} = {};
+						} else {
+							if ( $shapestr =~ /:/ ) {
+								@shape = split( /;/, $shapestr );
+							} else {
+								@shape = ( 1, $shapestr );
+							}
 						}
 					}
+					
+                    if ($tvar =~ /\(.*?\)/ && $tvar !~/\(0\)/) {
+                            die "FATAL ERROR: $tvar shouln't look like this!";
+                    }
+					
+					if ( $tvar =~ s/\(0\)// ) { # remove (0) placeholder 
+															
+						$tvar =~ s/\*\d+//
+						  ;    # FIXME: char string handling is not correct!
+						  # remove *number from the type, this is wrong. The right thing is to replace
+						  # this notation with type(number)
+						  # Also, this is not limited to arrays, we could have e.g. integer v*4  
+						$vars{$tvar}{'Kind'}  = 'Array';
+						$vars{$tvar}{'Shape'} = [@shape];
+						$p                    = '()';
+					} else {
+						$vars{$tvar}{'Kind'} = 'Scalar';
+					}
+					$vars{$tvar}{'Type'} = $type;
+					$var =~ s/;/,/g;
+					$vars{$tvar}{'Decl'} = "        $type $var"
+					  ; # TODO: this should maybe not be a textual representation
+					  # make it [$type,$var] ?
+					if ( exists $stref->{'Functions'}{$tvar} ) {
+						$stref->{'Functions'}{$tvar}{'Called'} = 1;
+						$stref->{'Functions'}{$tvar}{'Callers'}{$f}++;
+						if ( not exists $stref->{'Functions'}{$tvar}{'Lines'} )
+						{
+							$stref = read_fortran_src( $tvar, $stref );
+						}
+					}
+					push @varnames, $tvar;
 				}
-				$stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;
+				print "\t", join( ',', @varnames ), "\n" if $V;
+				$stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'VarDecl'} =
+				  \@varnames;
+				if ($first) {
+					$first = 0;
+					$stref->{$sub_func_incl}{$f}{'Info'}
+					  ->[$index]{'ExGlobVarDecls'} = {};
+				}
 			}
-			die "FIXME: shapes not correct!";
-			return $stref;
-		}    # END of get_var_decls()
+		}
+		$stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;
+	}
 
- # -----------------------------------------------------------------------------
+	#			die "FIXME: shapes not correct!";
+	return $stref;
+}    # END of get_var_decls()
 
-		sub get_commons_params_from_includes {
-			( my $f, my $stref ) = @_;
-			my $srcref = $stref->{'Includes'}{$f}{'Lines'};
-			if ( defined $srcref ) {
+# -----------------------------------------------------------------------------
 
-				#		warn "GETTING COMMONS/PARAMS from INCLUDE $f\n";
-				my %vars        = %{ $stref->{'Includes'}{$f}{'Vars'} };
-				my $has_pars    = 0;
-				my $has_commons = 0;
+sub get_commons_params_from_includes {
+	( my $f, my $stref ) = @_;
+	my $srcref = $stref->{'Includes'}{$f}{'Lines'};
+	if ( defined $srcref ) {
 
-				for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-					my $line = $srcref->[$index];
-					if ( $line =~ /^C\s+/ ) {
-						next;
-					}
-					if ( $line =~ /^\s*common\s+\/\s*[\w\d]+\s*\/\s+(.+)$/ ) {
-						my $commonlst = $1;
-						$has_commons = 1;
-						my @tcommons = split( /\s*\,\s*/, $commonlst );
-						for my $var (@tcommons) {
-							if ( not defined $vars{$var} ) {
-								print "WARNING: MISSING: <", $var, ">\n" if $W;
-							} else {
-								print $var, "\t", $vars{$var}{'Type'}, "\n"
-								  if $V;
-								$stref->{'Includes'}{$f}{'Commons'}{$var} =
-								  $vars{$var};
-							}
-						}
-						$stref->{'Includes'}{$f}{'Info'}->[$index]{'Common'} =
-						  {};
-					}
+		#		warn "GETTING COMMONS/PARAMS from INCLUDE $f\n";
+		my %vars        = %{ $stref->{'Includes'}{$f}{'Vars'} };
+		my $has_pars    = 0;
+		my $has_commons = 0;
 
-					if ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) {
-
-						my $parliststr = $1;
-						$has_pars = 1;
-						my @partups = split( /\s*,\s*/, $parliststr );
-						my @pvars =
-						  map { s/\s*=.+//; $_ } @partups;  # Perl::Critic, EYHO
-
-						for my $var (@pvars) {
-							if ( not defined $vars{$var} ) {
-								print "WARNINGS: NOT A PARAMETER: <", $var,
-								  ">\n"
-								  if $W;
-							} else {
-								$stref->{'Includes'}{$f}{'Parameters'}{$var} =
-								  $vars{$var};
-							}
-						}
-						$stref->{'Includes'}{$f}{'Info'}
-						  ->[$index]{'Parameter'} = {};
+		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+			my $line = $srcref->[$index];
+			if ( $line =~ /^C\s+/ ) {
+				next;
+			}
+			if ( $line =~ /^\s*common\s+\/\s*[\w\d]+\s*\/\s+(.+)$/ ) {
+				my $commonlst = $1;
+				$has_commons = 1;
+				my @tcommons = split( /\s*\,\s*/, $commonlst );
+				for my $var (@tcommons) {
+					if ( not defined $vars{$var} ) {
+						print "WARNING: MISSING: <", $var, ">\n" if $W;
+					} else {
+						print $var, "\t", $vars{$var}{'Type'}, "\n"
+						  if $V;
+						$stref->{'Includes'}{$f}{'Commons'}{$var} = $vars{$var};
 					}
 				}
+				$stref->{'Includes'}{$f}{'Info'}->[$index]{'Common'} = {};
+			}
 
-				if ($V) {
-					print "\nCOMMONS for $f:\n\n";
-					for my $v (
-						sort keys %{ $stref->{'Includes'}{$f}{'Commons'} } )
-					{
-						print $v, "\n";
+			if ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) {
+
+				my $parliststr = $1;
+				$has_pars = 1;
+				my @partups = split( /\s*,\s*/, $parliststr );
+				my @pvars =
+				  map { s/\s*=.+//; $_ } @partups;    # Perl::Critic, EYHO
+
+				for my $var (@pvars) {
+					if ( not defined $vars{$var} ) {
+						print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
+						  if $W;
+					} else {
+						$stref->{'Includes'}{$f}{'Parameters'}{$var} =
+						  $vars{$var};
 					}
 				}
+				$stref->{'Includes'}{$f}{'Info'}->[$index]{'Parameter'} = {};
+			}
+		}
 
-		 # FIXME!
-		 # An include file should basically only contain parameters and commons.
-		 # If it contains commons, we should remove them!
-				if ( $has_commons && $has_pars ) {
-					die
+		if ($V) {
+			print "\nCOMMONS for $f:\n\n";
+			for my $v ( sort keys %{ $stref->{'Includes'}{$f}{'Commons'} } ) {
+				print $v, "\n";
+			}
+		}
+
+		# FIXME!
+		# An include file should basically only contain parameters and commons.
+		# If it contains commons, we should remove them!
+		if ( $has_commons && $has_pars ) {
+			die
 "The include file $f contains both parameters and commons, this is not yet supported.\n";
-				} elsif ($has_commons) {
-					$stref->{'Includes'}{$f}{'Type'} = 'Common';
-				} elsif ($has_pars) {
-					$stref->{'Includes'}{$f}{'Type'} = 'Parameter';
-				} else {
-					$stref->{'Includes'}{$f}{'Type'} = 'None';
-				}
-				for my $var ( keys %vars ) {
-					if (
-						(
-							$has_pars and not exists(
-								$stref->{'Includes'}{$f}{'Parameters'}{$var}
-							)
-						)
-						or ( $has_commons
-							and not
-							exists( $stref->{'Includes'}{$f}{'Commons'}{$var} )
-						)
-					  )
-					{
-						warn Dumper( $stref->{'Includes'}{$f}{'Lines'} );
-						die
+		} elsif ($has_commons) {
+			$stref->{'Includes'}{$f}{'Type'} = 'Common';
+		} elsif ($has_pars) {
+			$stref->{'Includes'}{$f}{'Type'} = 'Parameter';
+		} else {
+			$stref->{'Includes'}{$f}{'Type'} = 'None';
+		}
+		for my $var ( keys %vars ) {
+			if (
+				(
+					$has_pars
+					and not
+					exists( $stref->{'Includes'}{$f}{'Parameters'}{$var} )
+				)
+				or ( $has_commons
+					and not exists( $stref->{'Includes'}{$f}{'Commons'}{$var} )
+				)
+			  )
+			{
+				warn Dumper( $stref->{'Includes'}{$f}{'Lines'} );
+				die
 "The include $f contains a variable $var that is neither a parameter nor a common variable, this is not supported\n";
-					}
-				}
 			}
-			return $stref;
-		}    # END of get_commons_params_from_includes()
+		}
+	}
+	return $stref;
+}    # END of get_commons_params_from_includes()
 
- # -----------------------------------------------------------------------------
-		sub separate_blocks {
-			( my $f, my $stref ) = @_;
+# -----------------------------------------------------------------------------
+sub separate_blocks {
+	( my $f, my $stref ) = @_;
 
 #    die "separate_blocks(): FIXME: we need to add in the locals from the parent subroutine as locals in the new subroutine!";
-			my $sub_or_func = sub_func_or_incl( $f, $stref );
-			my $srcref      = $stref->{$sub_or_func}{$f}{'Lines'};
-			my %vars        = %{ $stref->{$sub_or_func}{$f}{'Vars'} };
-			my %occs        = ();
-			my %blocks      = ();
-			my $in_block    = 0;
-			my $block       = 'OUTER';
-			$blocks{'OUTER'} = { 'Lines' => [] };
-			my $block_idx = 0;
+	my $sub_or_func = sub_func_or_incl( $f, $stref );
+	my $srcref      = $stref->{$sub_or_func}{$f}{'Lines'};
+	my %vars        = %{ $stref->{$sub_or_func}{$f}{'Vars'} };
+	my %occs        = ();
+	my %blocks      = ();
+	my $in_block    = 0;
+	my $block       = 'OUTER';
+	$blocks{'OUTER'} = { 'Lines' => [] };
+	my $block_idx = 0;
 
-			for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-				my $line = $srcref->[$index];
+	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+		my $line = $srcref->[$index];
 
-				if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
-					$in_block = 1;
-					$block    = $1;
-					print "FOUND BLOCK $block\n" if $V;
+		if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
+			$in_block = 1;
+			$block    = $1;
+			print "FOUND BLOCK $block\n" if $V;
 
-					#push @{ $blocks{'OUTER'}{'Lines'} }, $line;
-					$stref->{$sub_or_func}{$f}{'Info'}
-					  ->[$index]{'RefactoredSubroutineCall'}{'Name'} = $block;
-					delete $stref->{$sub_or_func}{$f}{'Info'}
-					  ->[$index]{'Comments'};
-					$stref->{$sub_or_func}{$f}{'Info'}
-					  ->[$index]{'BeginBlock'}{'Name'} = $block;
-					push @{ $blocks{'OUTER'}{'Lines'} }, $line;
-					push @{ $blocks{$block}{'Lines'} },
-					  $line;    # to be replaced by function signature
-					push @{ $blocks{$block}{'Info'} },
-					  { 'RefactoredSubroutineCall' => { 'Name' => $block } };
-					$blocks{$block}{'BeginBlockIdx'} = $index;
-					next;
-				}
-				if ( $line =~ /^C\s+END\sSUBROUTINE\s(\w+)/ ) {
-					$in_block = 0;
-					$block    = $1;
-					push @{ $blocks{'OUTER'}{'Lines'} }, $line;
-					push @{ $blocks{$block}{'Lines'} }, '      end';
-					push @{ $blocks{$block}{'Info'} },
-					  $stref->{$sub_or_func}{$f}{'Info'}->[$index];
-					$stref->{$sub_or_func}{$f}{'Info'}
-					  ->[$index]{'EndBlock'}{'Name'} = $block;
-					$blocks{$block}{'EndBlockIdx'} = $index;
-					next;
-				}
-				if ($in_block) {
-					push @{ $blocks{$block}{'Lines'} }, $line;
-					push @{ $blocks{$block}{'Info'} },
-					  $stref->{$sub_or_func}{$f}{'Info'}->[$index];
-					$stref->{$sub_or_func}{$f}{'Info'}
-					  ->[$index]{'InBlock'}{'Name'} = $block;
-				} else {
+			#push @{ $blocks{'OUTER'}{'Lines'} }, $line;
+			$stref->{$sub_or_func}{$f}{'Info'}
+			  ->[$index]{'RefactoredSubroutineCall'}{'Name'} = $block;
+			delete $stref->{$sub_or_func}{$f}{'Info'}->[$index]{'Comments'};
+			$stref->{$sub_or_func}{$f}{'Info'}->[$index]{'BeginBlock'}{'Name'} =
+			  $block;
+			push @{ $blocks{'OUTER'}{'Lines'} }, $line;
+			push @{ $blocks{$block}{'Lines'} },
+			  $line;    # to be replaced by function signature
+			push @{ $blocks{$block}{'Info'} },
+			  { 'RefactoredSubroutineCall' => { 'Name' => $block } };
+			$blocks{$block}{'BeginBlockIdx'} = $index;
+			next;
+		}
+		if ( $line =~ /^C\s+END\sSUBROUTINE\s(\w+)/ ) {
+			$in_block = 0;
+			$block    = $1;
+			push @{ $blocks{'OUTER'}{'Lines'} }, $line;
+			push @{ $blocks{$block}{'Lines'} }, '      end';
+			push @{ $blocks{$block}{'Info'} },
+			  $stref->{$sub_or_func}{$f}{'Info'}->[$index];
+			$stref->{$sub_or_func}{$f}{'Info'}->[$index]{'EndBlock'}{'Name'} =
+			  $block;
+			$blocks{$block}{'EndBlockIdx'} = $index;
+			next;
+		}
+		if ($in_block) {
+			push @{ $blocks{$block}{'Lines'} }, $line;
+			push @{ $blocks{$block}{'Info'} },
+			  $stref->{$sub_or_func}{$f}{'Info'}->[$index];
+			$stref->{$sub_or_func}{$f}{'Info'}->[$index]{'InBlock'}{'Name'} =
+			  $block;
+		} else {
 
-					#	print "OUTER:",$line,"\n";
-					push @{ $blocks{'OUTER'}{'Lines'} }, $line;
-				}
-			}
+			#	print "OUTER:",$line,"\n";
+			push @{ $blocks{'OUTER'}{'Lines'} }, $line;
+		}
+	}
 
-			# WV06/12/2011: OK up to here
-			#die Dumper($blocks{'OUTER'}{'Lines'});
-			for my $block ( keys %blocks ) {
-				next if $block eq 'OUTER';
+	# WV06/12/2011: OK up to here
+	#die Dumper($blocks{'OUTER'}{'Lines'});
+	for my $block ( keys %blocks ) {
+		next if $block eq 'OUTER';
 
-				# Here we create an entry for the new subroutine
-				# I think we need more than just Lines!
-				$stref->{$sub_or_func}{$block}{'Lines'} =
-				  $blocks{$block}{'Lines'};
-				$stref->{$sub_or_func}{$block}{'Info'} =
-				  $blocks{$block}{'Info'};
-				$stref->{$sub_or_func}{$block}{'Source'} =
-				  $stref->{$sub_or_func}{$f}{'Source'};
-			}
+		# Here we create an entry for the new subroutine
+		# I think we need more than just Lines!
+		$stref->{$sub_or_func}{$block}{'Lines'} = $blocks{$block}{'Lines'};
+		$stref->{$sub_or_func}{$block}{'Info'}  = $blocks{$block}{'Info'};
+		$stref->{$sub_or_func}{$block}{'Source'} =
+		  $stref->{$sub_or_func}{$f}{'Source'};
+	}
 
-		#die Dumper($blocks{'OUTER'}{'Lines'});
-		# 6. Identify which vars are used
-		#   - in both => these become function arguments
-		#   - only in "outer" => do nothing for those
-		#   - only in "inner" => can be removed from outer variable declarations
+	#die Dumper($blocks{'OUTER'}{'Lines'});
+	# 6. Identify which vars are used
+	#   - in both => these become function arguments
+	#   - only in "outer" => do nothing for those
+	#   - only in "inner" => can be removed from outer variable declarations
 
 # Find all vars used in each block, starting with the outer block
 # It is best to loop over all vars per line per block, because we can remove the encountered vars
-			for my $block ( keys %blocks ) {
-				my @lines = @{ $blocks{$block}{'Lines'} };
-				my %tvars = %vars;    # Hurray for pass-by-value!
-				print "\nVARS in $block:\n\n" if $V;
-				for my $line (@lines) {
+	for my $block ( keys %blocks ) {
+		my @lines = @{ $blocks{$block}{'Lines'} };
+		my %tvars = %vars;                           # Hurray for pass-by-value!
+		print "\nVARS in $block:\n\n" if $V;
+		for my $line (@lines) {
 
-					#    	print $block,':',$line,"\n";
-					my $tline = $line;
-					$tline =~ s/\'.+?\'//;
-					for my $var ( sort keys %tvars ) {
-						if ( $tline =~ /\W$var\W/ or $tline =~ /\W$var\s*$/ ) {
-							print "FOUND $var\n" if $V;
-							$occs{$block}{$var} = $var;
-							delete $tvars{$var};
-						}
-					}
+			#    	print $block,':',$line,"\n";
+			my $tline = $line;
+			$tline =~ s/\'.+?\'//;
+			for my $var ( sort keys %tvars ) {
+				if ( $tline =~ /\W$var\W/ or $tline =~ /\W$var\s*$/ ) {
+					print "FOUND $var\n" if $V;
+					$occs{$block}{$var} = $var;
+					delete $tvars{$var};
 				}
 			}
+		}
+	}
 
-			# Construct the subroutine signatures
-			my %args = ();
-			for my $block ( keys %blocks ) {
-				next if $block eq 'OUTER';
+	# Construct the subroutine signatures
+	my %args = ();
+	for my $block ( keys %blocks ) {
+		next if $block eq 'OUTER';
 
-				print "\nARGS for BLOCK $block:\n" if $V;
-				for my $var ( sort keys %{ $occs{$block} } ) {
-					if ( exists $occs{'OUTER'}{$var} ) {
-						print "$var\n" if $V;
-						push @{ $args{$block} }, $var;
-					}
-				}
+		print "\nARGS for BLOCK $block:\n" if $V;
+		for my $var ( sort keys %{ $occs{$block} } ) {
+			if ( exists $occs{'OUTER'}{$var} ) {
+				print "$var\n" if $V;
+				push @{ $args{$block} }, $var;
+			}
+		}
 
-				$stref->{'Subroutines'}{$block}{'Args'} = $args{$block};
-				my $sig   = "      subroutine $block(";
-				my $decls = [];
-				for my $argv ( @{ $args{$block} } ) {
-					$sig .= "$argv,";
-					my $decl =
-					  $vars{$argv}{'Decl'};    #|| $commons{$argv}{'Decl'};
-					push @{$decls}, $decl;
-				}
-				$sig =~ s/\,$/)/s;
+		$stref->{'Subroutines'}{$block}{'Args'} = $args{$block};
+		my $sig   = "      subroutine $block(";
+		my $decls = [];
+		for my $argv ( @{ $args{$block} } ) {
+			$sig .= "$argv,";
+			my $decl = $vars{$argv}{'Decl'};    #|| $commons{$argv}{'Decl'};
+			push @{$decls}, $decl;
+		}
+		$sig =~ s/\,$/)/s;
 
  #        $stref->{$sub_or_func}{$f}{'Blocks'}{$block}{'Args'}  = $args{$block};
-				$stref->{$sub_or_func}{$block}{'Sig'}   = $sig;
-				$stref->{$sub_or_func}{$block}{'Decls'} = $decls;
-				my $marker = shift @{ $stref->{$sub_or_func}{$block}{'Lines'} };
-				my $siginfo = shift @{ $stref->{$sub_or_func}{$block}{'Info'} };
-				for my $argv ( @{ $args{$block} } ) {
-					my $decl = $vars{$argv}{'Decl'};
-					unshift @{ $stref->{$sub_or_func}{$block}{'Lines'} }, $decl;
-					unshift @{ $stref->{'Subroutines'}{$block}{'Info'} },
-					  { 'VarDecl' => [$argv] };
-				}
-				unshift @{ $stref->{'Subroutines'}{$block}{'Info'} }, $siginfo;
-				my $fl = shift @{ $stref->{$sub_or_func}{$block}{'Info'} };
-				for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } )
-				{
+		$stref->{$sub_or_func}{$block}{'Sig'}   = $sig;
+		$stref->{$sub_or_func}{$block}{'Decls'} = $decls;
+		my $marker  = shift @{ $stref->{$sub_or_func}{$block}{'Lines'} };
+		my $siginfo = shift @{ $stref->{$sub_or_func}{$block}{'Info'} };
+		for my $argv ( @{ $args{$block} } ) {
+			my $decl = $vars{$argv}{'Decl'};
+			unshift @{ $stref->{$sub_or_func}{$block}{'Lines'} }, $decl;
+			unshift @{ $stref->{'Subroutines'}{$block}{'Info'} },
+			  { 'VarDecl' => [$argv] };
+		}
+		unshift @{ $stref->{'Subroutines'}{$block}{'Info'} }, $siginfo;
+		my $fl = shift @{ $stref->{$sub_or_func}{$block}{'Info'} };
+		for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } ) {
 
 #            $stref->{$sub_or_func}{$f}{'Blocks'}{$block}{'Includes'}{$inc} = -2;
-					$stref->{'Subroutines'}{$block}{'Includes'}{$inc} = 1;
+			$stref->{'Subroutines'}{$block}{'Includes'}{$inc} = 1;
 
-					unshift @{ $stref->{'Subroutines'}{$block}{'Lines'} },
-					  "      include '$inc'";
-					unshift @{ $stref->{'Subroutines'}{$block}{'Info'} },
-					  { 'Include' => { 'Name' => $inc } };
-					$stref->{'Subroutines'}{$block}{'Includes'}{$inc} = 1;
-				}
-				unshift @{ $stref->{$sub_or_func}{$block}{'Lines'} }, $sig;
+			unshift @{ $stref->{'Subroutines'}{$block}{'Lines'} },
+			  "      include '$inc'";
+			unshift @{ $stref->{'Subroutines'}{$block}{'Info'} },
+			  { 'Include' => { 'Name' => $inc } };
+			$stref->{'Subroutines'}{$block}{'Includes'}{$inc} = 1;
+		}
+		unshift @{ $stref->{$sub_or_func}{$block}{'Lines'} }, $sig;
 
-				for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-					if ( $index == $blocks{$block}{'BeginBlockIdx'} ) {
-						$sig =~ s/subroutine/call/;
-						$srcref->[$index] = $sig;
-					} elsif ( $index > $blocks{$block}{'BeginBlockIdx'}
-						and $index <= $blocks{$block}{'EndBlockIdx'} )
-					{
-						$srcref->[$index] = '';
-					}
-				}
-				unshift @{ $stref->{$sub_or_func}{$block}{'Info'} }, $fl;
-				if ($V) {
-					print $sig, "\n";
-					print join( "\n", @{$decls} ), "\n";
-				}
-				$stref->{'Subroutines'}{$block}{'Status'} = $READ;
-
-				#        die Dumper($stref->{'Subroutines'}{$block});
+		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+			if ( $index == $blocks{$block}{'BeginBlockIdx'} ) {
+				$sig =~ s/subroutine/call/;
+				$srcref->[$index] = $sig;
+			} elsif ( $index > $blocks{$block}{'BeginBlockIdx'}
+				and $index <= $blocks{$block}{'EndBlockIdx'} )
+			{
+				$srcref->[$index] = '';
 			}
+		}
+		unshift @{ $stref->{$sub_or_func}{$block}{'Info'} }, $fl;
+		if ($V) {
+			print $sig, "\n";
+			print join( "\n", @{$decls} ), "\n";
+		}
+		$stref->{'Subroutines'}{$block}{'Status'} = $READ;
 
-			#die Dumper($stref->{'Subroutines'}{$f});
-			return $stref;
-		}    # END of separate_blocks()
+		#        die Dumper($stref->{'Subroutines'}{$block});
+	}
+
+	#die Dumper($stref->{'Subroutines'}{$f});
+	return $stref;
+}    # END of separate_blocks()
 
 # -----------------------------------------------------------------------------
- # -----------------------------------------------------------------------------
- # FIXME: "error: break statement not within loop or switch"
-		sub identify_loops_breaks {
-			( my $f, my $stref ) = @_;
-			my $sub_or_func = sub_func_or_incl( $f, $stref );
-			my $srcref = $stref->{$sub_or_func}{$f}{'Lines'};
-			if ( defined $srcref ) {
-				my %do_loops = ();
-				my %gotos    = ();
+# -----------------------------------------------------------------------------
+# FIXME: "error: break statement not within loop or switch"
+sub identify_loops_breaks {
+	( my $f, my $stref ) = @_;
+	my $sub_or_func = sub_func_or_incl( $f, $stref );
+	my $srcref = $stref->{$sub_or_func}{$f}{'Lines'};
+	if ( defined $srcref ) {
+		my %do_loops = ();
+		my %gotos    = ();
 
-				#	my %labels=();
-				my $nest = 0;
-				for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-					my $line = $srcref->[$index];
-					next if $line =~ /^C\s+/;
+		#	my %labels=();
+		my $nest = 0;
+		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+			my $line = $srcref->[$index];
+			next if $line =~ /^C\s+/;
 
-					# BeginDo:
-					$line =~ /^\s+do\s+(\d+)\s+\w/ && do {
-						my $label = $1;
-						$stref->{$sub_or_func}{$f}{'Info'}
-						  ->[$index]{'BeginDo'}{'Label'} = $label;
-						if ( not exists $do_loops{$label} ) {
-							@{ $do_loops{$label} } = ( [$index], $nest );
-							$nest++;
-						} else {
-							push @{ $do_loops{$label}[0] }, $index;
+			# BeginDo:
+			$line =~ /^\s+do\s+(\d+)\s+\w/ && do {
+				my $label = $1;
+				$stref->{$sub_or_func}{$f}{'Info'}
+				  ->[$index]{'BeginDo'}{'Label'} = $label;
+				if ( not exists $do_loops{$label} ) {
+					@{ $do_loops{$label} } = ( [$index], $nest );
+					$nest++;
+				} else {
+					push @{ $do_loops{$label}[0] }, $index;
 
 #        		print STDERR "WARNING: $f: Found duplicate label $label at: ".join(',',@{ $do_loops{$label}[0] })."\n";
-						}
-						next;
-					};
+				}
+				next;
+			};
 
-					# Goto
-					$line =~ /^\s+.*?[\)\ ]\s*goto\s+(\d+)\s*$/ && do {
-						my $label = $1;
+			# Goto
+			$line =~ /^\s+.*?[\)\ ]\s*goto\s+(\d+)\s*$/ && do {
+				my $label = $1;
+				$stref->{$sub_or_func}{$f}{'Info'}->[$index]{'Goto'}{'Label'} =
+				  $label;
+				$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = 1;
+				push @{ $gotos{$label} }, [ $index, $nest ];
+				next;
+			};
+
+			# continue can be end of do loop or break target (amongs others?)
+			$line =~ /^\s{0,4}(\d+)\s+(continue|\w)/ && do {
+				my $label = $1;
+				my $is_cont = $2 eq 'continue' ? 1 : 0;
+				if ( exists $do_loops{$label} ) {
+					if ( $nest == $do_loops{$label}[1] + 1 ) {
 						$stref->{$sub_or_func}{$f}{'Info'}
-						  ->[$index]{'Goto'}{'Label'} = $label;
-						$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = 1;
-						push @{ $gotos{$label} }, [ $index, $nest ];
-						next;
-					};
-
-			   # continue can be end of do loop or break target (amongs others?)
-					$line =~ /^\s{0,4}(\d+)\s+(continue|\w)/ && do {
-						my $label = $1;
-						my $is_cont = $2 eq 'continue' ? 1 : 0;
-						if ( exists $do_loops{$label} ) {
-							if ( $nest == $do_loops{$label}[1] + 1 ) {
-								$stref->{$sub_or_func}{$f}{'Info'}
-								  ->[$index]{'EndDo'}{'Label'} = $label;
-								$stref->{$sub_or_func}{$f}{'Info'}
-								  ->[$index]{'EndDo'}{'Count'} =
-								  scalar @{ $do_loops{$label}[0] };
-								delete $do_loops{$label};
-								$nest--;
-							} else {
-								print
+						  ->[$index]{'EndDo'}{'Label'} = $label;
+						$stref->{$sub_or_func}{$f}{'Info'}
+						  ->[$index]{'EndDo'}{'Count'} =
+						  scalar @{ $do_loops{$label}[0] };
+						delete $do_loops{$label};
+						$nest--;
+					} else {
+						print
 "WARNING: $f: Found continue for label $label but nesting level is wrong: $nest<>$do_loops{$label}[1]\n"
-								  if $W;
-							}
-						} elsif ( exists $gotos{$label} ) {
-							my $target = 'GotoTarget';
-							for my $pair ( @{ $gotos{$label} } ) {
-								( my $tindex, my $tnest ) = @{$pair};
-								$target = 'GotoTarget';
-								if ( $nest <= $tnest )
-								{ # What if there are several gotos point to one label?
-									if ( $tnest > 0 ) {
-										if ($is_cont) {
-											$target = 'NoopBreakTarget';
-											$stref->{$sub_or_func}{$f}{'Info'}
-											  ->[$tindex]{'Break'}{'Label'} =
-											  $label;
-										} else {
-											$target = 'BreakTarget';
-											$stref->{$sub_or_func}{$f}{'Info'}
-											  ->[$tindex]{'Break'}{'Label'} =
-											  $label;
+						  if $W;
+					}
+				} elsif ( exists $gotos{$label} ) {
+					my $target = 'GotoTarget';
+					for my $pair ( @{ $gotos{$label} } ) {
+						( my $tindex, my $tnest ) = @{$pair};
+						$target = 'GotoTarget';
+						if ( $nest <= $tnest )
+						{  # What if there are several gotos point to one label?
+							if ( $tnest > 0 ) {
+								if ($is_cont) {
+									$target = 'NoopBreakTarget';
+									$stref->{$sub_or_func}{$f}{'Info'}
+									  ->[$tindex]{'Break'}{'Label'} = $label;
+								} else {
+									$target = 'BreakTarget';
+									$stref->{$sub_or_func}{$f}{'Info'}
+									  ->[$tindex]{'Break'}{'Label'} = $label;
 
 #                    	print STDERR "WARNING: $f: Found BREAK target not NOOP for label $label\n";
-										}
-									} else {
-										if ($is_cont) {
-											$target = 'NoopTarget';
-										}
+								}
+							} else {
+								if ($is_cont) {
+									$target = 'NoopTarget';
+								}
 
 #							print "WARNING: goto $label ($tindex) is not in loop ($f)\n" if $translate==$GO;
-									}
-								} else {
-									print
-"WARNING: $f: Found GOTO target not BREAK for label $label: wrong nesting $nest<>$gotos{$label}[1]\n"
-									  if $W;
-								}
 							}
-							$stref->{$sub_or_func}{$f}{'Info'}
-							  ->[$index]{$target}{'Label'} = $label;
-							$stref->{$sub_or_func}{$f}{'Gotos'}{$label} =
-							  $target;
-							delete $gotos{$label};
-
+						} else {
+							print
+"WARNING: $f: Found GOTO target not BREAK for label $label: wrong nesting $nest<>$gotos{$label}[1]\n"
+							  if $W;
 						}
-						next;
-					};
+					}
+					$stref->{$sub_or_func}{$f}{'Info'}
+					  ->[$index]{$target}{'Label'} = $label;
+					$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = $target;
+					delete $gotos{$label};
+
+				}
+				next;
+			};
 
    # When an open() fails, you can pass a label to some place for error handling
    # Some evil code combines this end-of-do-block labels
-					$line =~ /^\s+open.*?\,\s*err\s*=\s*(\d+)\s*\)/ && do {
-						my $label = $1;
-						$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = 1;
-						next;
-					};
+			$line =~ /^\s+open.*?\,\s*err\s*=\s*(\d+)\s*\)/ && do {
+				my $label = $1;
+				$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = 1;
+				next;
+			};
+		}
+	} else {
+		print "NO SOURCE for $f\n";
+	}
+	return $stref;
+}    # END of identify_loops_breaks()
+
+# -----------------------------------------------------------------------------
+# This subroutine reads the FORTRAN source and does very little else:
+# - it combines continuation lines in a single line
+# - it lowercases everything
+# - it detects and normalises comments
+# - it detects block markers (for factoring blocks out into subs)
+# The routine is called by parse_fortran_src_OLD()
+# A better way is to extract all subs in a single pass
+# I guess the best wat is to first join the lines, then separate the subs
+sub read_fortran_src {
+	( my $s, my $stref ) = @_;
+
+	my $is_incl = exists $stref->{'Includes'}{$s} ? 1 : 0;
+
+	# FIXME: handle Functions too!
+	# Unfortunately, a source can contain both subroutines and functions ...
+	my $sub_func_incl = sub_func_or_incl( $s, $stref );
+	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
+	my $f = $is_incl ? $s : $stref->{$sub_func_incl}{$s}{'Source'};
+
+	if ( $stref->{$sub_func_incl}{$s}{'Status'} == $UNREAD ) {
+		my $ok = 1;
+		open my $SRC, '<', $f or do {
+			print "WARNING: Can't find '$f' ($s)\n";
+			$ok = 0;
+		};
+		if ($ok) {
+			print "READING SOURCE for $f ($sub_func_incl)\n" if $V;
+			local $V = 0;
+			my $lines    = [];
+			my $prevline = '';
+
+			# 0. Slurp the source; standardise the comments
+			# 1. Join up the continuation lines
+			# TODO: split lines with ;
+			# TODO: Special case: comments in continuation lines.
+			# For now, I just throw them away.
+			my $cont = 0;
+
+			my %strconsts             = ();
+			my @phs                   = ();
+			my @placeholders_per_line = ();
+			my $ct                    = 0;
+
+			my $line = '';
+			while (<$SRC>) {
+				$line = $_;
+				chomp $line;
+
+				# Skip blanks
+				$line =~ /^\s*$/ && next;
+
+				# Detect blocks
+				if ( $stref->{$sub_func_incl}{$s}{'HasBlocks'} == 0 ) {
+					if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
+						$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 1;
+					}
 				}
-			} else {
-				print "NO SOURCE for $f\n";
-			}
-			return $stref;
-		}    # END of identify_loops_breaks()
 
- # -----------------------------------------------------------------------------
- # This subroutine reads the FORTRAN source and does very little else:
- # - it combines continuation lines in a single line
- # - it lowercases everything
- # - it detects and normalises comments
- # - it detects block markers (for factoring blocks out into subs)
- # The routine is called by parse_fortran_src_OLD()
- # A better way is to extract all subs in a single pass
- # I guess the best wat is to first join the lines, then separate the subs
-		sub read_fortran_src {
-			( my $s, my $stref ) = @_;
-
-			my $is_incl = exists $stref->{'Includes'}{$s} ? 1 : 0;
-
-		# FIXME: handle Functions too!
-		# Unfortunately, a source can contain both subroutines and functions ...
-			my $sub_func_incl = sub_func_or_incl( $s, $stref );
-			$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
-			my $f = $is_incl ? $s : $stref->{$sub_func_incl}{$s}{'Source'};
-
-			if ( $stref->{$sub_func_incl}{$s}{'Status'} == $UNREAD ) {
-				my $ok = 1;
-				open my $SRC, '<', $f or do {
-					print "WARNING: Can't find '$f' ($s)\n";
-					$ok = 0;
-				};
-				if ($ok) {
-					print "READING SOURCE for $f ($sub_func_incl)\n" if $V;
-					local $V = 0;
-					my $lines    = [];
-					my $prevline = '';
-
-					# 0. Slurp the source; standardise the comments
-					# 1. Join up the continuation lines
-					# TODO: split lines with ;
-					# TODO: Special case: comments in continuation lines.
-					# For now, I just throw them away.
-					my $cont = 0;
-
-					my %strconsts             = ();
-					my @phs                   = ();
-					my @placeholders_per_line = ();
-					my $ct                    = 0;
-
-					my $line = '';
-					while (<$SRC>) {
-						$line = $_;
-						chomp $line;
-
-						# Skip blanks
-						$line =~ /^\s*$/ && next;
-
-						# Detect blocks
-						if ( $stref->{$sub_func_incl}{$s}{'HasBlocks'} == 0 ) {
-							if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
-								$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 1;
-							}
-						}
-
-						# Detect and standardise comments
-						if ( $line =~ /^[CD\*\!]/i or $line =~ /^\ {6}\s*\!/i )
-						{
-							$line =~ s/^\s*[CcDd\*\!]/C /;
-						} elsif ( $line =~ /\s+\!.*$/ )
-						{    # FIXME: trailing comments are discarded!
-							my $tline = $line;
-							$tline =~ s/\'.+?\'//;
-							if ( $tline =~ /\s+\!.*$/ ) {
+				# Detect and standardise comments
+				if ( $line =~ /^[CD\*\!]/i or $line =~ /^\ {6}\s*\!/i ) {
+					$line =~ s/^\s*[CcDd\*\!]/C /;
+				} elsif ( $line =~ /\s+\!.*$/ )
+				{    # FIXME: trailing comments are discarded!
+					my $tline = $line;
+					$tline =~ s/\'.+?\'//;
+					if ( $tline =~ /\s+\!.*$/ ) {
 
 				  # convert trailing comments into comments on the previous line
-								( $line, my $comment ) =
-								  split( /\s+\!/, $line );
-							}
-						}
+						( $line, my $comment ) =
+						  split( /\s+\!/, $line );
+					}
+				}
 
-						if ( $line =~ /^\ {5}[^0\s]/ ) {    # continuation line
-							$line =~ s/^\s{5}.\s*/ /;
-							$prevline .= $line;
-							$cont = 1;
-						} elsif ( $line =~ /^\&/ ) {
-							$line =~ s/^\&\t*/ /;
-							$prevline .= $line;
-							$cont = 1;
-						} elsif ( $line =~ /^\t[1-9]/ ) {
-							$line =~ s/^\t[0-9]/ /;
-							$prevline .= $line;
-							$cont = 1;
-						} elsif ( $prevline =~ /\&\s&$/ ) {
-							$prevline =~ s/\&\s&$//;
-							$prevline .= $line;
-							$cont = 1;
-						} elsif ( $line =~ /^C\ / && ( $cont == 1 ) ) {
+				if ( $line =~ /^\ {5}[^0\s]/ ) {    # continuation line
+					$line =~ s/^\s{5}.\s*/ /;
+					$prevline .= $line;
+					$cont = 1;
+				} elsif ( $line =~ /^\&/ ) {
+					$line =~ s/^\&\t*/ /;
+					$prevline .= $line;
+					$cont = 1;
+				} elsif ( $line =~ /^\t[1-9]/ ) {
+					$line =~ s/^\t[0-9]/ /;
+					$prevline .= $line;
+					$cont = 1;
+				} elsif ( $prevline =~ /\&\s&$/ ) {
+					$prevline =~ s/\&\s&$//;
+					$prevline .= $line;
+					$cont = 1;
+				} elsif ( $line =~ /^C\ / && ( $cont == 1 ) ) {
 
-						   # A comment occuring after a continuation line. Skip!
-							next;
-						} else {
+					# A comment occuring after a continuation line. Skip!
+					next;
+				} else {
 
  #                    warn "TAB FORMAT for $prevline ?\n" if $prevline =~/9100/;
  #                    ($prevline=~/^\t/ || $prevline=~/^\d+\t/ ) && do {
  #                        warn "TAB FORMAT for $prevline\n" ;
  #                    };
-							my $sixspaces = ' ' x 6;
-							$prevline =~ s/^\t/$sixspaces/;
-							$prevline =~ /^(\d+)\t/ && do {
-								my $label  = $1;
-								my $ndig   = length($label);
-								my $spaces = ' ' x ( 6 - $ndig );
-								my $str    = $label . $spaces;
-								$prevline =~ s/^(\d+)\t/$str/;
-							};
-							if ( substr( $prevline, 0, 2 ) ne 'C ' ) {
-								if ( $prevline !~ /^\s+include\s+\'/i ) {
+					my $sixspaces = ' ' x 6;
+					$prevline =~ s/^\t/$sixspaces/;
+					$prevline =~ /^(\d+)\t/ && do {
+						my $label  = $1;
+						my $ndig   = length($label);
+						my $spaces = ' ' x ( 6 - $ndig );
+						my $str    = $label . $spaces;
+						$prevline =~ s/^(\d+)\t/$str/;
+					};
+					if ( substr( $prevline, 0, 2 ) ne 'C ' ) {
+						if ( $prevline !~ /^\s+include\s+\'/i ) {
 
-									# replace string constants by placeholders
-									while ( $prevline =~ /(\'.*?\')/ ) {
-										my $strconst = $1;
-										my $ph       = '__PH' . $ct . '__';
-										push @phs, $ph;
-										$strconsts{$ph} = $strconst;
-										$prevline =~ s/\'.*?\'/$ph/;
-										$ct++;
-									}
-								}
+							# replace string constants by placeholders
+							while ( $prevline =~ /(\'.*?\')/ ) {
+								my $strconst = $1;
+								my $ph       = '__PH' . $ct . '__';
+								push @phs, $ph;
+								$strconsts{$ph} = $strconst;
+								$prevline =~ s/\'.*?\'/$ph/;
+								$ct++;
+							}
+						}
 
 	 # remove trailing comments
 	 #	               	( $prevline, my $comment ) = split( /\s+\!/, $prevline );
-							}
-							my $lcprevline =
-							  ( substr( $prevline, 0, 2 ) eq 'C ' )
-							  ? $prevline
-							  : lc($prevline);
-							$lcprevline =~ s/__ph(\d+)__/__PH$1__/g;
-
-							#	                  warn "$lcprevline\n";
-							push @{$lines},
-							  $lcprevline;    # unless $lcprevline eq ''; # HACK
-							push @placeholders_per_line, [@phs];
-							@phs      = ();
-							$prevline = $line;
-							$cont     = 0;
-						}
 					}
+					my $lcprevline =
+					  ( substr( $prevline, 0, 2 ) eq 'C ' )
+					  ? $prevline
+					  : lc($prevline);
+					$lcprevline =~ s/__ph(\d+)__/__PH$1__/g;
 
-			   # There can't be strings on the last line (except in a include?)
-			   # and substr($prevline,-length($line),length($prevline)) ne $line
-					if ( $line ne $prevline )
-					{    # Too weak, if there are comments in between it breaks!
-						my $lcprevline =
-						  ( substr( $prevline, 0, 2 ) eq 'C ' )
-						  ? $prevline
-						  : lc($prevline);
-						push @{$lines}, $lcprevline;
-					}
+					#	                  warn "$lcprevline\n";
+					push @{$lines},
+					  $lcprevline;    # unless $lcprevline eq ''; # HACK
+					push @placeholders_per_line, [@phs];
+					@phs      = ();
+					$prevline = $line;
+					$cont     = 0;
+				}
+			}
 
-					# HACK! FIXME!
-					if (    $f =~ /^include/
-						and length($line) != length($prevline)
-						and
-						substr( $prevline, -length($line), length($prevline) )
-						eq $line )
-					{
+			# There can't be strings on the last line (except in a include?)
+			# and substr($prevline,-length($line),length($prevline)) ne $line
+			if ( $line ne $prevline )
+			{    # Too weak, if there are comments in between it breaks!
+				my $lcprevline =
+				  ( substr( $prevline, 0, 2 ) eq 'C ' )
+				  ? $prevline
+				  : lc($prevline);
+				push @{$lines}, $lcprevline;
+			}
 
-					  # the last line was already appended to the previous line!
-					} else {
-						my $lcline =
-						  ( substr( $line, 0, 2 ) eq 'C ' ) ? $line : lc($line);
-						push @{$lines}, $lcline;
-					}
-					push @placeholders_per_line, [];
-					push @placeholders_per_line, [];
-					close $SRC;
+			# HACK! FIXME!
+			if (    $f =~ /^include/
+				and length($line) != length($prevline)
+				and substr( $prevline, -length($line), length($prevline) ) eq
+				$line )
+			{
 
-					#	        die if $f =~ /coordtrafo/;
-					#	        die Dumper($lines) if $f =~ /coordtrafo/;
-					my $name = 'NONE';
-					my $ok   = 0;
-					if ($is_incl) {
-						$ok                                    = 1;
-						$name                                  = $s;
-						$stref->{$sub_func_incl}{$s}{'Status'} = $READ;
-					}
-					my $index = 0;
-					for my $line ( @{$lines} ) {
-						my $phs_ref = shift @placeholders_per_line;
-						if ( not defined $line ) {
-							$line = 'C UNDEF';
-						}
+				# the last line was already appended to the previous line!
+			} else {
+				my $lcline =
+				  ( substr( $line, 0, 2 ) eq 'C ' ) ? $line : lc($line);
+				push @{$lines}, $lcline;
+			}
+			push @placeholders_per_line, [];
+			push @placeholders_per_line, [];
+			close $SRC;
+
+			#	        die if $f =~ /coordtrafo/;
+			#	        die Dumper($lines) if $f =~ /coordtrafo/;
+			my $name = 'NONE';
+			my $ok   = 0;
+			if ($is_incl) {
+				$ok                                    = 1;
+				$name                                  = $s;
+				$stref->{$sub_func_incl}{$s}{'Status'} = $READ;
+			}
+			my $index = 0;
+			for my $line ( @{$lines} ) {
+				my $phs_ref = shift @placeholders_per_line;
+				if ( not defined $line ) {
+					$line = 'C UNDEF';
+				}
 
 #	        	print STDERR '[',join(',',@{$phs_ref}),"]\n";
 # If it's a subroutine source, skip all lines before the matching subroutine signature
 #and all lines from (and including) the next non-matching subroutine signature
 
 	   # FIXME: weak, the return type of the function can be more than one word!
-						if (   $is_incl == 0
-							&& $line =~
-/^\s+(program|subroutine|(?:\w+\s+)?function)\s+(\w+)/
-						  )
-						{
-							my $keyword = $1;
-							$name = $2;
-							if ( $keyword =~ /function/ ) {
-								$sub_func_incl = 'Functions';
-							} else {
-								$sub_func_incl = 'Subroutines';
-							}
-
-							#	            	warn "\t$name\n";
-							$ok                                       = 1;
-							$index                                    = 0;
-							$stref->{$sub_func_incl}{$name}{'Status'} = $READ;
-
-					  #					$stref->{$sub_func_incl}{$name}{'HasBlocks'}    = 0;
-							$stref->{$sub_func_incl}{$name}{'StringConsts'} =
-							  \%strconsts
-							  ; # Means we have all consts in the file, not just the sub, but who cares?
-						}
-						if ( $ok == 1 ) {
-							push @{ $stref->{$sub_func_incl}{$name}{'Lines'} },
-							  $line;
-							if ( $line =~ /^C/ ) {
-								$stref->{$sub_func_incl}{$name}{'Info'}
-								  ->[$index]{'Comments'} = {};
-							}
-							$stref->{$sub_func_incl}{$name}{'Info'}->[$index] =
-							  { 'PlaceHolders' => $phs_ref }
-							  if @{$phs_ref};
-							$index++;
-						}
-
+				if (   $is_incl == 0
+					&& $line =~
+					/^\s+(program|subroutine|(?:\w+\s+)?function)\s+(\w+)/ )
+				{
+					my $keyword = $1;
+					$name = $2;
+					if ( $keyword =~ /function/ ) {
+						$sub_func_incl = 'Functions';
+					} else {
+						$sub_func_incl = 'Subroutines';
 					}
-				}    # if OK
-			}    # if Status==0
 
-			#die $sub_func_incl.Dumper($stref->{'Functions'}{'ew'}) if $f=~/ew/;
-			return $stref;
-		}    # END of read_fortran_src()
+					#	            	warn "\t$name\n";
+					$ok                                       = 1;
+					$index                                    = 0;
+					$stref->{$sub_func_incl}{$name}{'Status'} = $READ;
 
- # -----------------------------------------------------------------------------
- # Find all source files in the current directory
-		sub find_subroutines_functions_and_includes {
-			my $stref = shift;
-			my $dir   = '.';
-			my $ext   = '.f';
-
-			# find sources (borrowed from PerlMonks)
-			my %src_files = ();
-			my $tf_finder = sub {
-				return if !-f;
-				return if !/\.f$/;
-				$src_files{$File::Find::name} = 1;
-			};
-			find( $tf_finder, $dir );
-
-			for my $src ( keys %src_files ) {
-				open my $SRC, '<', $src;
-				while ( my $line = <$SRC> ) {
-
-					# Skip blanks
-					$line =~ /^\s*$/ && next;
-
-					# Detect and standardise comments
-					$line =~ /^[C\*\!]/i && next;
-					# Find subroutine/program signatures
-					$line =~ /^\s+(subroutine|program)\s+(\w+)/i && do {
-						my $is_prog = $1 eq 'program' ? 1 : 0;
-						if ( $is_prog == 1 ) {
-							print "Found program $2 in $src\n" if $V;
-						}
-						my $sub = lc($2);
-						if (
-							not exists $stref->{'Subroutines'}{$sub}{'Source'}
-							or (    $src =~ /$sub\.f/
-								and $stref->{'Subroutines'}{$sub}{'Source'} !~
-								/$sub\.f/ )
-						  )
-						{
-							if ( exists $stref->{'Subroutines'}{$sub}{'Source'}
-								and $src =~ /$sub\.f/
-								and $stref->{'Subroutines'}{$sub}{'Source'} !~
-								/$sub\.f/ )
-							{
-								print "WARNING: Ignoring source "
-								  . $stref->{'Subroutines'}{$sub}{'Source'}
-								  . " because source $src matches subroutine name $sub.\n"
-								  if $W;
-							}
-							$stref->{'Subroutines'}{$sub}{'Source'}  = $src;
-							$stref->{'Subroutines'}{$sub}{'Status'}  = $UNREAD;
-							$stref->{'Subroutines'}{$sub}{'Program'} = $is_prog;
-
-						} else {
-							print
-"WARNING: Ignoring source $src for $sub because another source, "
-							  . $stref->{'Subroutines'}{$sub}{'Source'}
-							  . " exists.\n"
-							  if $W;
-						}
-					};
-					# Find include statements
-					$line =~ /^\s*include\s+\'(\w+)\'/ && do {
-						my $inc = $1;
-						if ( not exists $stref->{'Includes'}{$inc} ) {
-							$stref->{'Includes'}{$inc}{'Status'} = $UNREAD;
-						}
-					};
-					# Find function signatures
-					$line =~ /^\s*\w*\s+function\s+(\w+)/i && do {
-						my $func = lc($1);
-						$stref->{'Functions'}{$func}{'Source'} = $src;
-						$stref->{'Functions'}{$func}{'Status'} = $UNREAD;
-					};
-
+					#					$stref->{$sub_func_incl}{$name}{'HasBlocks'}    = 0;
+					$stref->{$sub_func_incl}{$name}{'StringConsts'} =
+					  \%strconsts
+					  ; # Means we have all consts in the file, not just the sub, but who cares?
 				}
-				close $SRC;
-			}
-			return $stref;
-		}    # END of find_subroutines_functions_and_includes()
- # -----------------------------------------------------------------------------
-        # Quick and dirty way to get the Kinds of all arguments
-        sub get_maybe_args_globs {
-            ( my $stref, my $f ) = @_;
+				if ( $ok == 1 ) {
+					push @{ $stref->{$sub_func_incl}{$name}{'Lines'} }, $line;
+					if ( $line =~ /^C/ ) {
+						$stref->{$sub_func_incl}{$name}{'Info'}
+						  ->[$index]{'Comments'} = {};
+					}
+					$stref->{$sub_func_incl}{$name}{'Info'}->[$index] =
+					  { 'PlaceHolders' => $phs_ref }
+					  if @{$phs_ref};
+					$index++;
+				}
 
-            my @globs      = ();
-            my %maybe_args = ();
-            for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
-                if ( defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc} ) {
-                    @globs = (
-                        @globs,
-                        @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} }
-                    );
-                }
-                if ( defined $stref->{'Includes'}{$inc}{'Vars'} ) {
-                    %maybe_args =
-                      ( %maybe_args, %{ $stref->{'Includes'}{$inc}{'Vars'} } );
-                }
-            }
-            %maybe_args =
-              ( %{ $stref->{'Subroutines'}{$f}{'Vars'} }, %maybe_args );
-            my %globals = map { $_ => 1 } @globs;
-            return ( \%maybe_args, \%globals );
-        }
+			}
+		}    # if OK
+	}    # if Status==0
+
+	#die $sub_func_incl.Dumper($stref->{'Functions'}{'ew'}) if $f=~/ew/;
+	return $stref;
+}    # END of read_fortran_src()
+
+# -----------------------------------------------------------------------------
+# Find all source files in the current directory
+sub find_subroutines_functions_and_includes {
+	my $stref = shift;
+	my $dir   = '.';
+	my $ext   = '.f';
+
+	# find sources (borrowed from PerlMonks)
+	my %src_files = ();
+	my $tf_finder = sub {
+		return if !-f;
+		return if !/\.f$/;
+		$src_files{$File::Find::name} = 1;
+	};
+	find( $tf_finder, $dir );
+
+	for my $src ( keys %src_files ) {
+		open my $SRC, '<', $src;
+		while ( my $line = <$SRC> ) {
+
+			# Skip blanks
+			$line =~ /^\s*$/ && next;
+
+			# Detect and standardise comments
+			$line =~ /^[C\*\!]/i && next;
+
+			# Find subroutine/program signatures
+			$line =~ /^\s+(subroutine|program)\s+(\w+)/i && do {
+				my $is_prog = $1 eq 'program' ? 1 : 0;
+				if ( $is_prog == 1 ) {
+					print "Found program $2 in $src\n" if $V;
+				}
+				my $sub = lc($2);
+				if (
+					not exists $stref->{'Subroutines'}{$sub}{'Source'}
+					or (    $src =~ /$sub\.f/
+						and $stref->{'Subroutines'}{$sub}{'Source'} !~
+						/$sub\.f/ )
+				  )
+				{
+					if (    exists $stref->{'Subroutines'}{$sub}{'Source'}
+						and $src =~ /$sub\.f/
+						and $stref->{'Subroutines'}{$sub}{'Source'} !~
+						/$sub\.f/ )
+					{
+						print "WARNING: Ignoring source "
+						  . $stref->{'Subroutines'}{$sub}{'Source'}
+						  . " because source $src matches subroutine name $sub.\n"
+						  if $W;
+					}
+					$stref->{'Subroutines'}{$sub}{'Source'}  = $src;
+					$stref->{'Subroutines'}{$sub}{'Status'}  = $UNREAD;
+					$stref->{'Subroutines'}{$sub}{'Program'} = $is_prog;
+
+				} else {
+					print
+"WARNING: Ignoring source $src for $sub because another source, "
+					  . $stref->{'Subroutines'}{$sub}{'Source'}
+					  . " exists.\n"
+					  if $W;
+				}
+			};
+
+			# Find include statements
+			$line =~ /^\s*include\s+\'(\w+)\'/ && do {
+				my $inc = $1;
+				if ( not exists $stref->{'Includes'}{$inc} ) {
+					$stref->{'Includes'}{$inc}{'Status'} = $UNREAD;
+				}
+			};
+
+			# Find function signatures
+			$line =~ /^\s*\w*\s+function\s+(\w+)/i && do {
+				my $func = lc($1);
+				$stref->{'Functions'}{$func}{'Source'} = $src;
+				$stref->{'Functions'}{$func}{'Status'} = $UNREAD;
+			};
+
+		}
+		close $SRC;
+	}
+	return $stref;
+}    # END of find_subroutines_functions_and_includes()
  # -----------------------------------------------------------------------------
+ # Quick and dirty way to get the Kinds of all arguments
+
+sub get_maybe_args_globs {
+	( my $stref, my $f ) = @_;
+
+	my @globs      = ();
+	my %maybe_args = ();
+	for my $inc ( keys %{ $stref->{'Subroutines'}{$f}{'Globals'} } ) {
+		if ( defined $stref->{'Subroutines'}{$f}{'Globals'}{$inc} ) {
+			@globs =
+			  ( @globs, @{ $stref->{'Subroutines'}{$f}{'Globals'}{$inc} } );
+		}
+		if ( defined $stref->{'Includes'}{$inc}{'Vars'} ) {
+			%maybe_args =
+			  ( %maybe_args, %{ $stref->{'Includes'}{$inc}{'Vars'} } );
+		}
+	}
+	%maybe_args = ( %{ $stref->{'Subroutines'}{$f}{'Vars'} }, %maybe_args );
+	my %globals = map { $_ => 1 } @globs;
+	return ( \%maybe_args, \%globals );
+}
+
+# -----------------------------------------------------------------------------
+
 =pod
  We remap as follows:
  Kind
@@ -4233,426 +4280,442 @@ Now, the actual remapped argument list consists of
 - all other arrays
 As we can only use these       
 =cut
- 
- sub remap_args { (my $stref, my$f) =@_;
- 	
- 	my $subtype;
- 	my @index=();
-    my $refargs=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'List'};
-#    print "\t$f( ".join(',',@{ $refargs })." )\n";
-print $f.':'.scalar @{ $refargs }," => ";
 
-    my $aidx=12; # {In,Out,InOut}x{int,long,float,double} 
-    my $code=0;	
-    my $remapped_args=[];
- 	for my $refarg (@{$refargs}) {
- 		my $kind=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Kind'};
- 		
- 		my $type=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Type'};
- 		my $iodir=$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'IODir'};
- 		my $k=($kind eq 'Scalar')?0:1;
- 		if ($k==1) {
- 			# If it's an array, we need the dimensions as well!
- 		}
- 		my $i= $iodir eq 'In' ? 1 : ($iodir eq 'Out' ? 0 : 2);
- 		(my $t,my $s)=get_typecode($refarg,$type);
- 		if ($t==-1) { # Unknown type, don't remap
- 		 $k=1;
- 		} else { 		
- 		 if (defined $index[$i][$t]) { 
- 		 	$index[$i][$t]++ 
- 		 } else {
- 			$index[$i][$t]=0;
- 		 }
- 		}
- 		if ($k==1) {
- 			# 1|_______|xxxxxxxx
- 			$code=(1 << 15)+($aidx & 0xFF);
- 			$remapped_args->[$aidx]=$refarg;
- 			$aidx++;
- 		} else {
- 			# 0|xx|xx|xx|_|xxxxxxxx
- 			$code=(0 << 15)+($i << 13)+($t << 11)+($s << 9)+ ($index[$i][$t] & 0xFF);
- 			$remapped_args->[$i*4+$t]='scalars_'.toCType($type).'_'.lc($iodir);
- 		}
- 		$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Remapped'}=$code;
- 	}
- 	@{ $remapped_args }=grep {defined $_} @{ $remapped_args };
-# 	print "\t$f( ".join(',',@{ $remapped_args })." )\n";
-        print scalar @{ $remapped_args },"\n";
- 	  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'RemappedList'}=$remapped_args;
-# 	  die if $f eq 'particles_main_loop';
-    return $stref;	
- 	
- }
- # -----------------------------------------------------------------------------
- sub get_typecode { (my $var,my $ftype)=@_;
- 	my $t=0;my $s=0;    
-    my %corr = (
-        'logical'          => [0,3],
-        'integer'          => [0,3],
-        'real'             => [2,0],
-        'double precision' => [3,0],
-        'doubleprecision'  => [3,0],
-        'character'        => [0,1],
-        'integer*1'          => [0,0],
-        'integer*2'          => [0,1],
-        'integer*4'          => [0,2],
-        'integer*8'          => [1,0]
-    );
-    if ( exists( $corr{$ftype} ) ) {
-        return @{$corr{$ftype}};
-    } else {
-        print "WARNING: NO TYPE for $var $ftype\n" if $W;
-        return (-1,-1);
-    } 	 	
- }
- # -----------------------------------------------------------------------------
+sub remap_args {
+	( my $stref, my $f ) = @_;
+
+	my $subtype;
+	my @index   = ();
+	my $refargs = $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'List'};
+
+	#    print "\t$f( ".join(',',@{ $refargs })." )\n";
+	print $f. ':' . scalar @{$refargs}, " => ";
+
+	my $aidx          = 12;    # {In,Out,InOut}x{int,long,float,double}
+	my $code          = 0;
+	my $remapped_args = [];
+	for my $refarg ( @{$refargs} ) {
+		my $kind =
+		  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Kind'};
+
+		my $type =
+		  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Type'};
+		my $iodir =
+		  $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'IODir'};
+		my $k = ( $kind eq 'Scalar' ) ? 0 : 1;
+		if ( $k == 1 ) {
+
+			# If it's an array, we need the dimensions as well!
+		}
+		my $i = $iodir eq 'In' ? 1 : ( $iodir eq 'Out' ? 0 : 2 );
+		( my $t, my $s ) = get_typecode( $refarg, $type );
+		if ( $t == -1 ) {    # Unknown type, don't remap
+			$k = 1;
+		} else {
+			if ( defined $index[$i][$t] ) {
+				$index[$i][$t]++;
+			} else {
+				$index[$i][$t] = 0;
+			}
+		}
+		if ( $k == 1 ) {
+
+			# 1|_______|xxxxxxxx
+			$code = ( 1 << 15 ) + ( $aidx & 0xFF );
+			$remapped_args->[$aidx] = $refarg;
+			$aidx++;
+		} else {
+
+			# 0|xx|xx|xx|_|xxxxxxxx
+			$code =
+			  ( 0 << 15 ) +
+			  ( $i << 13 ) +
+			  ( $t << 11 ) +
+			  ( $s << 9 ) +
+			  ( $index[$i][$t] & 0xFF );
+			$remapped_args->[ $i * 4 + $t ] =
+			  'scalars_' . toCType($type) . '_' . lc($iodir);
+		}
+		$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Remapped'} =
+		  $code;
+	}
+	@{$remapped_args} = grep { defined $_ } @{$remapped_args};
+
+	# 	print "\t$f( ".join(',',@{ $remapped_args })." )\n";
+	print scalar @{$remapped_args}, "\n";
+	$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'RemappedList'} =
+	  $remapped_args;
+
+	# 	  die if $f eq 'particles_main_loop';
+	return $stref;
+
+}
+
+# -----------------------------------------------------------------------------
+sub get_typecode {
+	( my $var, my $ftype ) = @_;
+	my $t    = 0;
+	my $s    = 0;
+	my %corr = (
+		'logical'          => [ 0, 3 ],
+		'integer'          => [ 0, 3 ],
+		'real'             => [ 2, 0 ],
+		'double precision' => [ 3, 0 ],
+		'doubleprecision'  => [ 3, 0 ],
+		'character'        => [ 0, 1 ],
+		'integer*1'        => [ 0, 0 ],
+		'integer*2'        => [ 0, 1 ],
+		'integer*4'        => [ 0, 2 ],
+		'integer*8'        => [ 1, 0 ]
+	);
+	if ( exists( $corr{$ftype} ) ) {
+		return @{ $corr{$ftype} };
+	} else {
+		print "WARNING: NO TYPE for $var $ftype\n" if $W;
+		return ( -1, -1 );
+	}
+}
+
+# -----------------------------------------------------------------------------
+
 =pod
 
 Now, for the actual subroutine call, we can create the 
 =cut
- 
- 
- # -----------------------------------------------------------------------------
-		sub sub_func_or_incl {
-			( my $f, my $stref ) = @_;
-			if ( exists $stref->{'Subroutines'}{$f} ) {
-				return 'Subroutines';
-			} elsif ( exists $stref->{'Functions'}{$f} ) {
-				return 'Functions';
-			} elsif ( exists $stref->{'Includes'}{$f} ) {
-				return 'Includes';
+
+# -----------------------------------------------------------------------------
+sub sub_func_or_incl {
+	( my $f, my $stref ) = @_;
+	if ( exists $stref->{'Subroutines'}{$f} ) {
+		return 'Subroutines';
+	} elsif ( exists $stref->{'Functions'}{$f} ) {
+		return 'Functions';
+	} elsif ( exists $stref->{'Includes'}{$f} ) {
+		return 'Includes';
+	} else {
+		croak "No entry for $f in the state\n";
+	}
+}
+
+# -----------------------------------------------------------------------------
+sub show_info {
+	( my $stref ) = @_;
+	if ($V) {
+		print "\n\n";
+		print "#" x 80, "\n";
+		print "Info\n";
+		print "#" x 80, "\n\n";
+	}
+
+	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
+
+		if (    exists $stref->{'Subroutines'}{$f}{'Lines'}
+			and exists $stref->{'Subroutines'}{$f}{'Info'} )
+		{
+			print "\nSUBROUTINE: $f\n\n";
+
+			#           die Dumper($stref->{'Subroutines'}{$f}{'Info'});
+			my @lines = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
+			my @info  = @{ $stref->{'Subroutines'}{$f}{'Info'} };
+			if ( scalar(@lines) != scalar(@info) ) {
+				die scalar(@lines) . '!=' . scalar(@info) . " for $f";
 			} else {
-				croak "No entry for $f in the state\n";
-			}
-		}
 
- # -----------------------------------------------------------------------------
-		sub show_info {
-			( my $stref ) = @_;
-			if ($V) {
-				print "\n\n";
-				print "#" x 80, "\n";
-				print "Info\n";
-				print "#" x 80, "\n\n";
-			}
-
-			for my $f ( keys %{ $stref->{'Subroutines'} } ) {
-
-				if (    exists $stref->{'Subroutines'}{$f}{'Lines'}
-					and exists $stref->{'Subroutines'}{$f}{'Info'} )
-				{
-					print "\nSUBROUTINE: $f\n\n";
-
-					#           die Dumper($stref->{'Subroutines'}{$f}{'Info'});
-					my @lines = @{ $stref->{'Subroutines'}{$f}{'Lines'} };
-					my @info  = @{ $stref->{'Subroutines'}{$f}{'Info'} };
-					if ( scalar(@lines) != scalar(@info) ) {
-						die scalar(@lines) . '!=' . scalar(@info) . " for $f";
-					} else {
-
-						for my $i ( 0 .. @lines - 1 ) {
-							my $line = $lines[$i];
-							my $item = $info[$i];
-							if ( defined $item ) {
-								print $line, "\t\t**** ";
-								print join( ',', keys %{$item} ), "\n";
-							}
-						}
-						print "\n";
+				for my $i ( 0 .. @lines - 1 ) {
+					my $line = $lines[$i];
+					my $item = $info[$i];
+					if ( defined $item ) {
+						print $line, "\t\t**** ";
+						print join( ',', keys %{$item} ), "\n";
 					}
-				} else {
-					print "WARNING: No info for $f\n" if $W;
 				}
-
+				print "\n";
 			}
-
+		} else {
+			print "WARNING: No info for $f\n" if $W;
 		}
 
- # -----------------------------------------------------------------------------
-		sub insert_lines {
-			( my $lref, my $srcref, my $idx ) =
-			  @_;    # \@lines, \@src_lines, $idx;
-			my $nsrc = [ @{$srcref} ];
-			splice( @{$nsrc}, $idx, 0, @{$lref} );
-			return $nsrc;
-		}    # END of insert_lines()
+	}
 
- # -----------------------------------------------------------------------------
+}
+
+# -----------------------------------------------------------------------------
+sub insert_lines {
+	( my $lref, my $srcref, my $idx ) = @_;    # \@lines, \@src_lines, $idx;
+	my $nsrc = [ @{$srcref} ];
+	splice( @{$nsrc}, $idx, 0, @{$lref} );
+	return $nsrc;
+}    # END of insert_lines()
+
+# -----------------------------------------------------------------------------
 
 # A convenience function to split long lines.
 # - count the number of characters, i.e. length()
 # - find the last comma before we exceed 64 characters (I guess it's really 72-5?):
 
-		sub split_long_line {
-			my $line   = shift;
-			my @chunks = @_;
+sub split_long_line {
+	my $line   = shift;
+	my @chunks = @_;
 
-			my $nchars = 64;
-			if ( scalar(@chunks) == 0 ) {
-				print "\nLINE: \n$line\n" if $V;
-				$nchars = 72;
-			}
-			my $split_on  = ',';
-			my $split_on2 = ' ';
-			my $split_on3 = '.ro.';
-			my $split_on4 = '.dna.';
+	my $nchars = 64;
+	if ( scalar(@chunks) == 0 ) {
+		print "\nLINE: \n$line\n" if $V;
+		$nchars = 72;
+	}
+	my $split_on  = ',';
+	my $split_on2 = ' ';
+	my $split_on3 = '.ro.';
+	my $split_on4 = '.dna.';
 
-			my $smart = 0;
-			if ( length($line) > $nchars ) {
-				my $patt  = '';
-				my $ll    = length($line);
-				my $rline = join( '', reverse( split( '', $line ) ) );
+	my $smart = 0;
+	if ( length($line) > $nchars ) {
+		my $patt  = '';
+		my $ll    = length($line);
+		my $rline = join( '', reverse( split( '', $line ) ) );
 
-				#		print $rline,"\n";
-				#		print "$ll - $nchars = ",$ll - $nchars,"\n";
-				my $idx  = index( $rline, $split_on,  $ll - $nchars );
-				my $idx2 = index( $rline, $split_on2, $ll - $nchars );
-				my $idx3 = index( $rline, $split_on3, $ll - $nchars );
-				my $idx4 = index( $rline, $split_on4, $ll - $nchars );
-				if ( $idx < 0 && $idx2 < 0 && $idx3 < 0 && $idx4 < 0 ) {
-					print "WARNING: Can't split line \n$line\n" if $W;
-				} elsif ( $idx >= 0 ) {
-					print "Split line on ", $ll - $idx, ", '$split_on'\n" if $V;
-				} elsif ( $idx < 0 && $idx2 >= 0 ) {
-					$idx = $idx2;
-					print "Split line on ", $ll - $idx2, ", '$split_on2'\n"
-					  if $V;
-				} elsif ( $idx < 0 && $idx2 < 0 && $idx3 >= 0 ) {
-					$idx = $idx3;
-					print "SPLIT line on ", $ll - $idx, ", '$split_on3'\n"
-					  if $V;
+		#		print $rline,"\n";
+		#		print "$ll - $nchars = ",$ll - $nchars,"\n";
+		my $idx  = index( $rline, $split_on,  $ll - $nchars );
+		my $idx2 = index( $rline, $split_on2, $ll - $nchars );
+		my $idx3 = index( $rline, $split_on3, $ll - $nchars );
+		my $idx4 = index( $rline, $split_on4, $ll - $nchars );
+		if ( $idx < 0 && $idx2 < 0 && $idx3 < 0 && $idx4 < 0 ) {
+			print "WARNING: Can't split line \n$line\n" if $W;
+		} elsif ( $idx >= 0 ) {
+			print "Split line on ", $ll - $idx, ", '$split_on'\n" if $V;
+		} elsif ( $idx < 0 && $idx2 >= 0 ) {
+			$idx = $idx2;
+			print "Split line on ", $ll - $idx2, ", '$split_on2'\n"
+			  if $V;
+		} elsif ( $idx < 0 && $idx2 < 0 && $idx3 >= 0 ) {
+			$idx = $idx3;
+			print "SPLIT line on ", $ll - $idx, ", '$split_on3'\n"
+			  if $V;
 
-					# Need smarter split
-					$smart = 1;
-					$patt = join( '', reverse( split( '', $split_on3 ) ) );
-				} elsif ( $idx < 0 && $idx2 < 0 && $idx4 >= 0 ) {
-					$idx = $idx4;
-					print "SPLIT line on ", $ll - $idx, ", '$split_on4'\n"
-					  if $V;
+			# Need smarter split
+			$smart = 1;
+			$patt = join( '', reverse( split( '', $split_on3 ) ) );
+		} elsif ( $idx < 0 && $idx2 < 0 && $idx4 >= 0 ) {
+			$idx = $idx4;
+			print "SPLIT line on ", $ll - $idx, ", '$split_on4'\n"
+			  if $V;
 
-					# Need smarter split
-					$smart = 1;
-					$patt = join( '', reverse( split( '', $split_on4 ) ) );
-				}
+			# Need smarter split
+			$smart = 1;
+			$patt = join( '', reverse( split( '', $split_on4 ) ) );
+		}
 
 #		if ($smart==1) {
 #			die substr( $line, 0, $ll - $idx3, '' ) if length(substr( $line, 0, $ll - $idx3, '' ))>$nchars;
 #		}
-				push @chunks, substr( $line, 0, $ll - $idx, '' );
-				print "CHUNKS:\n", join( "\n", @chunks ), "\n" if $V;
-				print "REST:\n", $line, "\n" if $V;
-				&split_long_line( $line, @chunks );
-			} else {
-				push @chunks, $line;
+		push @chunks, substr( $line, 0, $ll - $idx, '' );
+		print "CHUNKS:\n", join( "\n", @chunks ), "\n" if $V;
+		print "REST:\n", $line, "\n" if $V;
+		&split_long_line( $line, @chunks );
+	} else {
+		push @chunks, $line;
 
-				my @split_lines = ();
-				if ( @chunks > 1 ) {
-					my $fst = 1;
-					for my $chunk (@chunks) {
-						if ($fst) {
-							$fst = 0;
-						} else {
-							if ( $chunk =~ /^\s*$/ ) {
-								$chunk = '';
-							} else {
-
-								#						$chunk = '     &  ' . $chunk;
-								$chunk = '     &' . $chunk;
-							}
-						}
-						push @split_lines, $chunk;
-					}
+		my @split_lines = ();
+		if ( @chunks > 1 ) {
+			my $fst = 1;
+			for my $chunk (@chunks) {
+				if ($fst) {
+					$fst = 0;
 				} else {
-					@split_lines = @chunks;
-				}
-				if (   $split_lines[0] !~ /^C/
-					&& $split_lines[0] =~ /\t/
-					&& $split_lines[0] !~ /^\s{6}/
-					&& $split_lines[0] !~ /^\t/ )
-				{
+					if ( $chunk =~ /^\s*$/ ) {
+						$chunk = '';
+					} else {
 
-					# problematic tab!
-					print "WARNING: Pathological TAB in "
-					  . $split_lines[0] . "\n"
-					  if $W;
-					my $sixspaces = ' ' x 6;
-					$split_lines[0] =~ s/^\ +\t//;
-					if ( length( $split_lines[0] ) > 66 ) {
-						$split_lines[0] =~ s/^\s+//;
-						$split_lines[0] =~ s/\s+$//;
+						#						$chunk = '     &  ' . $chunk;
+						$chunk = '     &' . $chunk;
 					}
-					if ( length( $split_lines[0] ) > 66 ) {
-						print "WARNING: Line still too long: "
-						  . $split_lines[0] . "\n"
-						  if $W;
-					}
-					$split_lines[0] = $sixspaces . $split_lines[0]
-					  unless $split_lines[0] =~ /^\s+\d+/;
-
-					#			warn "<$split_lines[0]>\n";
-
 				}
-				return @split_lines;
+				push @split_lines, $chunk;
 			}
+		} else {
+			@split_lines = @chunks;
 		}
+		if (   $split_lines[0] !~ /^C/
+			&& $split_lines[0] =~ /\t/
+			&& $split_lines[0] !~ /^\s{6}/
+			&& $split_lines[0] !~ /^\t/ )
+		{
 
- # -----------------------------------------------------------------------------
-		sub union {
-			( my $aref, my $bref ) = @_;
-			my %as = map { $_ => 1 } @{$aref};
-			for my $elt ( @{$bref} ) {
-				$as{$elt} = 1;
+			# problematic tab!
+			print "WARNING: Pathological TAB in " . $split_lines[0] . "\n"
+			  if $W;
+			my $sixspaces = ' ' x 6;
+			$split_lines[0] =~ s/^\ +\t//;
+			if ( length( $split_lines[0] ) > 66 ) {
+				$split_lines[0] =~ s/^\s+//;
+				$split_lines[0] =~ s/\s+$//;
 			}
-			my @us = sort keys %as;
-			return \@us;
-		}    # END of union()
+			if ( length( $split_lines[0] ) > 66 ) {
+				print "WARNING: Line still too long: " . $split_lines[0] . "\n"
+				  if $W;
+			}
+			$split_lines[0] = $sixspaces . $split_lines[0]
+			  unless $split_lines[0] =~ /^\s+\d+/;
+
+			#			warn "<$split_lines[0]>\n";
+
+		}
+		return @split_lines;
+	}
+}
+
+# -----------------------------------------------------------------------------
+sub union {
+	( my $aref, my $bref ) = @_;
+	my %as = map { $_ => 1 } @{$aref};
+	for my $elt ( @{$bref} ) {
+		$as{$elt} = 1;
+	}
+	my @us = sort keys %as;
+	return \@us;
+}    # END of union()
 
 # -----------------------------------------------------------------------------
 # This union is obtained by removing duplicates from @b. It is a bit slower but preserves the order
-		sub ordered_union {
-			( my $aref, my $bref ) = @_;
-			my @us = @{$aref};
-			my %as = map { $_ => 1 } @{$aref};
-			for my $elt ( @{$bref} ) {
-				if ( not exists $as{$elt} ) {
-					push @us, $elt;
-				}
-			}
-			return \@us;
-		}    # END of ordered_union()
+sub ordered_union {
+	( my $aref, my $bref ) = @_;
+	my @us = @{$aref};
+	my %as = map { $_ => 1 } @{$aref};
+	for my $elt ( @{$bref} ) {
+		if ( not exists $as{$elt} ) {
+			push @us, $elt;
+		}
+	}
+	return \@us;
+}    # END of ordered_union()
 
- # -----------------------------------------------------------------------------
-		sub add_to_call_tree {
-			( my $f, my $stref, my $stubbed ) = @_;
-			$stubbed ||= ' ';
-			my $sub_or_func = sub_func_or_incl( $f, $stref );
-			my $src         = $stref->{$sub_or_func}{$f}{'Source'};
-			my $nspaces     =
-			  64 - $stref->{'Indents'} - length($f);    # -length($src) -2;
-			my $incls =
-			  join( ',', keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } );
-			my $padding    = ' ' x ( 32 - length($src) );
-			my $src_padded = $src . $padding;
-			my $tgt        = uc( substr( $sub_or_func, 0, 3 ) );
-			my @strs       = (
-				' ' x $stref->{'Indents'},
-				$f, $stubbed, ' ' x $nspaces,
-				$tgt, ' ', $src_padded, "\t", $incls, "\n"
-			);
-			my $str = join( '', @strs );
-			push @{ $stref->{'CallTree'} }, $str;
-			return $stref;
-		}    # END of add_to_call_tree()
+# -----------------------------------------------------------------------------
+sub add_to_call_tree {
+	( my $f, my $stref, my $stubbed ) = @_;
+	$stubbed ||= ' ';
+	my $sub_or_func = sub_func_or_incl( $f, $stref );
+	my $src         = $stref->{$sub_or_func}{$f}{'Source'};
+	my $nspaces     = 64 - $stref->{'Indents'} - length($f); # -length($src) -2;
+	my $incls = join( ',', keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } );
+	my $padding = ' ' x ( 32 - length($src) );
+	my $src_padded = $src . $padding;
+	my $tgt        = uc( substr( $sub_or_func, 0, 3 ) );
+	my @strs       = (
+		' ' x $stref->{'Indents'},
+		$f, $stubbed, ' ' x $nspaces,
+		$tgt, ' ', $src_padded, "\t", $incls, "\n"
+	);
+	my $str = join( '', @strs );
+	push @{ $stref->{'CallTree'} }, $str;
+	return $stref;
+}    # END of add_to_call_tree()
 
- # -----------------------------------------------------------------------------
-		sub add_to_C_build_sources {
-			( my $f, my $stref ) = @_;
-			my $sub_or_func = sub_func_or_incl( $f, $stref );
-			my $src = $stref->{$sub_or_func}{$f}{'Source'};
-			if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
-				print "ADDING $src to C BuildSources\n" if $V;
-				$stref->{'BuildSources'}{'C'}{$src} = 1;
-				$stref->{$sub_or_func}{$f}{'Status'} = $C_SOURCE;
-			}
+# -----------------------------------------------------------------------------
+sub add_to_C_build_sources {
+	( my $f, my $stref ) = @_;
+	my $sub_or_func = sub_func_or_incl( $f, $stref );
+	my $src = $stref->{$sub_or_func}{$f}{'Source'};
+	if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
+		print "ADDING $src to C BuildSources\n" if $V;
+		$stref->{'BuildSources'}{'C'}{$src} = 1;
+		$stref->{$sub_or_func}{$f}{'Status'} = $C_SOURCE;
+	}
 
 # Assuming no includes in Functions, this is not needed for Functions
 # However, this might be too restrictive: surely includes with constants must be supported! FIXME!
-			for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } ) {
-				if ( not exists $stref->{'BuildSources'}{'H'}{$inc} ) {
-					print "ADDING $inc to C Header BuildSources\n" if $V;
-					$stref->{'BuildSources'}{'H'}{$inc} = 1;
-				}
-			}
-			return $stref;
+	for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } ) {
+		if ( not exists $stref->{'BuildSources'}{'H'}{$inc} ) {
+			print "ADDING $inc to C Header BuildSources\n" if $V;
+			$stref->{'BuildSources'}{'H'}{$inc} = 1;
 		}
- # -----------------------------------------------------------------------------
- # -----------------------------------------------------------------------------
-		sub create_call_graph {
-			( my $stref ) = @_;
+	}
+	return $stref;
+}
 
-			open my $DOT, '>', 'callgraph.dot';
-			print $DOT 'digraph FlxWrf {
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+sub create_call_graph {
+	( my $stref ) = @_;
+
+	open my $DOT, '>', 'callgraph.dot';
+	print $DOT 'digraph FlxWrf {
 node [shape=box];
 rankdir="LR";
 ratio="fill";
 ';
-			for my $pnid ( keys %{ $stref->{'Nodes'} } ) {
-				my %seen = ();
-				my $i    = 0;
-				for my $cnid ( @{ $stref->{'Nodes'}{$pnid}{'Children'} } ) {
+	for my $pnid ( keys %{ $stref->{'Nodes'} } ) {
+		my %seen = ();
+		my $i    = 0;
+		for my $cnid ( @{ $stref->{'Nodes'}{$pnid}{'Children'} } ) {
 
-					# Repeated calls to subs without children are pruned
-					if (
-						scalar( @{ $stref->{'Nodes'}{$cnid}{'Children'} } ) != 0
-						or not
-						exists $seen{ $stref->{'Nodes'}{$cnid}{'Subroutine'} } )
-					{
-						my $psub = $stref->{'Nodes'}{$pnid}{'Subroutine'};
-						my $csub = $stref->{'Nodes'}{$cnid}{'Subroutine'};
-						print $DOT "$cnid [label=\"$csub\"];\n";
-						if ( $i == 0 ) {
-							print $DOT "$pnid [label=\"$psub\"];\n";
-						}
-						print $DOT "$pnid -> $cnid ;\n";
-					}
-					$seen{ $stref->{'Nodes'}{$cnid}{'Subroutine'} }++;
-					$i++;
+			# Repeated calls to subs without children are pruned
+			if ( scalar( @{ $stref->{'Nodes'}{$cnid}{'Children'} } ) != 0
+				or not exists $seen{ $stref->{'Nodes'}{$cnid}{'Subroutine'} } )
+			{
+				my $psub = $stref->{'Nodes'}{$pnid}{'Subroutine'};
+				my $csub = $stref->{'Nodes'}{$cnid}{'Subroutine'};
+				print $DOT "$cnid [label=\"$csub\"];\n";
+				if ( $i == 0 ) {
+					print $DOT "$pnid [label=\"$psub\"];\n";
 				}
-				my $sub = $stref->{'Nodes'}{$pnid}{'Subroutine'};
-
-				#        print $DOT "$pnid [label=\"$sub\"];\n";
+				print $DOT "$pnid -> $cnid ;\n";
 			}
-			print $DOT "}\n";
-			close $DOT;
+			$seen{ $stref->{'Nodes'}{$cnid}{'Subroutine'} }++;
+			$i++;
 		}
+		my $sub = $stref->{'Nodes'}{$pnid}{'Subroutine'};
 
+		#        print $DOT "$pnid [label=\"$sub\"];\n";
+	}
+	print $DOT "}\n";
+	close $DOT;
+}
 
- # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 
-		sub generate_docs {
-			my $scriptsrc   = $0;
-			my $src=$scriptsrc;
-			$src=~s/\.pl//;
-			$src =~ s/^.*\///;   
-			my $markdownsrc = $src.'.markdown';
-			open my $PL, '<', $scriptsrc;
-			open my $MD, '>', $markdownsrc;
-			my $md = 0;
-			while (<$PL>) {
-				/^=begin\s+markdown/ && do {
-					$md = 1;
-					next;
-				};
-				/^=end\s+markdown/ && do {
-					$md = 0;
-					next;
-				};
+sub generate_docs {
+	my $scriptsrc = $0;
+	my $src       = $scriptsrc;
+	$src =~ s/\.pl//;
+	$src =~ s/^.*\///;
+	my $markdownsrc = $src . '.markdown';
+	open my $PL, '<', $scriptsrc;
+	open my $MD, '>', $markdownsrc;
+	my $md = 0;
 
-				if ( $md == 1 ) {
-                    my $el=$_;
-					while ($el=~/\|(\$\w+)\|/) {
-						my $var=$1;	# so this is a '$' and then some \w's	
-						my $evar='';				  
-						eval("\$evar= $var");
-						warn $var,'=',$evar;
-						my $svar="\\|\\$var\\|";
-						$el=~s/$svar/$evar/;						
-					}					
-					print $MD $el;    
-				}
+	while (<$PL>) {
+		/^=begin\s+markdown/ && do {
+			$md = 1;
+			next;
+		};
+		/^=end\s+markdown/ && do {
+			$md = 0;
+			next;
+		};
+
+		if ( $md == 1 ) {
+			my $el = $_;
+			while ( $el =~ /\|(\$\w+)\|/ ) {
+				my $var  = $1;    # so this is a '$' and then some \w's
+				my $evar = '';
+				eval("\$evar= $var");
+				warn $var, '=', $evar;
+				my $svar = "\\|\\$var\\|";
+				$el =~ s/$svar/$evar/;
 			}
-			close $PL;
-			close $MD;
-			my $tex_src_in = $src.'_in.tex';			
-			system("pandoc -f markdown -t latex $markdownsrc > $tex_src_in ");
+			print $MD $el;
+		}
+	}
+	close $PL;
+	close $MD;
+	my $tex_src_in = $src . '_in.tex';
+	system("pandoc -f markdown -t latex $markdownsrc > $tex_src_in ");
 
-			my $tex_src_out = $src.'.tex';
+	my $tex_src_out = $src . '.tex';
 
-			open my $TEXIN,  '<', $tex_src_in;
-			open my $TEXOUT, '>', $tex_src_out;
-			print $TEXOUT <<'ENDH';
+	open my $TEXIN,  '<', $tex_src_in;
+	open my $TEXOUT, '>', $tex_src_out;
+	print $TEXOUT <<'ENDH';
 \documentclass{article}
 \usepackage[T1]{fontenc}
 \usepackage{textcomp}
@@ -4672,30 +4735,29 @@ ratio="fill";
 
 ENDH
 
-			my $code = 0;
-			while (<$TEXIN>) {
-				/verbatim/ && do {
-					$code = 1 - $code;
-				};
-				print $TEXOUT $_;
-				if ($code) {
-					print $TEXOUT "\n";
-				}
-			}
-			close $TEXIN;
-			print $TEXOUT '\printindex' . "\n";
-			print $TEXOUT '\end{document}' . "\n";
-			close $TEXOUT;
-			system("pdflatex $tex_src_out");
-			my @exts=qw(
-			_in.tex
-            .toc
-            .log
-            .idx
-            .aux
-            );
-            map { unlink $src.$_ } @exts;
-
+	my $code = 0;
+	while (<$TEXIN>) {
+		/verbatim/ && do {
+			$code = 1 - $code;
+		};
+		print $TEXOUT $_;
+		if ($code) {
+			print $TEXOUT "\n";
 		}
+	}
+	close $TEXIN;
+	print $TEXOUT '\printindex' . "\n";
+	print $TEXOUT '\end{document}' . "\n";
+	close $TEXOUT;
+	system("pdflatex $tex_src_out");
+	my @exts = qw(
+	  _in.tex
+	  .toc
+	  .log
+	  .idx
+	  .aux
+	);
+	map { unlink $src . $_ } @exts;
 
+}
 
