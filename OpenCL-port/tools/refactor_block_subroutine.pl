@@ -264,7 +264,7 @@ our $VER = '0.3';
 
 our $usage = "
     $0 [-hvwCTNbB] <toplevel subroutine name> 
-       [<subroutine name for C translation>]
+       [<subroutine name(s) for C translation>]
     -h: help
     -w: show warnings 
     -v: verbose (implies -w)
@@ -293,7 +293,7 @@ our $gen_sub = 0;
 # States for translation to C etc
 ( our $NO, our $YES, our $GO ) = ( 0 .. 2 );
 our $translate        = $NO;
-our $sub_to_translate = '';
+our %subs_to_translate = ();
 
 # The state of each subroutine, function or include
 #   FROM_BLOCK indicates a marked block of code factored out into a subroutine
@@ -378,7 +378,7 @@ sub main {
 			die "Please specify a target subroutine to translate.\n";
 		}
 		$translate        = 1;
-		$sub_to_translate = $ARGV[1];
+		%subs_to_translate = map {$_ => 1 } @ARGV[1,-1];		
 	}
 	$noop = ( $opts{'N'} ) ? 0 : 1;
 
@@ -451,13 +451,14 @@ sub main {
 	#	}
 	if ( $translate == $YES ) {
 		$translate = $GO;
-		$subname   = $sub_to_translate;
+		for my $subname   (keys %subs_to_translate ) {
 		print "\nTranslating $subname to C\n";
 		$gen_sub  = 1;
 		$stateref = parse_fortran_src( $subname, $stateref );
 		$stateref = refactor_C_targets($stateref);
 		emit_C_targets($stateref);
 		&translate_to_C($stateref);
+		}
 	}
 	create_build_script($stateref);
 	if ($build) {
@@ -817,6 +818,17 @@ sub refactor_globals {
 			# While we're here, might as well generate the declarations for remapping and reshaping.
 			# If the subroutine contains a call to a function that requires this, of course.
 			# Executive decision: do this only for the routines to be translated to C/OpenCL
+			for my $called_sub (keys %{ $stref->{'Subroutines'}{$f}{'CalledSubs'} }) {
+				if (exists $subs_to_translate{$called_sub}) {
+				    # OK, we need to do the remapping, so create the machinery here
+				    # 1. Get the arguments of the called sub
+				    
+				    # 2. Work out if they need reshaping. If so, create the declarations for the new 1-D arrays
+				    
+				    # 3. Work out which remapped arrays will be used; create the declarations for these arrays
+				     	
+				}
+			}
 
 		}
 		if ( exists $tags{'VarDecl'} ) {
@@ -3177,17 +3189,21 @@ sub determine_argument_io_direction_core {
 		  $args{$arg};
 		my $kind = 'Unknown';
 		my $type = 'Unknown';
+		my $shape = [];
 		if ( exists $maybe_args->{$arg}{'Type'} ) {
 			$kind = $maybe_args->{$arg}{'Kind'};
 			$type = $maybe_args->{$arg}{'Type'};
+			$shape = $maybe_args->{$arg}{'Shape'};
 		} else {
 			print "WARNING: No kind/type info for $arg in $f\n" if $W;
 		}
 
 		$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'Kind'} = $kind;
 		$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'Type'} = $type;
+		$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$arg}{'Shape'} = $shape;
 	}
-	$stref = remap_args( $stref, $f );
+	$stref = remap_args( $stref, $f ); # FIXME: I don't think this should be here
+	$stref = reshape_args( $stref, $f ); # FIXME: I don't think this should be here
 	return $stref;
 }    # determine_argument_io_direction_core()
 
@@ -3490,6 +3506,7 @@ sub get_var_decls {
 						$p                    = '()';
 					} else {
 						$vars{$tvar}{'Kind'} = 'Scalar';
+						$vars{$tvar}{'Shape'} = [];
 					}
 					$vars{$tvar}{'Type'} = $type;
 					$var =~ s/;/,/g;
@@ -4278,7 +4295,15 @@ sub get_maybe_args_globs {
 Now, the actual remapped argument list consists of
 - the arrays for all Types and IODirs
 - all other arrays
-As we can only use these       
+As we can only use these
+
+--------------------------
+
+I think we should generate everything in remap_args (though maybe we need reshape_args separately?)
+
+But then we need to store the declarations and statements for caller and called sub in the $stref  
+
+       
 =cut
 
 sub remap_args {
@@ -4349,7 +4374,7 @@ sub remap_args {
 	# 	  die if $f eq 'particles_main_loop';
 	return $stref;
 
-}
+} # END of remap_args()
 
 # -----------------------------------------------------------------------------
 sub get_typecode {
@@ -4377,7 +4402,52 @@ sub get_typecode {
 }
 
 # -----------------------------------------------------------------------------
+sub reshape_args {
+    ( my $stref, my $f ) = @_;
 
+    my $subtype;
+    my @index   = ();
+    my $refargs = $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'List'};
+
+#    print $f. ':' . scalar @{$refargs}, " => ";
+
+    my $reshaped_args = [];
+    for my $refarg ( @{$refargs} ) {    	
+        my $kind =
+          $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Kind'};
+        my $k = ( $kind eq 'Scalar' ) ? 0 : 1;
+        # No need to reshape scalars
+        if ( $k == 1 ) {
+            my $shape =
+              $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Shape'};
+              if (defined $shape) {
+              	if ( scalar @{$shape} == 2 && $shape->[0] == 1) {
+              		die $refarg,@{$shape};              		
+              	} 
+              } else {
+              	die keys %{$stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}};
+              }
+            my $type =
+              $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Type'};
+            # We need to reshape in both directions; but in reshape_args() 
+            # we don't have the actual call arguments so we can only work out the 
+            # new args for the called sub
+            my $decl = "$type, dimension(size($refarg)):: $refarg\_1D";
+            my $reshape = "$refarg = reshape($refarg\_1D,shape($refarg)";
+            warn $stref->{'Subroutines'}{$f}{'Vars'}{$refarg}{'Decl'},"\n",$decl,"\n",$reshape,"\n";             	         
+            $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Reshaped'}{'Decl'} = $decl;
+            $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{$refarg}{'Reshaped'}{'Reshape'} = $reshape;
+            push @{ $reshaped_args }, $refarg;
+        }        
+    }
+    
+#    print scalar @{$reshaped_args}, "\n";
+    $stref->{'Subroutines'}{$f}{'RefactoredArgs'}{'ReshapedList'} =
+      $reshaped_args;
+    return $stref;
+} # END of reshape_args()
+
+# -----------------------------------------------------------------------------
 =pod
 
 Now, for the actual subroutine call, we can create the 

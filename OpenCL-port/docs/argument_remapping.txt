@@ -192,6 +192,11 @@ The steps to follow are:
 - unmap
 - reshape to original shape
 
-The only complication is that the declarations must be inserted after the other declarations, both in the caller and the called sub.
+* One complication is that the declarations must be inserted after the other declarations, both in the caller and the called sub.
 In the caller, the reshaping & remapping code comes just before the subroutine call so it can be part of it.
 In the called function, the reshaping & remapping code comes just after the declarations.
+
+* Another, more serious complication is that it is possible for a subroutine to receive an array slice.
+If that is the case, I think we must generate a separate intermediate array.
+
+
