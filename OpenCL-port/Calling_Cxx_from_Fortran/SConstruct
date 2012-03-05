@@ -1,10 +1,10 @@
 # Proof of concept SConstruct for integrating C++ into FORTRAN
 
 cxxsources=['testCxx.cc']
-fsources=['test_Cxx_in_F.f']
+fsources=['test_Cxx_in_F_free.f']
 
 envCxx=Environment(CXX='g++');
 envCxx.Library('testCxx',cxxsources)
 
-envF=Environment(FORTRAN='gfortran')
+envF=Environment(FORTRAN='/opt/local/bin/gfortran',FORTRANFLAGS=['-ffree-form'])
 envF.Program('testF',fsources,LIBS=['testCxx','stdc++'],LIBPATH='.')

@@ -68,7 +68,7 @@ Inside the subroutine, we need to do the reverse operation. This is fine in Fort
         real,dimension(3) :: ashape = (/ SZ1,SZ2,SZ3 /)
 	! The declaration of the original array, just keep it
         real,dimension(SZ1,SZ2,SZ3) :: array
-	!  The 1-D array extracted from the argument array
+		!  The 1-D array extracted from the argument array
         real, dimension(size(array)):: array1d 
 	! Reshape array1d into array
         array = reshape(array1d,shape(array)) 
