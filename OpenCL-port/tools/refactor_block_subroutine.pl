@@ -3734,7 +3734,7 @@ sub separate_blocks {
     # TODO: $stref=create_new_subroutine_entries($blocksref,$stref)
 	for my $block ( keys %blocks ) {
 		next if $block eq 'OUTER';
-		my $Sblock=$stref->{$sub_or_func}{$block};
+		my $Sblock=$stref->{'Subroutines'}{$block};
 		$Sblock->{'Lines'} = $blocks{$block}{'Lines'};
 		$Sblock->{'Info'}  = $blocks{$block}{'Info'};
 		$Sblock->{'Source'} = $Sf->{'Source'};		
@@ -3768,49 +3768,48 @@ sub separate_blocks {
 
 	# 4. Construct the subroutine signatures
 	# TODO: $stref = construct_new_subroutine_signatures();
+	# TODO: see if this can be separated into shorter subs
 	my %args = ();
 	for my $block ( keys %blocks ) {
 		next if $block eq 'OUTER';
-
+		my $Sblock=$stref->{'Subroutines'}{$block};
 		print "\nARGS for BLOCK $block:\n" if $V;
+		# Collect args for new subroutine
 		for my $var ( sort keys %{ $occs{$block} } ) {
 			if ( exists $occs{'OUTER'}{$var} ) {
 				print "$var\n" if $V;
 				push @{ $args{$block} }, $var;
 			}
 		}
-
-		$stref->{'Subroutines'}{$block}{'Args'} = $args{$block};
+		$Sblock->{'Args'} = $args{$block};
+		# Create Signature and corresponding Decls
 		my $sig   = "      subroutine $block(";
 		my $decls = [];
 		for my $argv ( @{ $args{$block} } ) {
 			$sig .= "$argv,";
-			my $decl = $vars{$argv}{'Decl'};    #|| $commons{$argv}{'Decl'};
+			my $decl = $vars{$argv}{'Decl'};
 			push @{$decls}, $decl;
 		}
 		$sig =~ s/\,$/)/s;
-
-		$stref->{$sub_or_func}{$block}{'Sig'}   = $sig;
-		$stref->{$sub_or_func}{$block}{'Decls'} = $decls;
-		my $marker  = shift @{ $stref->{$sub_or_func}{$block}{'Lines'} };
-		my $siginfo = shift @{ $stref->{$sub_or_func}{$block}{'Info'} };
+		$Sblock->{'Sig'}   = $sig;
+		$Sblock->{'Decls'} = $decls;
+		my $marker  = shift @{ $Sblock->{'Lines'} };
+		my $siginfo = shift @{ $Sblock->{'Info'} };
 		for my $argv ( @{ $args{$block} } ) {
 			my $decl = $vars{$argv}{'Decl'};
-			unshift @{ $stref->{$sub_or_func}{$block}{'Lines'} }, $decl;
-			unshift @{ $stref->{'Subroutines'}{$block}{'Info'} },
+			unshift @{ $Sblock->{'Lines'} }, $decl;
+			unshift @{ $Sblock->{'Info'} },
 			  { 'VarDecl' => [$argv] };
 		}
-		unshift @{ $stref->{'Subroutines'}{$block}{'Info'} }, $siginfo;
-		my $fl = shift @{ $stref->{$sub_or_func}{$block}{'Info'} };
-		for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } ) {
-			$stref->{'Subroutines'}{$block}{'Includes'}{$inc} = 1;
-			unshift @{ $stref->{'Subroutines'}{$block}{'Lines'} },
-			  "      include '$inc'";
-			unshift @{ $stref->{'Subroutines'}{$block}{'Info'} },
-			  { 'Include' => { 'Name' => $inc } };
-			$stref->{'Subroutines'}{$block}{'Includes'}{$inc} = 1;
+		unshift @{ $Sblock->{'Info'} }, $siginfo;
+		my $fl = shift @{ $Sblock->{'Info'} };
+		for my $inc ( keys %{ $Sf->{'Includes'} } ) {
+			$Sblock->{'Includes'}{$inc} = 1;
+			unshift @{ $Sblock->{'Lines'} }, "      include '$inc'";
+			unshift @{ $Sblock->{'Info'} }, { 'Include' => { 'Name' => $inc } };
+			$Sblock->{'Includes'}{$inc} = 1;
 		}
-		unshift @{ $stref->{$sub_or_func}{$block}{'Lines'} }, $sig;
+		unshift @{ $Sblock->{'Lines'} }, $sig;
 
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			if ( $index == $blocks{$block}{'BeginBlockIdx'} ) {
@@ -3822,12 +3821,12 @@ sub separate_blocks {
 				$srcref->[$index] = '';
 			}
 		}
-		unshift @{ $stref->{$sub_or_func}{$block}{'Info'} }, $fl;
+		unshift @{ $Sblock->{'Info'} }, $fl;
 		if ($V) {
 			print $sig, "\n";
 			print join( "\n", @{$decls} ), "\n";
 		}
-		$stref->{'Subroutines'}{$block}{'Status'} = $READ;
+		$Sblock->{'Status'} = $READ;
 	}
 	return $stref;
 }    # END of separate_blocks()
