@@ -1,5 +1,4 @@
 #!/usr/bin/perl
-use warnings::unused;
 use warnings;
 use strict;
 use Carp;
@@ -604,18 +603,17 @@ sub parse_fortran_src {
 	if ( not $is_func ) {
 		$stref = get_var_decls( $f, $stref );
 	}
-	        # 3. Parse includes
-	$stref = parse_includes( $f, $stref );
 	if ( not $is_incl ) {
 
 		#		my $sub_or_func = sub_func_or_incl( $f, $stref );
-#		my $is_sub = ( $sub_or_func eq 'Subroutines' ) ? 1 : 0;
+		my $is_sub = ( $sub_or_func eq 'Subroutines' ) ? 1 : 0;
 
 # For subroutines, we detect blocks, parse include and parse nested subroutine calls.
 # Note that function calls have been dealt with (as a side effect) in get_var_decls()
 #        if ($is_sub) {
 # Detect the presence of a block in this target, only sets 'HasBlocks'
-# Detect include statements and add to Subroutine 'Include' field		
+# Detect include statements and add to Subroutine 'Include' field
+		$stref = parse_includes( $f, $stref );
 
 		if ( $stref->{$sub_or_func}{$f}{'HasBlocks'} == 1 ) {
 			$stref = separate_blocks( $f, $stref );
@@ -625,7 +623,8 @@ sub parse_fortran_src {
 		$stref = parse_subroutine_and_function_calls( $f, $stref );
 		$stref->{$sub_or_func}{$f}{'Status'} = $PARSED;
 	} else {    # includes
-		        
+		        # 3. Parse includes
+        $stref = parse_includes( $f, $stref );
 # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
 		$stref = get_commons_params_from_includes( $f, $stref );
 		$stref->{'IncludeFiles'}{$f}{'Status'} = $PARSED;
@@ -756,7 +755,7 @@ sub find_root_for_include {
 # We also need to add the include to all nodes in the divergent paths
 sub find_leaves {
 	( my $stref, my $nid ) = @_;
-
+	my @chain = ();
 	if ( exists $stref->{'Nodes'}{$nid}{'Children'}
 		and @{ $stref->{'Nodes'}{$nid}{'Children'} } )
 	{
@@ -798,7 +797,7 @@ sub create_chain {
 	# In $c
 	# If there are includes with common blocks, merge them into CommonIncludes
 	my $pnid = $stref->{'Nodes'}{$nid}{'Parent'};
-	
+	my $csub = $stref->{'Nodes'}{$cnid}{'Subroutine'};
 	my $sub  = $stref->{'Nodes'}{$nid}{'Subroutine'};
 	my $Ssub = $stref->{'Subroutines'}{$sub};
 
@@ -933,7 +932,7 @@ sub refactor_subroutine_signature {
 			print "SUB $f ORIG ARGS: ()\n";
 		}
 	}
-#	my %args               = map { $_ => 1 } @{ $Sf->{'Args'} };
+	my %args               = map { $_ => 1 } @{ $Sf->{'Args'} };
 	my @exglobs            = ();
 	my @nexglobs           = ();
 	my $conflicting_params = $Sf->{'ConflictingParams'};
@@ -1007,7 +1006,7 @@ sub create_refactored_vardecls {
 	my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
 	my %args      = map { $_ => 1 } @{ $Sf->{'Args'} };
 	
-	 my $globals = ( get_maybe_args_globs( $stref, $f ) )[1];
+	( my $maybe_args, my $globals ) = get_maybe_args_globs( $stref, $f );
 	
 #	my %conflicting_locals = ();
 #	if ( exists $Sf->{'ConflictingGlobals'} ) {
@@ -1061,9 +1060,9 @@ sub create_refactored_vardecls {
 sub create_exglob_var_declarations {
 	( my $stref, my $f, my $annline, my $rlines ) = @_;
 	my $Sf                 = $stref->{'Subroutines'}{$f};
-#	my $line               = $annline->[0] || '';
+	my $line               = $annline->[0] || '';
 	my $tags_lref          = $annline->[1];
-#	my %tags               = ( defined $tags_lref ) ? %{$tags_lref} : ();
+	my %tags               = ( defined $tags_lref ) ? %{$tags_lref} : ();
 	my %args               = map { $_ => 1 } @{ $Sf->{'Args'} };
 	my $conflicting_params = $Sf->{'ConflictingParams'};
 
@@ -1114,9 +1113,9 @@ sub create_exglob_var_declarations {
 sub create_new_include_statements {
 	( my $stref, my $f, my $annline, my $rlines ) = @_;
 	my $Sf        = $stref->{'Subroutines'}{$f};
-#	my $line      = $annline->[0] || '';
+	my $line      = $annline->[0] || '';
 	my $tags_lref = $annline->[1];
-#	my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
+	my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
 
 	for my $inc ( keys %{ $Sf->{'Globals'} } ) {
 		print "INC: $inc, root: $stref->{'IncludeFiles'}{$inc}{'Root'} \n"
@@ -1136,7 +1135,7 @@ sub create_new_include_statements {
 # --------------------------------------------------------------------------------
 sub skip_common_include_statement {
 	( my $stref, my $f, my $annline ) = @_;
-#	my $line      = $annline->[0] || '';
+	my $line      = $annline->[0] || '';
 	my $tags_lref = $annline->[1];
 	my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
 	my $skip      = 0;
@@ -1160,10 +1159,10 @@ sub skip_common_include_statement {
 sub create_refactored_subroutine_signature {
 	( my $stref, my $f, my $annline, my $rlines ) = @_;
 	my $Sf        = $stref->{'Subroutines'}{$f};
-#	my $line      = $annline->[0] || '';
+	my $line      = $annline->[0] || '';
 	my $tags_lref = $annline->[1];
 	my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
-#	( my $maybe_args, my $globals ) = get_maybe_args_globs( $stref, $f );
+	( my $maybe_args, my $globals ) = get_maybe_args_globs( $stref, $f );
 	my $args_ref = $Sf->{'RefactoredArgs'}{'List'};
 	my $args_str = join( ',', @{$args_ref} );
 	print "NEW ARGS: $args_str\n" if $V;
@@ -1342,7 +1341,7 @@ sub refactor_blocks_OLD {
 	my @blocks = ();
 	my $name   = 'NONE';
 	for my $annline ( @{$annlines} ) {
-#		my $line      = $annline->[0];
+		my $line      = $annline->[0];
 		my $tags_lref = $annline->[1];
 		my %tags = %{$tags_lref};
 		if  ( not defined $tags_lref ) {
@@ -1395,7 +1394,7 @@ sub refactor_blocks_OLD {
 	# Now go through the lines again and create the proper call
 	#        $annlines=$rlines;
 	for my $annline ( @{$rlines} ) {
-#		my $line      = $annline->[0];
+		my $line      = $annline->[0];
 		my $tags_lref = $annline->[1];
 		my %tags =
 		  ( defined $tags_lref )
@@ -1443,12 +1442,12 @@ sub refactor_blocks_OLD {
 sub create_refactored_source {
 	( my $stref, my $f, my $annlines ) = @_;
 	print "CREATING FINAL $f CODE\n" if $V;
-#	my $rlines      = [];
+	my $rlines      = [];
 	my @extra_lines = ();
 	my $sub_or_func =
 	  ( exists $stref->{'Subroutines'}{$f} ) ? 'Subroutines' : 'Functions';
 	my $Sf = $stref->{$sub_or_func}{$f};
-	$Sf->{'RefactoredCode'} = [];
+	$stref->{$sub_or_func}{$f}{'RefactoredCode'} = [];
 	
 	for my $annline ( @{$annlines} ) {
 		if (not defined $annline or not defined $annline->[0]) {
@@ -1467,7 +1466,7 @@ sub create_refactored_source {
 		if ( exists $tags{'EndDo'} ) {
 			my $is_goto_target = 0;
 			if (
-				$Sf->{'Gotos'}{ $tags{'EndDo'}{'Label'} } )
+				$stref->{$sub_or_func}{$f}{'Gotos'}{ $tags{'EndDo'}{'Label'} } )
 			{
 				# this is an end do which serves as a goto target
 				$is_goto_target = 1;
@@ -1505,7 +1504,7 @@ sub create_refactored_source {
 		if ( exists $tags{'PlaceHolders'} ) {
 			my @phs = @{ $tags{'PlaceHolders'} };
 			for my $ph (@phs) {
-				my $str = $Sf->{'StringConsts'}{$ph};
+				my $str = $stref->{$sub_or_func}{$f}{'StringConsts'}{$ph};
 				$line =~ s/$ph/$str/;
 			}
 		}
@@ -1513,17 +1512,17 @@ sub create_refactored_source {
 			print $line, "\n" if $V;
 			my @split_lines = split_long_line($line);
 			for my $sline (@split_lines) {
-				push @{ $Sf->{'RefactoredCode'} }, $sline;
+				push @{ $stref->{$sub_or_func}{$f}{'RefactoredCode'} }, $sline;
 			}
 			if (@extra_lines) {
 				for my $extra_line (@extra_lines) {
-					push @{ $Sf->{'RefactoredCode'} },
+					push @{ $stref->{$sub_or_func}{$f}{'RefactoredCode'} },
 					  $extra_line;
 				}
 				@extra_lines = ();
 			}
 		} else {
-			push @{ $Sf->{'RefactoredCode'} }, $line;
+			push @{ $stref->{$sub_or_func}{$f}{'RefactoredCode'} }, $line;
 		}
 	}
 	return $stref;
@@ -1702,7 +1701,7 @@ sub refactor_include {
 		push @{$annlines}, [ $line, $tags ];
 	}
 
-#	my $rlines = [];
+	my $rlines = [];
 	for my $annline ( @{$annlines} ) {
 		my $line      = $annline->[0] || '';
 		my $tags_lref = $annline->[1];
@@ -2259,12 +2258,12 @@ sub postprocess_C {
 				my $argstr    = $3;
 				my @args      = split( /\s*\,\s*/, $argstr )
 				  ; # FIXME: this will split things like v1,indzindicator[FTNREF1D(i,1)],v3
-				
+				my $ii = 0;
 				my $called_sub_args =
 				  $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{'List'};
 				my @nargs = ();
-#                my $ii = 0;
-				for my $ii ( 0 .. scalar @{$called_sub_args} - 1 ) {
+
+				for my $jj ( 1 .. scalar @{$called_sub_args} ) {
 					my $arg            = shift @args;
 					my $called_sub_arg = $called_sub_args->[$ii];
 					$ii++;
@@ -2522,10 +2521,6 @@ sub parse_subroutine_and_function_calls {
 
 				$Sname->{'Called'} = 1;
 				$Sname->{'Callers'}{$f}++;
-				if ($Sf->{'RefactorGlobals'}==1) {
-					print "SUB $name NEEDS GLOBALS REFACTORING\n";
-					$Sname->{'RefactorGlobals'} = 1;
-				}
 
 				#                $called_subs{$name} = $name;
 				$Sf->{'Info'}->[$index]{'SubroutineCall'}{'Args'} = $argstr;
@@ -2543,7 +2538,7 @@ sub parse_subroutine_and_function_calls {
 				}
 
 				my @tvars   = split( /\s*\,\s*/, $tvarlst );
-#				my $p       = '';
+				my $p       = '';
 				my @argvars = ();
 				for my $var (@tvars) {
 					$var =~ s/^\s+//;
@@ -2662,7 +2657,7 @@ sub resolve_globals {
 	{
 
 		# Not a leaf node, descend
-#		my %globs = ();
+		my %globs = ();
 
 		# Globals for $csub have been determined
 		$stref = identify_globals_used_in_subroutine( $f, $stref );
@@ -2838,7 +2833,7 @@ sub determine_subroutine_arguments {
 		# First determine subroutine arguments. Factor out?
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $line = $srcref->[$index];
-#			my $SfI  = $Sf->{'Info'};
+			my $SfI  = $Sf->{'Info'};
 			if ( $line =~ /^C\s+/ ) {
 				next;
 			}
@@ -3140,8 +3135,8 @@ sub determine_argument_io_direction_core {
 					}
 				}
 				if ( $line =~ /^\s*if/ ) {
-					my $cond =
-					  ( split( /\s+(\w+)(?:\([^=]*\))?\s*=\s*/, $line ) )[0];
+					( my $cond, my $rest ) =
+					  split( /\s+(\w+)(?:\([^=]*\))?\s*=\s*/, $line );
 					find_vars( $cond, \%args, \&set_io_dir );
 					for my $csub ( keys %{$called_sub_args} ) {
 						if ( %{ $called_sub_args->{$csub} } ) {
@@ -3184,7 +3179,7 @@ sub determine_argument_io_direction_core {
 		}
 	}
 
-    my $maybe_args = ( get_maybe_args_globs( $stref, $f ) )[0];
+	( my $maybe_args, my $globals ) = get_maybe_args_globs( $stref, $f );
 	for my $arg ( keys %args ) {
 		$Sf->{'RefactoredArgs'}{$arg}{'IODir'} = $args{$arg};
 		my $kind  = 'Unknown';
@@ -3413,7 +3408,7 @@ sub parse_includes {
 sub get_var_decls {
 	( my $f, my $stref ) = @_;
 
-#	my $is_incl = exists $stref->{'IncludeFiles'}{$f} ? 1 : 0;
+	my $is_incl = exists $stref->{'IncludeFiles'}{$f} ? 1 : 0;
 
 	#			my $sub_or_incl = $is_incl ? 'Includes' : 'Subroutines';
 	my $sub_func_incl = sub_func_or_incl( $f, $stref );
@@ -3675,7 +3670,7 @@ sub separate_blocks {
 	# Initial settings
 	my $block       = 'OUTER';
 	$blocks{'OUTER'} = { 'Lines' => [] };
-#	my $block_idx = 0;
+	my $block_idx = 0;
 	
     # 1. Process every line in $f, scan for blocks marked with pragmas.
     # What this does is to separate the code into blocks (%blocks) and keep track of the line numbers
@@ -3739,7 +3734,7 @@ sub separate_blocks {
     # TODO: $stref=create_new_subroutine_entries($blocksref,$stref)
 	for my $block ( keys %blocks ) {
 		next if $block eq 'OUTER';
-		my $Sblock=$stref->{'Subroutines'}{$block};
+		my $Sblock=$stref->{$sub_or_func}{$block};
 		$Sblock->{'Lines'} = $blocks{$block}{'Lines'};
 		$Sblock->{'Info'}  = $blocks{$block}{'Info'};
 		$Sblock->{'Source'} = $Sf->{'Source'};		
@@ -3773,50 +3768,50 @@ sub separate_blocks {
 
 	# 4. Construct the subroutine signatures
 	# TODO: $stref = construct_new_subroutine_signatures();
-	# TODO: see if this can be separated into shorter subs
 	my %args = ();
 	for my $block ( keys %blocks ) {
 		next if $block eq 'OUTER';
-		my $Sblock=$stref->{'Subroutines'}{$block};
+
 		print "\nARGS for BLOCK $block:\n" if $V;
-		# Collect args for new subroutine
 		for my $var ( sort keys %{ $occs{$block} } ) {
 			if ( exists $occs{'OUTER'}{$var} ) {
 				print "$var\n" if $V;
 				push @{ $args{$block} }, $var;
 			}
 		}
-		$Sblock->{'Args'} = $args{$block};
-		# Create Signature and corresponding Decls
+
+		$stref->{'Subroutines'}{$block}{'Args'} = $args{$block};
 		my $sig   = "      subroutine $block(";
 		my $decls = [];
 		for my $argv ( @{ $args{$block} } ) {
 			$sig .= "$argv,";
-			my $decl = $vars{$argv}{'Decl'};
+			my $decl = $vars{$argv}{'Decl'};    #|| $commons{$argv}{'Decl'};
 			push @{$decls}, $decl;
 		}
 		$sig =~ s/\,$/)/s;
-		$Sblock->{'Sig'}   = $sig;
-		$Sblock->{'Decls'} = $decls;		
-		# Add variable declarations and info to line 
-		my $siginfo = shift @{ $Sblock->{'Info'} };
+
+		$stref->{$sub_or_func}{$block}{'Sig'}   = $sig;
+		$stref->{$sub_or_func}{$block}{'Decls'} = $decls;
+		my $marker  = shift @{ $stref->{$sub_or_func}{$block}{'Lines'} };
+		my $siginfo = shift @{ $stref->{$sub_or_func}{$block}{'Info'} };
 		for my $argv ( @{ $args{$block} } ) {
 			my $decl = $vars{$argv}{'Decl'};
-			unshift @{ $Sblock->{'Lines'} }, $decl;
-			unshift @{ $Sblock->{'Info'} }, { 'VarDecl' => [$argv] };
+			unshift @{ $stref->{$sub_or_func}{$block}{'Lines'} }, $decl;
+			unshift @{ $stref->{'Subroutines'}{$block}{'Info'} },
+			  { 'VarDecl' => [$argv] };
 		}
-		unshift @{ $Sblock->{'Info'} }, $siginfo;
-		
-		# Now also add include statements and the actual sig to the line
-		my $fl = shift @{ $Sblock->{'Info'} };
-		for my $inc ( keys %{ $Sf->{'Includes'} } ) {
-			$Sblock->{'Includes'}{$inc} = 1;
-			unshift @{ $Sblock->{'Lines'} }, "      include '$inc'";
-			unshift @{ $Sblock->{'Info'} }, { 'Include' => { 'Name' => $inc } };
-			$Sblock->{'Includes'}{$inc} = 1;
+		unshift @{ $stref->{'Subroutines'}{$block}{'Info'} }, $siginfo;
+		my $fl = shift @{ $stref->{$sub_or_func}{$block}{'Info'} };
+		for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } ) {
+			$stref->{'Subroutines'}{$block}{'Includes'}{$inc} = 1;
+			unshift @{ $stref->{'Subroutines'}{$block}{'Lines'} },
+			  "      include '$inc'";
+			unshift @{ $stref->{'Subroutines'}{$block}{'Info'} },
+			  { 'Include' => { 'Name' => $inc } };
+			$stref->{'Subroutines'}{$block}{'Includes'}{$inc} = 1;
 		}
-		unshift @{ $Sblock->{'Lines'} }, $sig;
-        # And finally, in the original source, replace the blocks by calls to the new subs
+		unshift @{ $stref->{$sub_or_func}{$block}{'Lines'} }, $sig;
+
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			if ( $index == $blocks{$block}{'BeginBlockIdx'} ) {
 				$sig =~ s/subroutine/call/;
@@ -3827,13 +3822,12 @@ sub separate_blocks {
 				$srcref->[$index] = '';
 			}
 		}
-		unshift @{ $Sblock->{'Info'} }, $fl;
-		
+		unshift @{ $stref->{$sub_or_func}{$block}{'Info'} }, $fl;
 		if ($V) {
 			print $sig, "\n";
 			print join( "\n", @{$decls} ), "\n";
 		}
-		$Sblock->{'Status'} = $READ;
+		$stref->{'Subroutines'}{$block}{'Status'} = $READ;
 	}
 	return $stref;
 }    # END of separate_blocks()
@@ -3845,7 +3839,7 @@ sub identify_loops_breaks {
 	( my $f, my $stref ) = @_;
 	my $sub_or_func = sub_func_or_incl( $f, $stref );
 	my $Sf          = $stref->{$sub_or_func}{$f};
-	my $srcref      = $Sf->{'Lines'};
+	my $srcref      = $stref->{$sub_or_func}{$f}{'Lines'};
 	if ( defined $srcref ) {
 		my %do_loops = ();
 		my %gotos    = ();
@@ -3859,7 +3853,7 @@ sub identify_loops_breaks {
 			# BeginDo:
 			$line =~ /^\s+do\s+(\d+)\s+\w/ && do {
 				my $label = $1;
-				$Sf->{'Info'}
+				$stref->{$sub_or_func}{$f}{'Info'}
 				  ->[$index]{'BeginDo'}{'Label'} = $label;
 				if ( not exists $do_loops{$label} ) {
 					@{ $do_loops{$label} } = ( [$index], $nest );
@@ -3875,9 +3869,9 @@ sub identify_loops_breaks {
 			# Goto
 			$line =~ /^\s+.*?[\)\ ]\s*goto\s+(\d+)\s*$/ && do {
 				my $label = $1;
-				$Sf->{'Info'}->[$index]{'Goto'}{'Label'} =
+				$stref->{$sub_or_func}{$f}{'Info'}->[$index]{'Goto'}{'Label'} =
 				  $label;
-				$Sf->{'Gotos'}{$label} = 1;
+				$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = 1;
 				push @{ $gotos{$label} }, [ $index, $nest ];
 				next;
 			};
@@ -3888,9 +3882,9 @@ sub identify_loops_breaks {
 				my $is_cont = $2 eq 'continue' ? 1 : 0;
 				if ( exists $do_loops{$label} ) {
 					if ( $nest == $do_loops{$label}[1] + 1 ) {
-						$Sf->{'Info'}
+						$stref->{$sub_or_func}{$f}{'Info'}
 						  ->[$index]{'EndDo'}{'Label'} = $label;
-						$Sf->{'Info'}
+						$stref->{$sub_or_func}{$f}{'Info'}
 						  ->[$index]{'EndDo'}{'Count'} =
 						  scalar @{ $do_loops{$label}[0] };
 						delete $do_loops{$label};
@@ -3910,11 +3904,11 @@ sub identify_loops_breaks {
 							if ( $tnest > 0 ) {
 								if ($is_cont) {
 									$target = 'NoopBreakTarget';
-									$Sf->{'Info'}
+									$stref->{$sub_or_func}{$f}{'Info'}
 									  ->[$tindex]{'Break'}{'Label'} = $label;
 								} else {
 									$target = 'BreakTarget';
-									$Sf->{'Info'}
+									$stref->{$sub_or_func}{$f}{'Info'}
 									  ->[$tindex]{'Break'}{'Label'} = $label;
 
 #                    	print STDERR "WARNING: $f: Found BREAK target not NOOP for label $label\n";
@@ -3932,9 +3926,9 @@ sub identify_loops_breaks {
 							  if $W;
 						}
 					}
-					$Sf->{'Info'}
+					$stref->{$sub_or_func}{$f}{'Info'}
 					  ->[$index]{$target}{'Label'} = $label;
-					$Sf->{'Gotos'}{$label} = $target;
+					$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = $target;
 					delete $gotos{$label};
 
 				}
@@ -3945,7 +3939,7 @@ sub identify_loops_breaks {
    # Some evil code combines this end-of-do-block labels
 			$line =~ /^\s+open.*?\,\s*err\s*=\s*(\d+)\s*\)/ && do {
 				my $label = $1;
-				$Sf->{'Gotos'}{$label} = 1;
+				$stref->{$sub_or_func}{$f}{'Gotos'}{$label} = 1;
 				next;
 			};
 		}
@@ -4022,7 +4016,8 @@ sub read_fortran_src {
 					if ( $tline =~ /\s+\!.*$/ ) {
 
 				  # convert trailing comments into comments on the previous line
-						$line = ( split( /\s+\!/, $line ) )[0];
+						( $line, my $comment ) =
+						  split( /\s+\!/, $line );
 					}
 				}
 
@@ -4190,7 +4185,7 @@ sub read_fortran_src {
 sub find_subroutines_functions_and_includes {
 	my $stref = shift;
 	my $dir   = '.';
-#	my $ext   = '.f';
+	my $ext   = '.f';
 
 	# find sources (borrowed from PerlMonks)
 	my %src_files = ();
@@ -4333,7 +4328,7 @@ But then we need to store the declarations and statements for caller and called 
 sub remap_args {
 	( my $stref, my $f ) = @_;
 	my $Sf = $stref->{'Subroutines'}{$f};
-#	my $subtype;
+	my $subtype;
 	my @index   = ();
 	my $refargs = $Sf->{'RefactoredArgs'}{'List'};
 
@@ -4398,7 +4393,8 @@ sub remap_args {
 # -----------------------------------------------------------------------------
 sub get_typecode {
 	( my $var, my $ftype ) = @_;
-
+	my $t    = 0;
+	my $s    = 0;
 	my %corr = (
 		'logical'          => [ 0, 3 ],
 		'integer'          => [ 0, 3 ],
@@ -4423,8 +4419,8 @@ sub get_typecode {
 sub reshape_args {
 	( my $stref, my $f ) = @_;
 	my $Sf = $stref->{'Subroutines'}{$f};
-#	my $subtype;
-#	my @index   = ();
+	my $subtype;
+	my @index   = ();
 	my $refargs = $Sf->{'RefactoredArgs'}{'List'};
 
 	#    print $f. ':' . scalar @{$refargs}, " => ";
@@ -4747,8 +4743,8 @@ ratio="fill";
 			$seen{ $stref->{'Nodes'}{$cnid}{'Subroutine'} }++;
 			$i++;
 		}
-#		my $sub = $stref->{'Nodes'}{$pnid}{'Subroutine'};
-#
+		my $sub = $stref->{'Nodes'}{$pnid}{'Subroutine'};
+
 		#        print $DOT "$pnid [label=\"$sub\"];\n";
 	}
 	print $DOT "}\n";
