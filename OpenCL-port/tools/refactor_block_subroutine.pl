@@ -1,6 +1,7 @@
 #!/usr/bin/perl
 use warnings::unused;
 use warnings;
+use warnings FATAL => qw(uninitialized);
 use strict;
 use Carp;
 use Data::Dumper;
@@ -596,9 +597,11 @@ sub parse_fortran_src {
 	my $Sf          = $stref->{$sub_or_func}{$f};
 	my $is_incl     = exists $stref->{'IncludeFiles'}{$f} ? 1 : 0;
 	my $is_func     = exists $stref->{'Functions'}{$f} ? 1 : 0;
-
+    
     # Set 'RefactorGlobals' to 0, we only refactor the globals for subs that are kernel targets and their dependencies
-    $Sf->{'RefactorGlobals'} = 0;
+    if (not exists $Sf->{'RefactorGlobals'} ){ 
+        $Sf->{'RefactorGlobals'} = 0;
+    }
 # 2. Parse the type declarations in the source, create a per-target table Vars and a per-line VarDecl list
 # We don't do this in functions at the moment, because we don't need to? NO! FIXME!
 	if ( not $is_func ) {
@@ -612,6 +615,7 @@ sub parse_fortran_src {
 #		my $is_sub = ( $sub_or_func eq 'Subroutines' ) ? 1 : 0;
 
 # For subroutines, we detect blocks, parse include and parse nested subroutine calls.
+        $stref = detect_blocks($stref,$f);
 # Note that function calls have been dealt with (as a side effect) in get_var_decls()
 #        if ($is_sub) {
 # Detect the presence of a block in this target, only sets 'HasBlocks'
@@ -701,6 +705,11 @@ sub find_root_for_includes {
 	( my $stref, my $f ) = @_;
 	$stref = find_leaves( $stref, 0 );  # assumes we start at node 0 in the tree
 	for my $inc ( keys %{ $stref->{'IncludeFiles'} } ) {
+#		print "INC: $inc\n";
+#		print Dumper($stref->{'IncludeFiles'}{$inc});
+		if ($stref->{'IncludeFiles'}{$inc}{'Status'}==0) {
+			croak "TROUBLE: $inc not yet parsed, how come?";
+		}
 		if ( $stref->{'IncludeFiles'}{$inc}{'Type'} eq 'Common' ) {
 
 			#        	print "FINDING ROOT FOR $inc ($f)\n" ;
@@ -842,6 +851,7 @@ sub create_chain {
 
 sub refactor_globals {
 	( my $stref, my $f, my $annlines ) = @_;
+#	croak "FIXME: the caller of a sub with RefactorGlobals should refactor its globals!"
 	my $Sf = $stref->{'Subroutines'}{$f};
 	print "REFACTORING GLOBALS in $f\n" if $V;
 	my $rlines      = [];
@@ -861,9 +871,11 @@ sub refactor_globals {
 				 # Do this before the analysis for RefactoredArgs!
 			     $stref = refactor_subroutine_signature( $stref, $f );
 			}
+#			croak $line if $f eq 'particles_main_loop';
 			$rlines =
 			  create_refactored_subroutine_signature( $stref, $f, $annline,
 				$rlines );
+#				croak Dumper($rlines) if $f eq 'particles_main_loop';
 			$skip = 1;
 		}
 
@@ -908,6 +920,7 @@ sub refactor_globals {
 			# simply tag the common vars onto the arguments
 			$rlines = create_refactored_subroutine_call( $stref, $f, $annline,
 				$rlines );
+				
 			$skip = 1;
 		}
 
@@ -920,6 +933,7 @@ sub refactor_globals {
 		$idx++;
 	}
 	return $rlines;
+	
 }    # END of refactor_globals()
 
 # -----------------------------------------------------------------------------
@@ -1049,7 +1063,9 @@ sub create_refactored_vardecls {
 		    $spaces
 		  . $Sf->{'Vars'}{ $vars[0] }{'Type'} . ' '
 		  . join( ',', @nvars ) . "\n";
-	} else {
+		  warn "LINE: $line: OK!";		  
+	} else {		
+		$rline ="C FIXME! ".$rline;
 		warn "LINE: $line: FIXME: can't handle arrays yet!";
 	}
 
@@ -1579,6 +1595,12 @@ sub refactor_subroutine {
 	# @{$rlines} is the list of refactored lines
 	my $rlines = $annlines;
 
+croak "FIXME: if a sub calls another sub that has 'RefactorGlobals' == 1, and itself has 'RefactorGlobals' == 2,
+ then this sub should be the root for the refactoring
+# This means that is should be the root for the includes, no need to go any higher! 
+# Also, the 'Common' includes from any sub with 'RefactorGlobals' == 1 must be lifted
+# The main task is to rewrite any subroutine signatures for 'RefactorGlobals' == 1 subs so they take the globals as arguments.
+";
 	if ( $Sf->{'HasCommons'} and $Sf->{'RefactorGlobals'} == 1) {
 		$rlines = refactor_globals( $stref, $f, $annlines );
 	}
@@ -1802,10 +1824,14 @@ sub emit_refactored_include {
 		print "INFO: emitting refactored code for include $f\n" if $V;
 		my $mode = '>';
 		open my $SRC, $mode, "$dir/$f" or die $!;
-		for my $line ( @{$srcref} ) {
-			print $SRC "$line\n";
-			print "$line\n" if $V;
-		}
+        my $prevline='C ';
+        for my $line ( @{$srcref} ) {
+            if (not ($prevline =~/^\s*$/ and $line =~/^\s*$/)) {
+            print $SRC "$line\n";
+            print "$line\n" if $V;
+            }
+            $prevline=$line;
+        }
 		close $SRC;
 	}
 }
@@ -1842,10 +1868,14 @@ sub emit_refactored_function {
 		if ( $mode eq '>>' ) {
 			print $SRC "\nC *** FUNCTION $f ***\n";
 		}
-		for my $line ( @{$srcref} ) {
-			print $SRC "$line\n";
-			print "$line\n" if $V;
-		}
+        my $prevline='C ';
+        for my $line ( @{$srcref} ) {
+            if (not ($prevline =~/^\s*$/ and $line =~/^\s*$/)) {
+            print $SRC "$line\n";
+            print "$line\n" if $V;
+            }
+            $prevline=$line;
+        }
 		close $SRC;
 
 	}
@@ -1890,9 +1920,13 @@ sub emit_refactored_subroutine {
 		if ( $mode eq '>>' ) {
 			print $SRC "\nC *** SUBROUTINE $f ***\n";
 		}
+		my $prevline='C ';
 		for my $line ( @{$srcref} ) {
+			if (not ($prevline =~/^\s*$/ and $line =~/^\s*$/)) {
 			print $SRC "$line\n";
 			print "$line\n" if $V;
+			}
+			$prevline=$line;
 		}
 		close $SRC;
 	}
@@ -2132,7 +2166,7 @@ sub postprocess_C {
 						my $vtype = toCType($ftype);
 						$chunk =~ s/F2C\-ACC\:\ Type\ not\ recognized\./$vtype/;
 					} else {
-						die "No entry for $var in $sub\n" . Dumper(%vars);
+						croak "No entry for $var in $sub\n" . Dumper(%vars);
 					}
 				  };
 			}
@@ -2494,6 +2528,7 @@ sub parse_subroutine_and_function_calls {
 		}
 	}
 	my $srcref = $Sf->{'Lines'};
+#	croak Dumper( $srcref) if $f=~/timemanager/;
 	if ( defined $srcref ) {
 
 		#        my %called_subs         = ();
@@ -2504,8 +2539,11 @@ sub parse_subroutine_and_function_calls {
 	  # Subroutine calls. Surprisingly, these even occur in functions! *shudder*
 			if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )
 			{
+				
 				my $name  = $1;
+				
 				my $Sname = $stref->{'Subroutines'}{$name};
+				
 				$stref->{'NId'}++;
 				my $nid = $stref->{'NId'};
 				push @{ $stref->{'Nodes'}{$pnid}{'Children'} }, $nid;
@@ -2523,7 +2561,7 @@ sub parse_subroutine_and_function_calls {
 				$Sname->{'Called'} = 1;
 				$Sname->{'Callers'}{$f}++;
 				if ($Sf->{'RefactorGlobals'}==1) {
-					print "SUB $name NEEDS GLOBALS REFACTORING\n";
+					print "SUB $name NEEDS GLOBALS REFACTORING\n" if $V;
 					$Sname->{'RefactorGlobals'} = 1;
 				}
 
@@ -3202,10 +3240,9 @@ sub determine_argument_io_direction_core {
 		$Sf->{'RefactoredArgs'}{$arg}{'Type'}  = $type;
 		$Sf->{'RefactoredArgs'}{$arg}{'Shape'} = $shape;
 	}
-	$stref =
-	  remap_args( $stref, $f );    # FIXME: I don't think this should be here
-	$stref =
-	  reshape_args( $stref, $f );    # FIXME: I don't think this should be here
+	 # FIXME: I don't think this should be done here
+#TODO	$stref = remap_args( $stref, $f );   
+#TODO	$stref = reshape_args( $stref, $f );    
 	return $stref;
 }    # determine_argument_io_direction_core()
 
@@ -3253,20 +3290,21 @@ sub find_vars {
 }    # END of find_vars()
 
 # -----------------------------------------------------------------------------
+# UNUSED!
 sub detect_blocks {
-	( my $s, my $stref ) = @_;
+	( my $stref, my $s ) = @_;
 	print "CHECKING BLOCKS in $s\n" if $V;
 	my $sub_func_incl = sub_func_or_incl( $s, $stref );
 	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
 	my $srcref = $stref->{$sub_func_incl}{$s}{'Lines'};
-	for my $line ( @{$srcref} ) {
+	for my $line ( @{$srcref} ) {		
 		if ( $line =~ /^C\s/i ) {
 
 # I'd like to use the OpenACC compliant pragma !$acc kernels , !$acc end kernels
 # but OpenACC does not allow to provide a name
 # so I propose my own tag: !$acc subroutine name, !$acc end subroutine
 			if (   $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/
-				or $line =~ /^C\s\$acc\ssubroutine\s(\w+)/ )
+				or $line =~ /^C\s\$acc\ssubroutine\s(\w+)/i )
 			{
 				$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 1;
 				my $tgt = uc( substr( $sub_func_incl, 0, 3 ) );
@@ -3275,6 +3313,7 @@ sub detect_blocks {
 			}
 		}
 	}
+	
 	return $stref;
 }    # END of detect_blocks()
 
@@ -3636,7 +3675,7 @@ sub get_commons_params_from_includes {
 			  )
 			{
 				warn Dumper( $stref->{'IncludeFiles'}{$f}{'Lines'} );
-				die
+				croak
 "The include $f contains a variable $var that is neither a parameter nor a common variable, this is not supported\n";
 			}
 		}
@@ -3683,24 +3722,25 @@ sub separate_blocks {
      
 #TODO: replace by sub
 #    (my $stref, my $blocksref) = separate_into_blocks($stref,$f);
-
+    
 	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 		my $line = $srcref->[$index];
 		if (   $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/
-			or $line =~ /^C\s\$acc\s+subroutine\s(\w+)/ )
+			or $line =~ /^C\s\$acc\s+subroutine\s(\w+)/i )
 		{
 			$in_block = 1;
 			$block    = $1;
 			print "FOUND BLOCK $block\n" if $V;
 			# Enter the name of the block in the metadata for the line
 			$Sf->{'Info'}[$index]{'RefactoredSubroutineCall'}{'Name'} = $block;
+			$Sf->{'Info'}[$index]{'SubroutineCall'}{'Name'} = $block;
 			delete $Sf->{'Info'}[$index]{'Comments'};
 			$Sf->{'Info'}[$index]{'BeginBlock'}{'Name'} = $block;
 			# Push the line with the pragma onto the list of 'OUTER' lines
-			push @{ $blocks{'OUTER'}{'Lines'} }, $line;
+			push @{ $blocks{'OUTER'}{'Lines'} }, "C *** Refactored code into $block ***";
 			# Push the line with the pragma onto the list of lines for the block,
 			# to be replaced by function signature
-			push @{ $blocks{$block}{'Lines'} }, $line;
+			push @{ $blocks{$block}{'Lines'} }, "C *** Original code from $f starts here ***";
 			# Add the name and index to %blocks  
 			push @{ $blocks{$block}{'Info'} },
 			  { 'RefactoredSubroutineCall' => { 'Name' => $block } };
@@ -3708,7 +3748,7 @@ sub separate_blocks {
 			next;
 		}
 		if (   $line =~ /^C\s+END\sSUBROUTINE\s(\w+)/
-			or $line =~ /^C\s\$acc\s+end\ssubroutine\s(\w+)/ )
+			or $line =~ /^C\s\$acc\s+end\ssubroutine\s(\w+)/i )
 		{
 			$in_block = 0;
 			$block    = $1;
@@ -3719,7 +3759,7 @@ sub separate_blocks {
 			# Add info to %blocks. 
 			push @{ $blocks{$block}{'Info'} }, $Sf->{'Info'}[$index];
 			$Sf->{'Info'}[$index]{'EndBlock'}{'Name'} = $block;
-			$blocks{$block}{'EndBlockIdx'} = $index;
+			$blocks{$block}{'EndBlockIdx'} = $index; 
 			next;
 		}
 		if ($in_block) {
@@ -3739,11 +3779,13 @@ sub separate_blocks {
     # TODO: $stref=create_new_subroutine_entries($blocksref,$stref)
 	for my $block ( keys %blocks ) {
 		next if $block eq 'OUTER';
+		$stref->{'Subroutines'}{$block}={};
 		my $Sblock=$stref->{'Subroutines'}{$block};
 		$Sblock->{'Lines'} = $blocks{$block}{'Lines'};
 		$Sblock->{'Info'}  = $blocks{$block}{'Info'};
 		$Sblock->{'Source'} = $Sf->{'Source'};		
 		$Sblock->{'RefactorGlobals'} = 1;
+		$Sf->{'RefactorGlobals'} = 2;
 	}
 
 	# 3. Identify which vars are used
@@ -3776,7 +3818,7 @@ sub separate_blocks {
 	# TODO: see if this can be separated into shorter subs
 	my %args = ();
 	for my $block ( keys %blocks ) {
-		next if $block eq 'OUTER';
+		next if $block eq 'OUTER';		
 		my $Sblock=$stref->{'Subroutines'}{$block};
 		print "\nARGS for BLOCK $block:\n" if $V;
 		# Collect args for new subroutine
@@ -3817,14 +3859,16 @@ sub separate_blocks {
 		}
 		unshift @{ $Sblock->{'Lines'} }, $sig;
         # And finally, in the original source, replace the blocks by calls to the new subs
-		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-			if ( $index == $blocks{$block}{'BeginBlockIdx'} ) {
+#        print "\n-----\n".Dumper($srcref)."\n-----";
+		for my $tindex ( 0 .. scalar( @{$srcref} ) - 1 ) {
+#			print $f,':',$tindex,"\n",$srcref->[$tindex],"\n";			
+			if ( $tindex == $blocks{$block}{'BeginBlockIdx'} ) {
 				$sig =~ s/subroutine/call/;
-				$srcref->[$index] = $sig;
-			} elsif ( $index > $blocks{$block}{'BeginBlockIdx'}
-				and $index <= $blocks{$block}{'EndBlockIdx'} )
+				$srcref->[$tindex] = $sig;
+			} elsif ( $tindex > $blocks{$block}{'BeginBlockIdx'}
+				and $tindex <= $blocks{$block}{'EndBlockIdx'} )
 			{
-				$srcref->[$index] = '';
+				$srcref->[$tindex] = '';
 			}
 		}
 		unshift @{ $Sblock->{'Info'} }, $fl;
@@ -4218,6 +4262,7 @@ sub find_subroutines_functions_and_includes {
 					print "Found program $2 in $src\n" if $V;
 				}
 				my $sub  = lc($2);
+				$stref->{'Subroutines'}{$sub}={};
 				my $Ssub = $stref->{'Subroutines'}{$sub};
 				if (
 					not exists $Ssub->{'Source'}
@@ -4439,7 +4484,7 @@ sub reshape_args {
 			my $shape = $Sf->{'RefactoredArgs'}{$refarg}{'Shape'};
 			if ( defined $shape ) {
 				if ( scalar @{$shape} == 2 && $shape->[0] == 1 ) {
-					die $refarg, @{$shape};
+					die $refarg.':'.join(',', @{$shape});
 				}
 			} else {
 				die keys %{ $Sf->{'RefactoredArgs'}{$refarg} };
@@ -4481,6 +4526,7 @@ sub sub_func_or_incl {
 	} elsif ( exists $stref->{'IncludeFiles'}{$f} ) {
 		return 'IncludeFiles';
 	} else {
+		print Dumper($stref);
 		croak "No entry for $f in the state\n";
 	}
 }
