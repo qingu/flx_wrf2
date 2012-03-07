@@ -446,6 +446,7 @@ sub main {
 	#	my $gen = ( $opts{'b'} || $opts{'B'} ) ? 1 : 0;
 	my $build = ( $opts{'B'} ) ? 1 : 0;
 
+# ================================================================================
 	#  Initialise the global state.
 	my $stateref = init_state($subname);
 
@@ -723,6 +724,7 @@ sub find_root_for_includes {
 }    # END of find_root_for_includes()
 
 # -----------------------------------------------------------------------------
+
 sub find_root_for_include {
 	( my $stref, my $inc, my $sub ) = @_;
 	my $Ssub = $stref->{'Subroutines'}{$sub};
@@ -782,7 +784,7 @@ sub find_leaves {
 # We reached a leaf node
 #		print "Reached leaf $nid\n";
 # Now we work our way back up via the parent using a separate recursive function
-		$stref = create_chain( $stref, $nid, $nid );
+		$stref = create_chain( $stref, $nid, $nid, '' );
 
 # The chain is identified by the name of the leaf child
 # Check if the chain contains the $inc on the way up
@@ -801,18 +803,28 @@ sub find_leaves {
 # We combine all includes of all child nodes of a node, and the node's own includes, into CommonIncludes
 
 sub create_chain {
-	( my $stref, my $nid, my $cnid ) = @_;
+	( my $stref, my $nid, my $cnid, my $chain ) = @_;
 
 	#	print "create_chain $nid $cnid ";
 	# In $c
 	# If there are includes with common blocks, merge them into CommonIncludes
-	my $pnid = $stref->{'Nodes'}{$nid}{'Parent'};
-	
+	# We should only do this for subs that need refactoring
+	my $pnid = $stref->{'Nodes'}{$nid}{'Parent'};	
 	my $sub  = $stref->{'Nodes'}{$nid}{'Subroutine'};
 	my $Ssub = $stref->{'Subroutines'}{$sub};
-
+	my $f=$stref->{'Nodes'}{$pnid}{'Subroutine'};
+	if ($sub ne $f ) {
+		if ($Ssub->{'RefactorGlobals'}>0) {
+	   $chain .="$sub -> ";
+		}
+	} else {
+		$chain=~s/....$//;
+		print "$chain\n" if $chain=~/->/;
+	}
+#    if ($Ssub->{'RefactorGlobals'}>0) {
 	if ( exists $Ssub->{'Includes'}
-		and not exists $Ssub->{'CommonIncludes'} )
+		and not exists $Ssub->{'CommonIncludes'}	 
+		)
 	{
 		for my $inc ( keys %{ $Ssub->{'Includes'} } ) {
 			if ( $stref->{'IncludeFiles'}{$inc}{'Type'} eq 'Common'
@@ -822,28 +834,25 @@ sub create_chain {
 			}
 		}
 	}
+#	print "NEED TO REFACTOR $sub, CREATE CHAIN\n";
+#    } else {
+#    	print "NO NEED TO REFACTOR $sub, STOP CHAIN\n";
+#    }
 	if ( $nid != $cnid ) {
 		my $csub  = $stref->{'Nodes'}{$cnid}{'Subroutine'};
 		my $Scsub = $stref->{'Subroutines'}{$csub};
 		if ( exists $Scsub->{'CommonIncludes'} ) {
 			for my $inc ( keys %{ $Scsub->{'CommonIncludes'} } ) {
 				if ( not exists $Ssub->{'CommonIncludes'}{$inc} ) {
-
-					#					print "$sub:\tMERGING $inc FROM $csub\n"
-					#					  if $sub =~ /advance/;
 					$Ssub->{'CommonIncludes'}{$inc} = 1;
 				}
 			}
 		}
 	}
 	if ( $nid != 0 ) {
-		$stref = create_chain( $stref, $pnid, $nid );
+		$stref = create_chain( $stref, $pnid, $nid,$chain );
 	}
 
-	#	else {
-	# reached head node, return $stref
-	#		print "Reached head node\n";
-	#	}
 	return $stref;
 }    # END of create_chain
 
@@ -935,6 +944,62 @@ sub refactor_globals {
 	return $rlines;
 	
 }    # END of refactor_globals()
+
+# -----------------------------------------------------------------------------
+sub refactor_calls_globals {
+    ( my $stref, my $f, my $annlines ) = @_;
+#   croak "FIXME: the caller of a sub with RefactorGlobals should refactor its globals!"
+    print "REFACTORING CALLS WITH GLOBALS in $f\n" if $V;
+    my $rlines      = [];
+    
+    my $idx         = 0;
+    for my $annline ( @{$annlines} ) {
+        my $line      = $annline->[0] || '';
+        my $tags_lref = $annline->[1];
+        my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
+        print '*** ' . join( ',', keys(%tags) ) . "\n" if $V;
+        print '*** ' . $line . "\n" if $V;
+        my $skip = 0;
+
+
+        if ( exists $tags{'Includes'} ) {
+
+            # First, add addional includes if required
+            $rlines =
+              create_new_include_statements( $stref, $f, $annline, $rlines );
+
+## While we're here, might as well generate the declarations for remapping and reshaping.
+## If the subroutine contains a call to a function that requires this, of course.
+## Executive decision: do this only for the routines to be translated to C/OpenCL
+#            for my $called_sub ( keys %{ $Sf->{'CalledSubs'} } ) {
+#                if ( exists $subs_to_translate{$called_sub} ) {
+#
+#                 # OK, we need to do the remapping, so create the machinery here
+#                 # 1. Get the arguments of the called sub
+#
+## 2. Work out if they need reshaping. If so, create the declarations for the new 1-D arrays
+#
+## 3. Work out which remapped arrays will be used; create the declarations for these arrays
+#
+#                }
+#            }
+
+        }
+        if ( exists $tags{'SubroutineCall'} ) {
+
+            # simply tag the common vars onto the arguments
+            $rlines = create_refactored_subroutine_call( $stref, $f, $annline,
+                $rlines );
+                
+            $skip = 1;
+        }
+
+        push @{$rlines}, $annline unless $skip;
+        $idx++;
+    }
+    return $rlines;
+    
+}    # END of refactor_calls_globals()
 
 # -----------------------------------------------------------------------------
 sub refactor_subroutine_signature {
@@ -1130,9 +1195,7 @@ sub create_exglob_var_declarations {
 sub create_new_include_statements {
 	( my $stref, my $f, my $annline, my $rlines ) = @_;
 	my $Sf        = $stref->{'Subroutines'}{$f};
-#	my $line      = $annline->[0] || '';
 	my $tags_lref = $annline->[1];
-#	my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
 
 	for my $inc ( keys %{ $Sf->{'Globals'} } ) {
 		print "INC: $inc, root: $stref->{'IncludeFiles'}{$inc}{'Root'} \n"
@@ -1403,7 +1466,7 @@ sub refactor_blocks_OLD {
 		$stref = determine_argument_io_direction( $name, $stref );
 
 		# Now we're ready to refactor this source
-		$stref = refactor_subroutine( $name, $stref );    # shiver!
+		$stref = refactor_subroutine_main( $name, $stref );    # shiver!
 
 		#		croak Dumper( $Sname );
 	}
@@ -1551,7 +1614,7 @@ sub create_refactored_source {
 
 =begin markdown
 
-## Info refactoring `refactor_subroutine()`
+## Info refactoring `refactor_subroutine_main()`
 
 Essentially, call `refactor_globals()` and then call `create_refactored_source()`
 
@@ -1574,7 +1637,7 @@ This is a node called 'RefactoredSubroutineCall'
 =end markdown
 =cut
 
-sub refactor_subroutine {
+sub refactor_subroutine_main {
 	( my $f, my $stref ) = @_;
 	if ($V) {
 		print "\n\n";
@@ -1595,14 +1658,18 @@ sub refactor_subroutine {
 	# @{$rlines} is the list of refactored lines
 	my $rlines = $annlines;
 
-croak "FIXME: if a sub calls another sub that has 'RefactorGlobals' == 1, and itself has 'RefactorGlobals' == 2,
- then this sub should be the root for the refactoring
-# This means that is should be the root for the includes, no need to go any higher! 
-# Also, the 'Common' includes from any sub with 'RefactorGlobals' == 1 must be lifted
-# The main task is to rewrite any subroutine signatures for 'RefactorGlobals' == 1 subs so they take the globals as arguments.
-";
-	if ( $Sf->{'HasCommons'} and $Sf->{'RefactorGlobals'} == 1) {
-		$rlines = refactor_globals( $stref, $f, $annlines );
+#croak "FIXME: if a sub calls another sub that has 'RefactorGlobals' == 1, and itself has 'RefactorGlobals' == 2,
+# then this sub should be the root for the refactoring
+## This means that is should be the root for the includes, no need to go any higher! 
+## Also, the 'Common' includes from any sub with 'RefactorGlobals' == 1 must be lifted
+## The main task is to rewrite any subroutine signatures for 'RefactorGlobals' == 1 subs so they take the globals as arguments.
+#";
+	if ( $Sf->{'HasCommons'} ) {
+		if ( $Sf->{'RefactorGlobals'} == 1 ) {
+		  $rlines = refactor_globals( $stref, $f, $annlines );
+		} elsif ( $Sf->{'RefactorGlobals'} == 2 ) {
+			$rlines = refactor_calls_globals( $stref, $f, $annlines );
+		}
 	}
 
 	if (   not exists $Sf->{'RefactoredCode'}
@@ -1612,7 +1679,7 @@ croak "FIXME: if a sub calls another sub that has 'RefactorGlobals' == 1, and it
 		$stref = create_refactored_source( $stref, $f, $rlines );
 	}
 	return $stref;
-}    # END of refactor_subroutine()
+}    # END of refactor_subroutine_main()
 
 # -----------------------------------------------------------------------------
 
@@ -1630,7 +1697,7 @@ sub refactor_all_subroutines {
 		next if $Sf->{'Status'} == $UNREAD;
 		next if $Sf->{'Status'} == $READ;
 		next if $Sf->{'Status'} == $FROM_BLOCK;
-	  $stref = refactor_subroutine( $f, $stref );
+	  $stref = refactor_subroutine_main( $f, $stref );
 	}
 	return $stref;
 }    # END of refactor_all_subroutines()
@@ -1665,7 +1732,7 @@ sub refactor_C_targets {
 	for my $f ( keys %{ $stref->{'Subroutines'} } ) {
 		my $Sf = $stref->{'Subroutines'}{$f};
 		if ( exists $stref->{'BuildSources'}{'C'}{ $Sf->{'Source'} } ) {
-			$stref = refactor_subroutine( $f, $stref );
+			$stref = refactor_subroutine_main( $f, $stref );
 		}
 	}
 	return $stref;
