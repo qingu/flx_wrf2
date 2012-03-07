@@ -731,6 +731,7 @@ sub find_root_for_include {
 	if ( exists $Ssub->{'Includes'}{$inc} ) {
 		$stref->{'IncludeFiles'}{$inc}{'Root'} = $sub;
 	} else {
+		# $sub is (currently) not 'Root' for $inc
 		my $nchildren   = 0;
 		my $singlechild = '';
 		for my $calledsub ( keys %{ $Ssub->{'CalledSubs'} } ) {
@@ -746,7 +747,7 @@ sub find_root_for_include {
 		if ( $nchildren == 0 ) {
 			die
 "find_root_for_include(): Can't find $inc in parent or any children, something's wrong!\n";
-		} elsif ( $nchildren == 1 ) {
+		} elsif ( $nchildren == 1 and $Ssub->{'RefactorGlobals'}==0) {
 
 			#			print "DESCEND into $singlechild\n";
 			delete $Ssub->{'CommonIncludes'}{$inc};
@@ -813,6 +814,7 @@ sub create_chain {
 	my $sub  = $stref->{'Nodes'}{$nid}{'Subroutine'};
 	my $Ssub = $stref->{'Subroutines'}{$sub};
 	my $f=$stref->{'Nodes'}{$pnid}{'Subroutine'};
+	if ($V) {
 	if ($sub ne $f ) {
 		if ($Ssub->{'RefactorGlobals'}>0) {
 	   $chain .="$sub -> ";
@@ -820,6 +822,7 @@ sub create_chain {
 	} else {
 		$chain=~s/....$//;
 		print "$chain\n" if $chain=~/->/;
+	}
 	}
 #    if ($Ssub->{'RefactorGlobals'}>0) {
 	if ( exists $Ssub->{'Includes'}
