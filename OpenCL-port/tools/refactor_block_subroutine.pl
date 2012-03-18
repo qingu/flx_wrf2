@@ -704,14 +704,14 @@ So what we do is:
 
 sub find_root_for_includes {
 	( my $stref, my $f ) = @_;
-	$stref = find_leaves( $stref, 0 );  # assumes we start at node 0 in the tree
+	$stref = create_include_chains( $stref, 0 );  # assumes we start at node 0 in the tree
 	for my $inc ( keys %{ $stref->{'IncludeFiles'} } ) {
 #		print "INC: $inc\n";
 #		print Dumper($stref->{'IncludeFiles'}{$inc});
 		if ($stref->{'IncludeFiles'}{$inc}{'Status'}==0) {
 			croak "TROUBLE: $inc not yet parsed, how come?";
 		}
-		if ( $stref->{'IncludeFiles'}{$inc}{'Type'} eq 'Common' ) {
+		if ( $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common' ) {
 
 			#        	print "FINDING ROOT FOR $inc ($f)\n" ;
 			$stref = find_root_for_include( $stref, $inc, $f );
@@ -724,13 +724,28 @@ sub find_root_for_includes {
 }    # END of find_root_for_includes()
 
 # -----------------------------------------------------------------------------
+=pod
 
+`find_root_for_include()` is called for every include file in IncludeFiles, after `create_include_chains()` has created all the chains; 
+by 'chain' we mean a path in the call tree where every node contains the include for its child nodes.
+The purpose of this routine is to prune the paths, i.e. remove includes from nodes that don't need them.
+The algorithm is as follows: 
+- compare Includes with CommonIncludes.
+    - if an inc is only in CommonIncludes, it is inherited
+    - the node needs to keep it either
+        - it has more than one child node
+        - it contains a call to a refactored subroutine which contains the include  
+    - any other case, just remove the include
+=cut
 sub find_root_for_include {
 	( my $stref, my $inc, my $sub ) = @_;
 	my $Ssub = $stref->{'Subroutines'}{$sub};
+	
 	if ( exists $Ssub->{'Includes'}{$inc} ) {
+		# Not inherited
 		$stref->{'IncludeFiles'}{$inc}{'Root'} = $sub;
 	} else {
+		# Inherited 
 		# $sub is (currently) not 'Root' for $inc
 		my $nchildren   = 0;
 		my $singlechild = '';
@@ -752,8 +767,12 @@ sub find_root_for_include {
 			#			print "DESCEND into $singlechild\n";
 			delete $Ssub->{'CommonIncludes'}{$inc};
 			find_root_for_include( $stref, $inc, $singlechild );
+#		} elsif ($Ssub->{'RefactorGlobals'}==2) {
+#			# The current node must be Root for this $inc. Exit the search.
+#				die '$Ssub->{RefactorGlobals}==2 for '.$inc;
+		      		
 		} else {
-
+            
 			# head node is root
 			#			print "Found $nchildren children with $inc\n";
 			$stref->{'IncludeFiles'}{$inc}{'Root'} = $sub;
@@ -766,7 +785,7 @@ sub find_root_for_include {
 # What we do is simply a recursive descent until we hit the include and we log that path
 # Then we prune the paths until they differ, that's the root
 # We also need to add the include to all nodes in the divergent paths
-sub find_leaves {
+sub create_include_chains {
 	( my $stref, my $nid ) = @_;
 
 	if ( exists $stref->{'Nodes'}{$nid}{'Children'}
@@ -778,14 +797,14 @@ sub find_leaves {
 
 # Now for each of these children, find their children until the leaf nodes are reached
 		for my $child (@children) {
-			$stref = find_leaves( $stref, $child );
+			$stref = create_include_chains( $stref, $child );
 		}
 	} else {
 
 # We reached a leaf node
 #		print "Reached leaf $nid\n";
 # Now we work our way back up via the parent using a separate recursive function
-		$stref = create_chain( $stref, $nid, $nid, '' );
+		$stref = merge_includes( $stref, $nid, $nid, '' );
 
 # The chain is identified by the name of the leaf child
 # Check if the chain contains the $inc on the way up
@@ -797,16 +816,16 @@ sub find_leaves {
 	}
 
 	return $stref;
-}    # END of find_leaves()
+}    # END of create_include_chains()
 
 # -----------------------------------------------------------------------------
 # From each leaf node we follow the path back to the root of the tree
 # We combine all includes of all child nodes of a node, and the node's own includes, into CommonIncludes
 
-sub create_chain {
+sub merge_includes {
 	( my $stref, my $nid, my $cnid, my $chain ) = @_;
 
-	#	print "create_chain $nid $cnid ";
+	#	print "merge_includes $nid $cnid ";
 	# In $c
 	# If there are includes with common blocks, merge them into CommonIncludes
 	# We should only do this for subs that need refactoring
@@ -815,22 +834,22 @@ sub create_chain {
 	my $Ssub = $stref->{'Subroutines'}{$sub};
 	my $f=$stref->{'Nodes'}{$pnid}{'Subroutine'};
 	if ($V) {
-	if ($sub ne $f ) {
-		if ($Ssub->{'RefactorGlobals'}>0) {
-	   $chain .="$sub -> ";
+		if ($sub ne $f ) {
+			if ($Ssub->{'RefactorGlobals'}>0) {
+		   $chain .="$sub -> ";
+			}
+		} else {
+			$chain=~s/....$//;
+			print "$chain\n" if $chain=~/->/;
 		}
-	} else {
-		$chain=~s/....$//;
-		print "$chain\n" if $chain=~/->/;
-	}
-	}
+	} # $V
 #    if ($Ssub->{'RefactorGlobals'}>0) {
 	if ( exists $Ssub->{'Includes'}
 		and not exists $Ssub->{'CommonIncludes'}	 
 		)
 	{
 		for my $inc ( keys %{ $Ssub->{'Includes'} } ) {
-			if ( $stref->{'IncludeFiles'}{$inc}{'Type'} eq 'Common'
+			if ( $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common'
 				and not exists $Ssub->{'CommonIncludes'}{$inc} )
 			{
 				$Ssub->{'CommonIncludes'}{$inc} = 1;
@@ -853,18 +872,35 @@ sub create_chain {
 		}
 	}
 	if ( $nid != 0 ) {
-		$stref = create_chain( $stref, $pnid, $nid,$chain );
+		$stref = merge_includes( $stref, $pnid, $nid,$chain );
 	}
 
 	return $stref;
-}    # END of create_chain
+}    # END of merge_includes
 
 # -----------------------------------------------------------------------------
 
 sub refactor_globals {
 	( my $stref, my $f, my $annlines ) = @_;
-#	croak "FIXME: the caller of a sub with RefactorGlobals should refactor its globals!"
+	
+#	croak "FIXME: the caller of a sub with RefactorGlobals should refactor its globals!";
 	my $Sf = $stref->{'Subroutines'}{$f};
+	if ($Sf->{'RefactorGlobals'}==2) {
+		warn "FIXME: the caller of a sub with RefactorGlobals ($f) should refactor its globals!";
+        # Which child has RefactorGlobals==1?
+        my @additional_includes=();
+        for my $cs ($Sf->{'CalledSubs'}) {        	
+        	if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
+        		for my $inc ($stref->{'Subroutines'}{$cs}{'CommonIncludes'}) {
+        			if (not exists $Sf->{'CommonIncludes'}{$inc}) {
+        				push @additional_includes, $inc;
+        				croak "$inc from $cs was missing from $f"; 
+        			} 
+        		}
+        		
+        	}
+        }		
+	}
 	print "REFACTORING GLOBALS in $f\n" if $V;
 	my $rlines      = [];
 	my $s           = $Sf->{'Source'};
@@ -896,6 +932,7 @@ sub refactor_globals {
 		}
 
 		if ( exists $tags{'ExGlobVarDecls'} ) {
+			die if $f eq 'timemanager';
 
 			# First, abuse ExGlobVarDecls as a hook for the addional includes
 			$rlines =
@@ -951,7 +988,27 @@ sub refactor_globals {
 # -----------------------------------------------------------------------------
 sub refactor_calls_globals {
     ( my $stref, my $f, my $annlines ) = @_;
-#   croak "FIXME: the caller of a sub with RefactorGlobals should refactor its globals!"
+    my $Sf = $stref->{'Subroutines'}{$f};
+#    if ($Sf->{'RefactorGlobals'}==2) {
+#        warn "FIXME: the caller of a sub with RefactorGlobals ($f) should refactor its globals!";
+#        # Which child has RefactorGlobals==1?
+#        my @additional_includes=();
+#        for my $cs (keys %{ $Sf->{'CalledSubs'} }) {
+#        	 
+#            if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
+#            	warn $cs,"\n";         
+#                for my $inc (keys %{ $stref->{'Subroutines'}{$cs}{'CommonIncludes'} }) {
+#                	warn "\t",$inc,"\n";
+#                    if (not exists $Sf->{'IncludeFiles'}{$inc} and $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common') {
+#                        push @additional_includes, $inc;
+#                        warn "$inc from $cs was missing from $f\n"; 
+#                    } 
+#                }
+#                
+#            }
+#        }       
+#    }
+
     print "REFACTORING CALLS WITH GLOBALS in $f\n" if $V;
     my $rlines      = [];
     
@@ -965,11 +1022,11 @@ sub refactor_calls_globals {
         my $skip = 0;
 
 
-        if ( exists $tags{'Includes'} ) {
+        if ( exists $tags{'Include'} ) {
 
             # First, add addional includes if required
             $rlines =
-              create_new_include_statements( $stref, $f, $annline, $rlines );
+              create_additional_include_statements( $stref, $f, $annline, $rlines );
 
 ## While we're here, might as well generate the declarations for remapping and reshaping.
 ## If the subroutine contains a call to a function that requires this, of course.
@@ -986,7 +1043,7 @@ sub refactor_calls_globals {
 #
 #                }
 #            }
-
+            $skip = 1;
         }
         if ( exists $tags{'SubroutineCall'} ) {
 
@@ -1000,6 +1057,7 @@ sub refactor_calls_globals {
         push @{$rlines}, $annline unless $skip;
         $idx++;
     }
+    
     return $rlines;
     
 }    # END of refactor_calls_globals()
@@ -1088,16 +1146,15 @@ sub create_refactored_vardecls {
 	my $tags_lref = $annline->[1];
 	my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
 	my %args      = map { $_ => 1 } @{ $Sf->{'Args'} };
-	
-	 my $globals = ( get_maybe_args_globs( $stref, $f ) )[1];
-	
+    my $globals = ( get_maybe_args_globs( $stref, $f ) )[1];
+	my $skip=0;
 #	my %conflicting_locals = ();
 #	if ( exists $Sf->{'ConflictingGlobals'} ) {
 #		%conflicting_locals = %{ $Sf->{'ConflictingGlobals'} };
 #	}
 	
 	my @vars      = @{ $tags{'VarDecl'} };
-	my @nvars = ();
+	my @nvars = ();	
 	my $rline = $line;
 	for my $var (@vars) {
 		my $skip_var = 0;
@@ -1120,24 +1177,35 @@ sub create_refactored_vardecls {
 				push @nvars, $var;
 			}
 		}
-	}
+	} # @vars
 	
 	$rline =~ s/,\s*$//;
 
-	if ( $line !~ /\(.*?\)/ ) {    # FIXME: can't handle arrays yet!
+	if ( $line !~ /\(.*?\)/ ) {   
+	# If the line does not contain array decls,
+	# remove the spaces from the original line and use them for the new line
 		my $spaces = $line;
 		$spaces =~ s/[^\s].*$//;
 		$rline =
 		    $spaces
 		  . $Sf->{'Vars'}{ $vars[0] }{'Type'} . ' '
-		  . join( ',', @nvars ) . "\n";
-		  warn "LINE: $line: OK!";		  
-	} else {		
-		$rline ="C FIXME! ".$rline;
-		warn "LINE: $line: FIXME: can't handle arrays yet!";
+		  . join( ',', @nvars ) . "\n";		  
+	} else {						
+		# If it is an array but there is only one, it's OK
+		if (scalar @nvars == 1) {
+			$rline =$rline;
+		} else {  # FIXME: can't handle multiple array decls on a single line  yet!
+			warn "LINE: $line ($f) FIXME: can't handle multiple array decls on a single line yet!";			
+			for my $tnvar (@nvars) {
+				$rline=$Sf->{'Vars'}{ $tnvar }{'Decl'};
+				$tags_lref->{'VarDecl'} = [$tnvar];
+				push @{$rlines}, [ $rline, $tags_lref ];
+			}
+			$skip=1;
+		}
 	}
 
-	push @{$rlines}, [ $rline, $tags_lref ];
+	push @{$rlines}, [ $rline, $tags_lref ] unless $skip==1;
 	return $rlines;
 }    # END of create_refactored_vardecls()
 
@@ -1156,13 +1224,11 @@ sub create_exglob_var_declarations {
 		for my $var ( @{ $Sf->{'Globals'}{$inc} } ) {
 			if ( exists $args{$var} ) {
 				my $rline = "*** ARG MASKS GLOB $var in $f!";
-
-				#                        warn $rline,"\n";
 				push @{$rlines}, [ $rline, $tags_lref ];
 			} else {
 				if ( exists $Sf->{'Commons'}{$inc} ) {
 					if ( $f ne $stref->{'IncludeFiles'}{$inc}{'Root'} ) {
-						print "\tGLOBAL $var from $inc in $f\n" if $V;
+						print "\tGLOBAL $var from $inc in $f\n" if $V;						
 						my $rline = $Sf->{'Commons'}{$inc}{$var}{'Decl'};
 						if ( exists $conflicting_params->{$var} ) {
 							my $gvar = $conflicting_params->{$var};
@@ -1172,8 +1238,11 @@ sub create_exglob_var_declarations {
 							$rline =~ s/\b$var\b/$gvar/;
 						}
 						if ( not defined $rline ) {
-							print "*** NO DECL for $var in $f!\n" if $V;
-							$rline = "*** NO DECL for $var in $f!";
+							print "*** NO DECL for $var in $f, taking from INC $inc!\n" if $V;
+#							$rline = "*** NO DECL for $var in $f!";
+                            # FIXME: is it OK to just generate the decls here?
+                            my $decl_from_inc = $stref->{IncludeFiles}{$inc}{Vars}{$var}{Decl};
+                            $rline ="$decl_from_inc"." ! from $inc";			
 						}
 						push @{$rlines}, [ $rline, $tags_lref ];
 					} elsif ($V) {
@@ -1191,13 +1260,50 @@ sub create_exglob_var_declarations {
 			}
 		}    # for
 	}
+#	die if $f=~/particles_main/;
 	return $rlines;
 }    # END of create_exglob_var_declarations()
+# --------------------------------------------------------------------------------
+sub create_additional_include_statements {
+    ( my $stref, my $f, my $annline, my $rlines ) = @_;
+    my $Sf        = $stref->{'Subroutines'}{$f};    
+#    if ($Sf->{'RefactorGlobals'}==2) {
+#        warn "FIXME: the caller of a sub with RefactorGlobals ($f) should refactor its globals!";
+        # Which child has RefactorGlobals==1?
+        my @additional_includes=();
+        for my $cs (keys %{ $Sf->{'CalledSubs'} }) {
+             
+            if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
+                warn $cs,"\n";         
+                for my $inc (keys %{ $stref->{'Subroutines'}{$cs}{'CommonIncludes'} }) {
+                    warn "\t",$inc,"\n";
+                    if (not exists $Sf->{'Includes'}{$inc} and $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common') {
+                        push @additional_includes, $inc;
+                        warn "$inc from $cs was missing from $f\n"; 
+                    } 
+                }
+                
+            }
+        }        
+#    }    
+    
+    my $tags_lref = $annline->[1];
+    for my $inc (@additional_includes) {
+            print "INFO: instantiating merged INC $inc in $f\n" if $V;
+            my $rline = "      include '$inc'";
+            $tags_lref->{'Include'}{'Name'} = $inc;
+            push @{$rlines}, [ $rline, $tags_lref ];        
+    }
 
+    return $rlines;
+}    # END of create_additional_include_statements()
+
+# --------------------------------------------------------------------------------
 # --------------------------------------------------------------------------------
 sub create_new_include_statements {
 	( my $stref, my $f, my $annline, my $rlines ) = @_;
-	my $Sf        = $stref->{'Subroutines'}{$f};
+	my $Sf        = $stref->{'Subroutines'}{$f};	
+	
 	my $tags_lref = $annline->[1];
 
 	for my $inc ( keys %{ $Sf->{'Globals'} } ) {
@@ -1224,7 +1330,7 @@ sub skip_common_include_statement {
 	my $skip      = 0;
 	my $inc       = $tags{'Include'}{'Name'};
 	print "INFO: INC $inc in $f\n" if $V;
-	if ( $stref->{'IncludeFiles'}{$inc}{'Type'} eq 'Common' ) {
+	if ( $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common' ) {
 
 		if ($V) {
 			print "SKIPPED $inc: Root: ",
@@ -1415,103 +1521,103 @@ sub refactor_subroutine_call_args {
 }    # END of refactor_subroutine_call_args
 
 # ----------------------------------------------------------------------------------------------------
-sub refactor_blocks_OLD {
-	( my $stref, my $f, my $annlines ) = @_;
-	my $Sf = $stref->{'Subroutines'}{$f};
-	die "OLD! SHOULDN'T COME HERE!!!";
-	my $rlines = [];
-	print "REFACTORING BLOCKS in $f\n" if $V;
-	my @blocks = ();
-	my $name   = 'NONE';
-	for my $annline ( @{$annlines} ) {
-#		my $line      = $annline->[0];
-		my $tags_lref = $annline->[1];
-		my %tags = %{$tags_lref};
-		if  ( not defined $tags_lref ) {
-			die "BOOM!";		  
-		  %tags = ( 'Nil' => [] );    # FIXME: needed?
-		}
-		my $skip = 0;
-		if ( exists $tags{'RefactoredSubroutineCall'} ) {
-			$name = $tags{'RefactoredSubroutineCall'}{'Name'};
-			my $Sname = $stref->{'Subroutines'}{$name};
-			$tags{'RefactoredSubroutineCall'}{'Args'} =
-			  [ @{ $Sf->{'Blocks'}{$name}{'Args'} } ];
-			push @blocks, $name;
-
-			#we should refactor the block here to get the correct args
-			#                $stref=$refactor_block_->($name,$f,$stref);
-			my @args = @{ $Sname->{'Args'} };
-			my $rline = 'C     call ' . $name . '(' . join( ',', @args ) . ')';
-			$tags_lref = {%tags};
-			delete $tags_lref->{'Comments'};
-			push @{$rlines}, [ $rline, $tags_lref ];
-			$skip = 1;
-		}
-		if ( exists $tags{'InBlock'} or exists $tags{'EndBlock'} ) {
-			if ( $name ne 'NONE' ) {
-				push @{ $Sf->{'Blocks'}{$name}{'Info'} }, $tags_lref;
-			}
-			$skip = 1;
-		}
-		push @{$rlines}, $annline unless $skip;
-	}
-
-	for my $name (@blocks) {
-		$stref = create_subroutine_source_from_block( $name, $f, $stref );
-
-		#        my $Sname=$stref->{'Subroutines'}{$name};
-		# Now we must parse this source
-		$stref = get_var_decls( $name, $stref );
-		$stref = parse_includes( $name, $stref );
-		$stref = parse_subroutine_and_function_calls( $name, $stref );
-		$stref = identify_globals_used_in_subroutine( $name, $stref );
-		$stref = determine_argument_io_direction( $name, $stref );
-
-		# Now we're ready to refactor this source
-		$stref = refactor_subroutine_main( $name, $stref );    # shiver!
-
-		#		croak Dumper( $Sname );
-	}
-
-	# Now go through the lines again and create the proper call
-	#        $annlines=$rlines;
-	for my $annline ( @{$rlines} ) {
-#		my $line      = $annline->[0];
-		my $tags_lref = $annline->[1];
-		my %tags =
-		  ( defined $tags_lref )
-		  ? %{$tags_lref}
-		  : ( 'Nil' => [] );    # FIXME: needed?
-		if ( exists $tags{'RefactoredSubroutineCall'} ) {
-
-			# simply tag the common vars onto the arguments
-			my $name    = $tags{'RefactoredSubroutineCall'}{'Name'};
-			my $Sname   = $stref->{'Subroutines'}{$name};
-			my @globals = ();
-			for my $inc ( keys %{ $Sname->{'Globals'} } ) {
-				next if $stref->{'IncludeFiles'}{$inc}{'Root'} eq $name;
-				@globals = ( @globals, @{ $Sname->{'Globals'}{$inc} } );
-			}
-			my $orig_args = [];
-
-			# do I need to check for conflicting locals?
-			for my $arg ( @{ $tags{'RefactoredSubroutineCall'}{'Args'} } ) {
-
-		  #                    if (exists $conflicting_locals{$arg}) {
-		  #                        push @{$orig_args},$conflicting_locals{$arg};
-		  #                    } else {
-				push @{$orig_args}, $arg;
-			}
-			my $args_ref = ordered_union( $orig_args, \@globals );
-			my $args_str = join( ',', @{$args_ref} );
-			my $rline = "      call $name($args_str)";
-			$annline->[0] = $rline;
-		}
-	}
-
-	return ( $stref, $rlines );
-}    # END of refactor_blocks_OLD()
+#sub refactor_blocks_OLD {
+#	( my $stref, my $f, my $annlines ) = @_;
+#	my $Sf = $stref->{'Subroutines'}{$f};
+#	die "OLD! SHOULDN'T COME HERE!!!";
+#	my $rlines = [];
+#	print "REFACTORING BLOCKS in $f\n" if $V;
+#	my @blocks = ();
+#	my $name   = 'NONE';
+#	for my $annline ( @{$annlines} ) {
+##		my $line      = $annline->[0];
+#		my $tags_lref = $annline->[1];
+#		my %tags = %{$tags_lref};
+#		if  ( not defined $tags_lref ) {
+#			die "BOOM!";		  
+#		  %tags = ( 'Nil' => [] );    # FIXME: needed?
+#		}
+#		my $skip = 0;
+#		if ( exists $tags{'RefactoredSubroutineCall'} ) {
+#			$name = $tags{'RefactoredSubroutineCall'}{'Name'};
+#			my $Sname = $stref->{'Subroutines'}{$name};
+#			$tags{'RefactoredSubroutineCall'}{'Args'} =
+#			  [ @{ $Sf->{'Blocks'}{$name}{'Args'} } ];
+#			push @blocks, $name;
+#
+#			#we should refactor the block here to get the correct args
+#			#                $stref=$refactor_block_->($name,$f,$stref);
+#			my @args = @{ $Sname->{'Args'} };
+#			my $rline = 'C     call ' . $name . '(' . join( ',', @args ) . ')';
+#			$tags_lref = {%tags};
+#			delete $tags_lref->{'Comments'};
+#			push @{$rlines}, [ $rline, $tags_lref ];
+#			$skip = 1;
+#		}
+#		if ( exists $tags{'InBlock'} or exists $tags{'EndBlock'} ) {
+#			if ( $name ne 'NONE' ) {
+#				push @{ $Sf->{'Blocks'}{$name}{'Info'} }, $tags_lref;
+#			}
+#			$skip = 1;
+#		}
+#		push @{$rlines}, $annline unless $skip;
+#	}
+#
+#	for my $name (@blocks) {
+#		$stref = create_subroutine_source_from_block( $name, $f, $stref );
+#
+#		#        my $Sname=$stref->{'Subroutines'}{$name};
+#		# Now we must parse this source
+#		$stref = get_var_decls( $name, $stref );
+#		$stref = parse_includes( $name, $stref );
+#		$stref = parse_subroutine_and_function_calls( $name, $stref );
+#		$stref = identify_globals_used_in_subroutine( $name, $stref );
+#		$stref = determine_argument_io_direction( $name, $stref );
+#
+#		# Now we're ready to refactor this source
+#		$stref = refactor_subroutine_main( $name, $stref );    # shiver!
+#
+#		#		croak Dumper( $Sname );
+#	}
+#
+#	# Now go through the lines again and create the proper call
+#	#        $annlines=$rlines;
+#	for my $annline ( @{$rlines} ) {
+##		my $line      = $annline->[0];
+#		my $tags_lref = $annline->[1];
+#		my %tags =
+#		  ( defined $tags_lref )
+#		  ? %{$tags_lref}
+#		  : ( 'Nil' => [] );    # FIXME: needed?
+#		if ( exists $tags{'RefactoredSubroutineCall'} ) {
+#
+#			# simply tag the common vars onto the arguments
+#			my $name    = $tags{'RefactoredSubroutineCall'}{'Name'};
+#			my $Sname   = $stref->{'Subroutines'}{$name};
+#			my @globals = ();
+#			for my $inc ( keys %{ $Sname->{'Globals'} } ) {
+#				next if $stref->{'IncludeFiles'}{$inc}{'Root'} eq $name;
+#				@globals = ( @globals, @{ $Sname->{'Globals'}{$inc} } );
+#			}
+#			my $orig_args = [];
+#
+#			# do I need to check for conflicting locals?
+#			for my $arg ( @{ $tags{'RefactoredSubroutineCall'}{'Args'} } ) {
+#
+#		  #                    if (exists $conflicting_locals{$arg}) {
+#		  #                        push @{$orig_args},$conflicting_locals{$arg};
+#		  #                    } else {
+#				push @{$orig_args}, $arg;
+#			}
+#			my $args_ref = ordered_union( $orig_args, \@globals );
+#			my $args_str = join( ',', @{$args_ref} );
+#			my $rline = "      call $name($args_str)";
+#			$annline->[0] = $rline;
+#		}
+#	}
+#
+#	return ( $stref, $rlines );
+#}    # END of refactor_blocks_OLD()
 
 # -----------------------------------------------------------------------------
 
@@ -1762,8 +1868,8 @@ sub refactor_includes {
 
 	for my $f ( keys %{ $stref->{'IncludeFiles'} } ) {
 
-		if (   $stref->{'IncludeFiles'}{$f}{'Type'} eq 'Common'
-			or $stref->{'IncludeFiles'}{$f}{'Type'} eq 'Parameter' )
+		if (   $stref->{'IncludeFiles'}{$f}{'InclType'} eq 'Common'
+			or $stref->{'IncludeFiles'}{$f}{'InclType'} eq 'Parameter' )
 		{
 			print "\nREFACTORING INCLUDE $f\n" if $V;
 			refactor_include( $f, $stref );
@@ -1808,7 +1914,7 @@ sub refactor_include {
 		if ( exists $tags{'VarDecl'} ) {
 			my @nvars = ();
 			for my $var ( @{ $annline->[1]{'VarDecl'} } ) {
-				if ( $stref->{'IncludeFiles'}{$f}{'Type'} ne 'Parameter'
+				if ( $stref->{'IncludeFiles'}{$f}{'InclType'} ne 'Parameter'
 					and
 					exists $stref->{'IncludeFiles'}{$f}{'ConflictingGlobals'}
 					{$var} )
@@ -2161,7 +2267,7 @@ sub postprocess_C {
 			} @args;
 
 			for my $i ( keys %{ $Ssub->{'Includes'} } ) {
-				if ( $stref->{'IncludeFiles'}{$i}{'Type'} eq 'Parameter' ) {
+				if ( $stref->{'IncludeFiles'}{$i}{'InclType'} eq 'Parameter' ) {
 					%params = (
 						%params, %{ $stref->{'IncludeFiles'}{$i}{'Parameters'} }
 					);
@@ -2630,9 +2736,12 @@ sub parse_subroutine_and_function_calls {
 
 				$Sname->{'Called'} = 1;
 				$Sname->{'Callers'}{$f}++;
+#				if ($Sf->{'RefactorGlobals'} == 2) {
+#				warn "NAME: $f => $name,".(exists $Sname->{'RefactorGlobals'}? $Sname->{'RefactorGlobals'} : 'UNDEF')."\n" if $f eq 'timemanager';
+#				}
 				if ($Sf->{'RefactorGlobals'}==1) {
 					print "SUB $name NEEDS GLOBALS REFACTORING\n" if $V;
-					$Sname->{'RefactorGlobals'} = 1;
+					$Sname->{'RefactorGlobals'} = 1;					
 				}
 
 				#                $called_subs{$name} = $name;
@@ -2782,8 +2891,8 @@ sub resolve_globals {
 			# Merge them with globals for $f
 			for my $inc ( keys %{ $Sf->{'CommonIncludes'} } ) {
 				$Sf->{'Globals'}{$inc} = ordered_union( $Sf->{'Globals'}{$inc},
-					$Scsub->{'Globals'}{$inc} );
-			}
+					$Scsub->{'Globals'}{$inc} );					
+			}			
 		}
 	} else {
 
@@ -2804,7 +2913,7 @@ sub resolve_conflicts_with_params {
 	my $Sf = $stref->{'Subroutines'}{$f};
 
 	for my $inc ( keys %{ $Sf->{'Includes'} } ) {
-		if ( $stref->{'IncludeFiles'}{$inc}{'Type'} eq 'Parameter' ) {
+		if ( $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Parameter' ) {
 
 			# See if there are any conflicts between parameters and ex-globals
 			for my $commoninc ( keys %{ $Sf->{'Globals'} } ) {
@@ -2827,7 +2936,7 @@ sub resolve_conflicts_with_params {
 
 	$Sf->{'ConflictingParams'} = {};
 	for my $inc ( keys %{ $Sf->{'Includes'} } ) {
-		if ( $stref->{'IncludeFiles'}{$inc}{'Type'} eq 'Parameter' ) {
+		if ( $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Parameter' ) {
 			if ( exists $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'} ) {
 				%{ $Sf->{'ConflictingParams'} } = (
 					%{ $Sf->{'ConflictingParams'} },
@@ -2841,21 +2950,24 @@ sub resolve_conflicts_with_params {
 }    # END of resolve_conflicts_with_params
 
 # ----------------------------------------------------------------------------------------------------
+# Here we identify which globals from the includes are actually used in the subroutine.
+# This is not correct because globals used in called subroutines are not recognised
+# So what I should do is find the globals for every called sub recursively.
 sub identify_globals_used_in_subroutine {
 	( my $f, my $stref ) = @_;
 
-	#	local $V=1 if $f=~/interpol/;
+#		local $V=1 if $f=~/main_loop/;
 	my $Sf = $stref->{'Subroutines'}{$f};
 
 	# First determine subroutine arguments.
 	$stref = determine_subroutine_arguments( $f, $stref );
 
 	my %commons = ();
-	print "COMMONS ANALYSIS in $f\n" if $V;
+	print "COMMONS ANALYSIS in $f\n" if $V; 
 	if ( not exists $Sf->{'Commons'} ) {
 		for my $inc ( keys %{ $Sf->{'CommonIncludes'} } ) {
-			print "COMMONS from $inc in $f? " if $V;
-			$commons{$inc} = $stref->{'IncludeFiles'}{$inc}{'Commons'};
+			print "COMMONS from $inc in $f? \n" if $V;
+			$commons{$inc} = $stref->{'IncludeFiles'}{$inc}{'Commons'};			
 		}
 		$Sf->{'Commons'}    = \%commons;
 		$Sf->{'HasCommons'} = 1;
@@ -2898,6 +3010,7 @@ sub identify_globals_used_in_subroutine {
 			$Sf->{'Globals'}{$cinc} = \@globs;
 		}
 	}
+#	die if $f=~/main_loop/;
 	return $stref;
 }    # END of identify_globals_used_in_subroutine()
 
@@ -2914,7 +3027,7 @@ sub look_for_variables {
 		if ( exists $tvars->{$mvar} and not $Sf->{'Vars'}{$mvar} ) {
 			my $is_par = 0;
 			for my $inc ( keys %{ $Sf->{'Includes'} } ) {
-				if ( $stref->{'IncludeFiles'}{$inc}{'Type'} eq 'Parameter'
+				if ( $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Parameter'
 					and exists $stref->{'IncludeFiles'}{$inc}{'Vars'}{$mvar} )
 				{
 					print "WARNING: $mvar in $f is a PARAMETER from $inc!\n"
@@ -3726,11 +3839,11 @@ sub get_commons_params_from_includes {
 			die
 "The include file $f contains both parameters and commons, this is not yet supported.\n";
 		} elsif ($has_commons) {
-			$stref->{'IncludeFiles'}{$f}{'Type'} = 'Common';
+			$stref->{'IncludeFiles'}{$f}{'InclType'} = 'Common';
 		} elsif ($has_pars) {
-			$stref->{'IncludeFiles'}{$f}{'Type'} = 'Parameter';
+			$stref->{'IncludeFiles'}{$f}{'InclType'} = 'Parameter';
 		} else {
-			$stref->{'IncludeFiles'}{$f}{'Type'} = 'None';
+			$stref->{'IncludeFiles'}{$f}{'InclType'} = 'None';
 		}
 		for my $var ( keys %vars ) {
 			if (
@@ -3855,7 +3968,11 @@ sub separate_blocks {
 		$Sblock->{'Info'}  = $blocks{$block}{'Info'};
 		$Sblock->{'Source'} = $Sf->{'Source'};		
 		$Sblock->{'RefactorGlobals'} = 1;
-		$Sf->{'RefactorGlobals'} = 2;
+		if ($Sf->{'RefactorGlobals'} == 0) {
+		  $Sf->{'RefactorGlobals'} = 2;
+		} else {
+			die 'BOOM!';
+		}
 	}
 
 	# 3. Identify which vars are used
