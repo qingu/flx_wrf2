@@ -460,14 +460,9 @@ sub main {
 #    	'Subroutine'=>$subname
 #    };
 	$stateref = parse_fortran_src( $subname, $stateref );
-
+    
 	if ( $call_tree_only and not $ARGV[1] ) {
-		create_dot_call_graph($stateref);
-
-		print "\nCall tree for $subname:\n\n" if $main_tree;
-		for my $entry ( @{ $stateref->{'CallTree'} } ) {
-			print $entry;
-		}
+		create_call_graph($stateref,$subname);
 		exit(0);
 	}
 
@@ -478,7 +473,6 @@ sub main {
 	# We need to walk the tree again, find the globals in rec descent.
 	$stateref = resolve_globals( $subname, $stateref );
 
-#    $stateref= resolve_globals($subname,$stateref);
 # I think we need to refactor the source first without creating the new sources,
 # then us this info to determine the IO direction
 
@@ -495,7 +489,6 @@ sub main {
 	$stateref = refactor_called_functions($stateref);
 
 	if ( not $call_tree_only ) {
-
 		# Emit the refactored source
 		emit_all($stateref);
 	}
@@ -518,7 +511,7 @@ sub main {
 			$stateref = parse_fortran_src( $subname, $stateref );
 			$stateref = refactor_C_targets($stateref);
 			emit_C_targets($stateref);
-			&translate_to_C($stateref);
+			translate_to_C($stateref);
 		}
 	}
 	create_build_script($stateref);
@@ -988,7 +981,7 @@ sub refactor_globals {
 # -----------------------------------------------------------------------------
 sub refactor_calls_globals {
     ( my $stref, my $f, my $annlines ) = @_;
-    my $Sf = $stref->{'Subroutines'}{$f};
+#    my $Sf = $stref->{'Subroutines'}{$f};
 #    if ($Sf->{'RefactorGlobals'}==2) {
 #        warn "FIXME: the caller of a sub with RefactorGlobals ($f) should refactor its globals!";
 #        # Which child has RefactorGlobals==1?
@@ -1180,29 +1173,27 @@ sub create_refactored_vardecls {
 	} # @vars
 	
 	$rline =~ s/,\s*$//;
+    my $spaces = $line;
+    $spaces =~ s/[^\s].*$//;
 
 	if ( $line !~ /\(.*?\)/ ) {   
 	# If the line does not contain array decls,
 	# remove the spaces from the original line and use them for the new line
-		my $spaces = $line;
-		$spaces =~ s/[^\s].*$//;
 		$rline =
 		    $spaces
 		  . $Sf->{'Vars'}{ $vars[0] }{'Type'} . ' '
 		  . join( ',', @nvars ) . "\n";		  
-	} else {						
-		# If it is an array but there is only one, it's OK
-		if (scalar @nvars == 1) {
-			$rline =$rline;
-		} else {  # FIXME: can't handle multiple array decls on a single line  yet!
-			warn "LINE: $line ($f) FIXME: can't handle multiple array decls on a single line yet!";			
-			for my $tnvar (@nvars) {
-				$rline=$Sf->{'Vars'}{ $tnvar }{'Decl'};
-				$tags_lref->{'VarDecl'} = [$tnvar];
-				push @{$rlines}, [ $rline, $tags_lref ];
-			}
-			$skip=1;
+	} else {	
+		# For arrays, we split the declaration over multiple lines
+		# And we use the declaration from the include					
+		for my $tnvar (@nvars) {
+			$rline=$Sf->{'Vars'}{ $tnvar }{'Decl'};
+			$rline=~s/^\s+//;
+			$rline= $spaces.$rline;
+			$tags_lref->{'VarDecl'} = [$tnvar];
+			push @{$rlines}, [ $rline, $tags_lref ];
 		}
+		$skip=1;
 	}
 
 	push @{$rlines}, [ $rline, $tags_lref ] unless $skip==1;
@@ -1267,25 +1258,17 @@ sub create_exglob_var_declarations {
 sub create_additional_include_statements {
     ( my $stref, my $f, my $annline, my $rlines ) = @_;
     my $Sf        = $stref->{'Subroutines'}{$f};    
-#    if ($Sf->{'RefactorGlobals'}==2) {
-#        warn "FIXME: the caller of a sub with RefactorGlobals ($f) should refactor its globals!";
         # Which child has RefactorGlobals==1?
-        my @additional_includes=();
-        for my $cs (keys %{ $Sf->{'CalledSubs'} }) {
-             
-            if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
-                warn $cs,"\n";         
-                for my $inc (keys %{ $stref->{'Subroutines'}{$cs}{'CommonIncludes'} }) {
-                    warn "\t",$inc,"\n";
-                    if (not exists $Sf->{'Includes'}{$inc} and $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common') {
-                        push @additional_includes, $inc;
-                        warn "$inc from $cs was missing from $f\n"; 
-                    } 
-                }
-                
+    my @additional_includes=();
+    for my $cs (keys %{ $Sf->{'CalledSubs'} }) {             
+        if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
+            for my $inc (keys %{ $stref->{'Subroutines'}{$cs}{'CommonIncludes'} }) {
+                if (not exists $Sf->{'Includes'}{$inc} and $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common') {
+                    push @additional_includes, $inc;
+                } 
             }
-        }        
-#    }    
+        }
+    }        
     
     my $tags_lref = $annline->[1];
     for my $inc (@additional_includes) {
@@ -2010,7 +1993,7 @@ sub emit_refactored_include {
         }
 		close $SRC;
 	}
-}
+} # END of emit_refactored_include
 
 # -----------------------------------------------------------------------------
 
@@ -2060,7 +2043,7 @@ sub emit_refactored_function {
 	#    	warn "NO REFACTORED CODE FOR $f\n";
 	#    	warn Dumper($Ff->{'Lines'});
 	#    }
-}
+} # END of emit_refactored_function()
 
 # -----------------------------------------------------------------------------
 sub emit_refactored_subroutine {
@@ -4950,6 +4933,13 @@ sub add_to_C_build_sources {
 }
 
 # -----------------------------------------------------------------------------
+sub create_call_graph { ( my $stref, my $subname) = @_;
+    create_dot_call_graph($stref);
+    print "\nCall tree for $subname:\n\n" if $main_tree;
+    for my $entry ( @{ $stref->{'CallTree'} } ) {
+        print $entry;
+    }	
+}
 # -----------------------------------------------------------------------------
 sub create_dot_call_graph {
 	( my $stref ) = @_;
