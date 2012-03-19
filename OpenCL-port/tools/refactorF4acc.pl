@@ -256,8 +256,6 @@ Nodes = Hash.Map Int Node
 
 =cut
 
-push @INC,'.';
-
 use warnings::unused;
 use warnings;
 use warnings FATAL => qw(uninitialized);
@@ -273,7 +271,9 @@ use RefactorF4Acc::Analysis::Includes qw( find_root_for_includes );
 use RefactorF4Acc::Analysis::Globals qw( resolve_globals );
 use RefactorF4Acc::Analysis::ArgumentIODirs qw( determine_argument_io_direction_rec );
 use RefactorF4Acc::Analysis::LoopsBreaks qw( analyse_sources );
-use RefactorF4Acc::Refactoring qw( refactor_all_subroutines refactor_includes refactor_called_functions );
+use RefactorF4Acc::Refactoring::Subroutines qw( refactor_all_subroutines );
+use RefactorF4Acc::Refactoring::Functions qw( refactor_called_functions );
+use RefactorF4Acc::Refactoring::Includes qw( refactor_includes );
 use RefactorF4Acc::Emitter qw( emit_all );
 use RefactorF4Acc::CTranslation qw( refactor_C_targets emit_C_targets translate_to_C );
 use RefactorF4Acc::Builder qw( create_build_script build_flexpart );
@@ -402,7 +402,6 @@ sub main {
 		$subname =~ s/\.f$//;
 	}
 
-	#	  die %opts;
 	$V = ( $opts{'v'} ) ? 1 : 0;
 	$I = ( $opts{'i'} or $V ) ? 1 : 0;
 	$W = ( $opts{'w'} or $V ) ? 1 : 0;
@@ -430,7 +429,6 @@ sub main {
 	}
 	$noop = ( $opts{'N'} ) ? 0 : 1;
 
-	#	my $gen = ( $opts{'b'} || $opts{'B'} ) ? 1 : 0;
 	my $build = ( $opts{'B'} ) ? 1 : 0;
 
 # ================================================================================
@@ -441,11 +439,6 @@ sub main {
 	$stateref = find_subroutines_functions_and_includes($stateref);
 
 # First we analyse the code for use of globals and blocks to be transformed into subroutines
-#    $stateref->{'Nodes'}{0}={
-#    	'Parent'=>0,
-#    	'Children'=>[],
-#    	'Subroutine'=>$subname
-#    };
 	$stateref = parse_fortran_src( $subname, $stateref );
     
 	if ( $call_tree_only and not $ARGV[1] ) {
@@ -480,16 +473,6 @@ sub main {
 		emit_all($stateref);
 	}
 
-	#	elsif ( $call_tree_only and $ARGV[1] ) {
-	#		$subname = $ARGV[1];
-	#		$gen_sub = 1;
-	#		print "\nCall tree for $subname:\n\n";
-	#		$stateref = parse_fortran_src( $subname, $stateref );
-	#        for my $entry (@{$stateref->{'CallTree'}}) {
-	#            print $entry;
-	#        }
-	#      exit(0);
-	#	}
 	if ( $translate == $YES ) {
 		$translate = $GO;
 		for my $subname ( keys %{ $stateref->{'SubsToTranslate'} }) {

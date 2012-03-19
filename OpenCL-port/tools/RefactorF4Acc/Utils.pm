@@ -90,7 +90,7 @@ sub ordered_union {
 
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
-
+# FIXME: this routine is now broken as it relied on all docs being in the main script
 sub generate_docs {
     my $scriptsrc = $0;
     my $src       = $scriptsrc;

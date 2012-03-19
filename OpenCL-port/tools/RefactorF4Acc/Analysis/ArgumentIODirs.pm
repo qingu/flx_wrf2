@@ -2,7 +2,7 @@ package RefactorF4Acc::Analysis::ArgumentIODirs;
 
 use RefactorF4Acc::Config qw($V $W);
 use RefactorF4Acc::Utils;
-use RefactorF4Acc::Refactoring qw( refactor_subroutine_signature );
+use RefactorF4Acc::Refactoring::Subroutines::Signatures qw( refactor_subroutine_signature );
 # 
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
 #   

@@ -27,6 +27,34 @@ use Exporter;
     &refactor_subroutine_signature
 );
 
+=pod
+
+Common
+    split_long_line
+    create_refactored_source
+Includes
+    refactor_includes()
+    refactor_include()
+Functions
+    refactor_called_functions()
+    refactor_function()
+Subroutines
+    refactor_all_subroutines() -> 
+    refactor_subroutine_main() ->
+    - refactor_globals(): 
+        refactor_subroutine_signature() # This should maybe happen in the analysis? -> Signature        
+        create_refactored_subroutine_signature() -> Signature
+        skip_common_include_statement() -> Includes
+        create_new_include_statements() -> Includes        
+        create_exglob_var_declarations() -> Decls 
+        create_refactored_vardecls() -> Decls
+        create_refactored_subroutine_call() -> Calls
+        rename_conflicting_locals()        
+    - refactor_calls_globals(): 
+        create_additional_include_statements() -> Includes
+        create_refactored_subroutine_call() -> Calls    
+=cut
+
 # -----------------------------------------------------------------------------
 
 #TODO: We need to split this into argument/globals refactoring and the other refactoring operations
@@ -329,8 +357,7 @@ sub refactor_globals {
             $skip = skip_common_include_statement( $stref, $f, $annline );
         }
 
-        if ( exists $tags{'ExGlobVarDecls'} ) {
-            die if $f eq 'timemanager';
+        if ( exists $tags{'ExGlobVarDecls'} ) {            
 
             # First, abuse ExGlobVarDecls as a hook for the addional includes
             $rlines =
@@ -386,26 +413,6 @@ sub refactor_globals {
 # -----------------------------------------------------------------------------
 sub refactor_calls_globals {
     ( my $stref, my $f, my $annlines ) = @_;
-#    my $Sf = $stref->{'Subroutines'}{$f};
-#    if ($Sf->{'RefactorGlobals'}==2) {
-#        warn "FIXME: the caller of a sub with RefactorGlobals ($f) should refactor its globals!";
-#        # Which child has RefactorGlobals==1?
-#        my @additional_includes=();
-#        for my $cs (keys %{ $Sf->{'CalledSubs'} }) {
-#            
-#            if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
-#               warn $cs,"\n";         
-#                for my $inc (keys %{ $stref->{'Subroutines'}{$cs}{'CommonIncludes'} }) {
-#                   warn "\t",$inc,"\n";
-#                    if (not exists $Sf->{'IncludeFiles'}{$inc} and $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common') {
-#                        push @additional_includes, $inc;
-#                        warn "$inc from $cs was missing from $f\n"; 
-#                    } 
-#                }
-#                
-#            }
-#        }       
-#    }
 
     print "REFACTORING CALLS WITH GLOBALS in $f\n" if $V;
     my $rlines      = [];
@@ -471,10 +478,10 @@ sub refactor_subroutine_signature {
             print "SUB $f ORIG ARGS: ()\n";
         }
     }
-#   my %args               = map { $_ => 1 } @{ $Sf->{'Args'} };
     my @exglobs            = ();
-    my @nexglobs           = ();
-    my $conflicting_params = $Sf->{'ConflictingParams'};
+    my @nexglobs           = ();    
+    # Loop over all globals and create the list @exglobs by concatenation
+    # Also add all vars to $Sf->{'Vars'} unless they were already there    
     for my $inc ( keys %{ $Sf->{'Globals'} } ) {
         print "INFO: INC $inc in $f\n" if $V;
         if ( not exists $stref->{'IncludeFiles'}{$inc}{'Root'} ) {
@@ -497,63 +504,102 @@ sub refactor_subroutine_signature {
             @exglobs = ( @exglobs, @{ $Sf->{'Globals'}{$inc} } );
         }
     }
+    # Loop over @exglobs, rename vars that conflict with parameters
     for my $var (@exglobs) {
-        if ( exists $conflicting_params->{$var} ) {
+        if ( exists $Sf->{'ConflictingParams'}{$var} ) {
             print
 "WARNING: CONFLICT in arguments for $f, renamed $var to ${var}_GLOB\n"
               if $W;
-            push @nexglobs, $conflicting_params->{$var};
-            $Sf->{'Vars'}{ $conflicting_params->{$var} } = $Sf->{'Vars'}{$var};
+            push @nexglobs, $Sf->{'ConflictingParams'}{$var};
+            $Sf->{'Vars'}{ $Sf->{'ConflictingParams'}{$var} } = $Sf->{'Vars'}{$var};
         } else {
             push @nexglobs, $var;
         }
     }
+    # Now combine the original subroutine arguments with the ex-globals
+    # and store in $Sf->{'RefactoredArgs'}{'List'} 
     my $args_ref = ordered_union( $Sf->{'Args'}, \@nexglobs );
     $Sf->{'RefactoredArgs'}{'List'} = $args_ref;
     return $stref;
 }    # END of refactor_subroutine_signature()
-
+# -----------------------------------------------------------------------------
+sub refactor_subroutine_signature_NEW {
+    ( my $stref, my $f ) = @_;
+    my $Sf = $stref->{'Subroutines'}{$f};
+    my @exglobs            = ();
+    my @nexglobs           = ();    
+    # Loop over all globals and create the list @exglobs by concatenation
+    # Also add all vars to $Sf->{'Vars'} unless they were already there    
+    for my $inc ( keys %{ $Sf->{'Globals'} } ) {
+        if ( not exists $stref->{'IncludeFiles'}{$inc}{'Root'} ) {
+            die "$inc has no Root in $f";
+        }
+        if ( $stref->{'IncludeFiles'}{$inc}{'Root'} eq $f ) {
+            next;
+        }
+        if ( defined $Sf->{'Globals'}{$inc} ) {
+            for my $var ( @{ $Sf->{'Globals'}{$inc} } ) {
+                if ( not exists $Sf->{'Vars'}{$var} ) {
+                    $Sf->{'Vars'}{$var} =
+                      $stref->{'IncludeFiles'}{$inc}{'Vars'}{$var};
+                }
+            }
+            @exglobs = ( @exglobs, @{ $Sf->{'Globals'}{$inc} } );
+        }
+    }
+    # Loop over @exglobs, rename vars that conflict with parameters
+    for my $var (@exglobs) {
+        if ( exists $Sf->{'ConflictingParams'}{$var} ) {
+            push @nexglobs, $Sf->{'ConflictingParams'}{$var};
+            $Sf->{'Vars'}{ $Sf->{'ConflictingParams'}{$var} } = $Sf->{'Vars'}{$var};
+        } else {
+            push @nexglobs, $var;
+        }
+    }
+    # Now combine the original subroutine arguments with the ex-globals
+    # and store in $Sf->{'RefactoredArgs'}{'List'} 
+    my $args_ref = ordered_union( $Sf->{'Args'}, \@nexglobs );
+    $Sf->{'RefactoredArgs'}{'List'} = $args_ref;
+    return $stref;
+}    # END of refactor_subroutine_signature_NEW()
 # --------------------------------------------------------------------------------
+# This routine renames instances of locals that conflict with globals (using names from create_refactored_vardecls() )
 sub rename_conflicting_locals {
     ( my $stref, my $f, my $annline, my $rlines ) = @_;
     my $line               = $annline->[0] || '';
     my $tags_lref          = $annline->[1];
     my $Sf                 = $stref->{'Subroutines'}{$f};
-    my %conflicting_locals = ();
-    if ( exists $Sf->{'ConflictingGlobals'} ) {
-        %conflicting_locals = %{ $Sf->{'ConflictingGlobals'} };
-    }
     my $rline = $line;
-    for my $lvar ( keys %conflicting_locals ) {
-        if ( $rline =~ /\b$lvar\b/ ) {
-            print
-"WARNING: CONFLICT in $f, renaming $lvar with $conflicting_locals{$lvar}\n"
-              if $W;
-            $rline =~ s/\b$lvar\b/$conflicting_locals{$lvar}/g;
-        }
+    if ( exists $Sf->{'ConflictingGlobals'} ) {    
+	    for my $lvar ( keys %{ $Sf->{'ConflictingGlobals'} } ) {
+	        if ( $rline =~ /\b$lvar\b/ ) {
+	            print
+	"WARNING: CONFLICT in $f, renaming $lvar with $Sf->{'ConflictingGlobals'}{$lvar}\n"
+	              if $W;
+	            $rline =~ s/\b$lvar\b/$Sf->{'ConflictingGlobals'}{$lvar}/g;
+	        }
+	    }
     }
     push @{$rlines}, [ $rline, $tags_lref ];
     return $rlines;
 }    # END of rename_conflicting_locals()
 
 # --------------------------------------------------------------------------------
+# This routine renames the declarations of local variables than conflict with global variables
 sub create_refactored_vardecls {
     ( my $stref, my $f, my $annline, my $rlines, my $is_C_target ) = @_;
     my $Sf        = $stref->{'Subroutines'}{$f};
     my $line      = $annline->[0] || '';
     my $tags_lref = $annline->[1];
-    my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
     my %args      = map { $_ => 1 } @{ $Sf->{'Args'} };
     my $globals = ( get_maybe_args_globs( $stref, $f ) )[1];
     my $skip=0;
-#   my %conflicting_locals = ();
-#   if ( exists $Sf->{'ConflictingGlobals'} ) {
-#       %conflicting_locals = %{ $Sf->{'ConflictingGlobals'} };
-#   }
     
-    my @vars      = @{ $tags{'VarDecl'} };
+    my @vars      = @{ $tags_lref->{'VarDecl'} };
     my @nvars = (); 
     my $rline = $line;
+    # Loop over all declared variables and check for conflicts with globals
+    # Also check if none of them is actually a built-in function, these must be skipped for C translation
     for my $var (@vars) {
         my $skip_var = 0;
         if ( exists $stref->{'Functions'}{$var} ) {
@@ -568,7 +614,6 @@ sub create_refactored_vardecls {
 "WARNING: CONFLICT in $f ($Sf->{'Source'}):  renaming local $var to $var\_LOCAL\n"
                   if $W;
                 my $nvar = $var . '_LOCAL';
-#               $conflicting_locals{$var} = $nvar;
                 $rline =~ s/\b$var\b/$nvar/;
                 push @nvars, $nvar;
             } else {
@@ -609,11 +654,8 @@ sub create_refactored_vardecls {
 sub create_exglob_var_declarations {
     ( my $stref, my $f, my $annline, my $rlines ) = @_;
     my $Sf                 = $stref->{'Subroutines'}{$f};
-#   my $line               = $annline->[0] || '';
     my $tags_lref          = $annline->[1];
-#   my %tags               = ( defined $tags_lref ) ? %{$tags_lref} : ();
     my %args               = map { $_ => 1 } @{ $Sf->{'Args'} };
-    my $conflicting_params = $Sf->{'ConflictingParams'};
 
     for my $inc ( keys %{ $Sf->{'Globals'} } ) {
         print "INFO: GLOBALS from INC $inc in $f\n" if $V;
@@ -626,8 +668,8 @@ sub create_exglob_var_declarations {
                     if ( $f ne $stref->{'IncludeFiles'}{$inc}{'Root'} ) {
                         print "\tGLOBAL $var from $inc in $f\n" if $V;                      
                         my $rline = $Sf->{'Commons'}{$inc}{$var}{'Decl'};
-                        if ( exists $conflicting_params->{$var} ) {
-                            my $gvar = $conflicting_params->{$var};
+                        if ( exists $Sf->{'ConflictingParams'}{$var} ) {
+                            my $gvar = $Sf->{'ConflictingParams'}{$var};
                             print
 "WARNING: CONFLICT in arg decls for $f: renaming $var to ${var}_GLOB\n"
                               if $W;
@@ -660,6 +702,40 @@ sub create_exglob_var_declarations {
     return $rlines;
 }    # END of create_exglob_var_declarations()
 # --------------------------------------------------------------------------------
+sub create_exglob_var_declarations_NEW {
+    ( my $stref, my $f, my $annline, my $rlines ) = @_;
+    my $Sf                 = $stref->{'Subroutines'}{$f};
+    my $tags_lref          = $annline->[1];
+    my %args               = map { $_ => 1 } @{ $Sf->{'Args'} };
+
+    for my $inc ( keys %{ $Sf->{'Globals'} } ) {
+        for my $var ( @{ $Sf->{'Globals'}{$inc} } ) {
+            if ( exists $args{$var} ) {
+                my $rline = "*** ARG MASKS GLOB $var in $f!";
+                push @{$rlines}, [ $rline, $tags_lref ];
+            } else {
+                if ( exists $Sf->{'Commons'}{$inc} ) {
+                    if ( $f ne $stref->{'IncludeFiles'}{$inc}{'Root'} ) {
+                        my $rline = $Sf->{'Commons'}{$inc}{$var}{'Decl'};                        
+                        if ( not defined $rline ) {
+                            # FIXME: is it OK to just generate the decls here?
+                            my $decl_from_inc = $stref->{IncludeFiles}{$inc}{Vars}{$var}{Decl};
+                            $rline ="$decl_from_inc"." ! from $inc";            
+                        }
+                        if ( exists $Sf->{'ConflictingParams'}{$var} ) {
+                            my $gvar = $Sf->{'ConflictingParams'}{$var};
+                            $rline =~ s/\b$var\b/$gvar/;
+                        }                        
+                        push @{$rlines}, [ $rline, $tags_lref ];                        
+                    } 
+                } 
+            }
+        }    # for
+    }
+
+    return $rlines;
+}    # END of create_exglob_var_declarations_NEW()
+# --------------------------------------------------------------------------------
 sub create_additional_include_statements {
     ( my $stref, my $f, my $annline, my $rlines ) = @_;
     my $Sf        = $stref->{'Subroutines'}{$f};    
@@ -690,10 +766,8 @@ sub create_additional_include_statements {
 # --------------------------------------------------------------------------------
 sub create_new_include_statements {
     ( my $stref, my $f, my $annline, my $rlines ) = @_;
-    my $Sf        = $stref->{'Subroutines'}{$f};    
-    
+    my $Sf        = $stref->{'Subroutines'}{$f};        
     my $tags_lref = $annline->[1];
-
     for my $inc ( keys %{ $Sf->{'Globals'} } ) {
         print "INC: $inc, root: $stref->{'IncludeFiles'}{$inc}{'Root'} \n"
           if $V;
@@ -712,14 +786,11 @@ sub create_new_include_statements {
 # --------------------------------------------------------------------------------
 sub skip_common_include_statement {
     ( my $stref, my $f, my $annline ) = @_;
-#   my $line      = $annline->[0] || '';
     my $tags_lref = $annline->[1];
-    my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
     my $skip      = 0;
-    my $inc       = $tags{'Include'}{'Name'};
+    my $inc       = $tags_lref->{'Include'}{'Name'};
     print "INFO: INC $inc in $f\n" if $V;
     if ( $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common' ) {
-
         if ($V) {
             print "SKIPPED $inc: Root: ",
               ( $stref->{'IncludeFiles'}{$inc}{'Root'} ne $f ) ? 0 : 1,
@@ -733,24 +804,21 @@ sub skip_common_include_statement {
 }    # END of skip_common_include_statement()
 
 # --------------------------------------------------------------------------------
+# This routine creates the actual refactored source text 
 sub create_refactored_subroutine_signature {
     ( my $stref, my $f, my $annline, my $rlines ) = @_;
     my $Sf        = $stref->{'Subroutines'}{$f};
-#   my $line      = $annline->[0] || '';
-    my $tags_lref = $annline->[1];
-    my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
-#   ( my $maybe_args, my $globals ) = get_maybe_args_globs( $stref, $f );
+    my $tags_lref = $annline->[1];    
     my $args_ref = $Sf->{'RefactoredArgs'}{'List'};
     my $args_str = join( ',', @{$args_ref} );
     print "NEW ARGS: $args_str\n" if $V;
     my $rline = '';
-
     if ( $Sf->{'Program'} ) {
         $rline = '      program ' . $f;
     } else {
         $rline = '      subroutine ' . $f . '(' . $args_str . ')';
     }
-    $tags{'Refactored'} = 1;
+    $tags_lref->{'Refactored'} = 1;
     $Sf->{'HasRefactoredArgs'} = 1;
     push @{$rlines}, [ $rline, $tags_lref ];
 
@@ -758,9 +826,8 @@ sub create_refactored_subroutine_signature {
     for my $arg ( @{$args_ref} ) {
         if ( exists $Sf->{'RefactoredArgs'}{$arg}{'IODir'} ) {
             my $iodir = $Sf->{'RefactoredArgs'}{$arg}{'IODir'};
-            my $kind  = $Sf->{'RefactoredArgs'}{$arg}{'Kind'};    #Unknown';
-            my $type  = $Sf->{'RefactoredArgs'}{$arg}{'Type'};    #Unknown';
-
+            my $kind  = $Sf->{'RefactoredArgs'}{$arg}{'Kind'};
+            my $type  = $Sf->{'RefactoredArgs'}{$arg}{'Type'};
             my $ntabs = ' ' x 8;
             if ( $iodir eq 'In' and $kind eq 'Scalar' ) {
                 $ntabs = '';
@@ -777,6 +844,11 @@ sub create_refactored_subroutine_signature {
 }    # END of create_refactored_subroutine_signature()
 
 # ----------------------------------------------------------------------------------------------------
+# Calls to subroutines with refactored globals must be refactored to contain the globals as arguments. 
+# Similar to refactor_subroutine_signature()
+# The heavy lifting is done by determine_exglob_subroutine_call_args()
+# Then we merge the original args, renamed for local/global clashes, with the globals
+
 sub create_refactored_subroutine_call {
     ( my $stref, my $f, my $annline, my $rlines ) = @_;
     my $Sf        = $stref->{'Subroutines'}{$f};
@@ -847,7 +919,6 @@ sub determine_exglob_subroutine_call_args {
             }
         }
     }
-
     return \@globals;
 }    # END of determine_exglob_subroutine_call_args
 

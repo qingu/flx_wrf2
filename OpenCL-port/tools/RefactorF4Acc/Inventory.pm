@@ -25,7 +25,6 @@ use File::Find;
 sub find_subroutines_functions_and_includes {
     my $stref = shift;
     my $dir   = '.';
-#   my $ext   = '.f';
 
     # find sources (borrowed from PerlMonks)
     my %src_files = ();

@@ -760,7 +760,7 @@ sub get_commons_params_from_includes {
 # - it lowercases everything
 # - it detects and normalises comments
 # - it detects block markers (for factoring blocks out into subs)
-# The routine is called by parse_fortran_src_OLD()
+# The routine is called by parse_fortran_src()
 # A better way is to extract all subs in a single pass
 # I guess the best wat is to first join the lines, then separate the subs
 sub read_fortran_src {
@@ -847,10 +847,6 @@ sub read_fortran_src {
                     next;
                 } else {
 
- #                    warn "TAB FORMAT for $prevline ?\n" if $prevline =~/9100/;
- #                    ($prevline=~/^\t/ || $prevline=~/^\d+\t/ ) && do {
- #                        warn "TAB FORMAT for $prevline\n" ;
- #                    };
                     my $sixspaces = ' ' x 6;
                     $prevline =~ s/^\t/$sixspaces/;
                     $prevline =~ /^(\d+)\t/ && do {
@@ -937,9 +933,8 @@ sub read_fortran_src {
                     $line = 'C UNDEF';
                 }
 
-#               print STDERR '[',join(',',@{$phs_ref}),"]\n";
 # If it's a subroutine source, skip all lines before the matching subroutine signature
-#and all lines from (and including) the next non-matching subroutine signature
+# and all lines from (and including) the next non-matching subroutine signature
 
        # FIXME: weak, the return type of the function can be more than one word!
                 if (   $is_incl == 0
@@ -980,7 +975,6 @@ sub read_fortran_src {
         }    # if OK
     }    # if Status==0
 
-    #die $sub_func_incl.Dumper($stref->{'Functions'}{'ew'}) if $f=~/ew/;
     return $stref;
 }    # END of read_fortran_src()
 
