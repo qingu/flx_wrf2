@@ -22,6 +22,7 @@ use Exporter;
 
 @RefactorF4Acc::Refactoring::Subroutines::Calls::EXPORT = qw(
     &create_refactored_subroutine_call
+    &refactor_subroutine_call_args
 );
 
 
@@ -105,3 +106,61 @@ sub determine_exglob_subroutine_call_args {
     }
     return \@globals;
 }    # END of determine_exglob_subroutine_call_args
+
+# ----------------------------------------------------------------------------------------------------
+sub refactor_subroutine_call_args {
+    ( my $stref, my $f, my $idx ) = @_;
+    my $Sf   = $stref->{'Subroutines'}{$f};
+    my $tags = $Sf->{'Info'}[$idx];
+
+    # simply tag the common vars onto the arguments
+    my $name               = $tags->{'SubroutineCall'}{'Name'};
+    my $Sname              = $stref->{'Subroutines'}{$name};
+    my %conflicting_locals = ();
+    my %conflicting_params = ();
+    if ( exists $Sf->{'ConflictingParams'} ) {
+        %conflicting_params = %{ $Sf->{'ConflictingParams'} };
+    }
+    if ( exists $Sf->{'ConflictingGlobals'} ) {
+        %conflicting_locals = %{ $Sf->{'ConflictingGlobals'} };
+    }
+    my %conflicting_exglobs_params = ();
+    if (%conflicting_params) {
+        %conflicting_exglobs_params =
+          ( %conflicting_locals, %conflicting_params );
+    }
+    my @globals = ();
+    for my $inc ( keys %{ $Sname->{'Globals'} } ) {
+        next if $stref->{'IncludeFiles'}{$inc}{'Root'} eq $name;
+        if ( defined $Sname->{'Globals'}{$inc} ) {
+            if (%conflicting_exglobs_params) {
+                for my $var ( @{ $Sname->{'Globals'}{$inc} } ) {
+                    if ( exists $conflicting_exglobs_params{$var} ) {
+                        print
+"WARNING: CONFLICT in call to $name in $f:renaming $var with ${var}_GLOB!\n"
+                          if $W;
+                        push @globals, $conflicting_exglobs_params{$var};
+                    } else {
+                        push @globals, $var;
+                    }
+                }
+            } else {
+                @globals = ( @globals, @{ $Sname->{'Globals'}{$inc} } );
+            }
+        }
+    }
+
+    my $orig_args = [];
+    for my $arg ( @{ $tags->{'SubroutineCall'}{'Args'} } ) {
+        if ( exists $conflicting_locals{$arg} ) {
+            push @{$orig_args}, $conflicting_locals{$arg};
+        } else {
+            push @{$orig_args}, $arg;
+        }
+    }
+    my $args_ref = ordered_union( $orig_args, \@globals );
+    $tags->{'SubroutineCall'}{'RefactoredArgs'} = $args_ref;
+    $Sf->{'Info'}[$idx] = $tags;
+    return $stref;
+}    # END of refactor_subroutine_call_args
+# -----------------------------------------------------------------------------

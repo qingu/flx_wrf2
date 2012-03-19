@@ -1,8 +1,9 @@
 package RefactorF4Acc::Analysis::ArgumentIODirs;
 
-use RefactorF4Acc::Config qw($V $W);
+use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
 use RefactorF4Acc::Refactoring::Subroutines::Signatures qw( refactor_subroutine_signature );
+use RefactorF4Acc::Refactoring::Subroutines::Calls qw( refactor_subroutine_call_args);
 # 
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
 #   
@@ -29,13 +30,18 @@ use Exporter;
 # We do a recusive descent for all called subroutines, and for the leaves we do the analysis
 sub determine_argument_io_direction_rec {
     ( my $f, my $stref ) = @_;
+    my $c = (defined $stref->{Counter}) ? $stref->{Counter} : 0;
+    print "\t" x $c; print "$f\n";
     my $Sf = $stref->{'Subroutines'}{$f};
     if ( exists $Sf->{'CalledSubs'} ) {
         for my $calledsub ( keys %{ $Sf->{'CalledSubs'} } ) {
+            $stref->{Counter}++;
             $stref = determine_argument_io_direction_rec( $calledsub, $stref );
+            $stref->{Counter}--;
         }
+#   die "Resolved IO for called subs, now use it!\n" if $f =~ /advance/;
+        $stref = determine_argument_io_direction_core( $stref, $f );
     } else {
-
 # For a leaf, this should resolve all
 # For a non-leaf, we should merge the declarations from the calls
 # This is more tricky than it seems because a sub can be called multiple times with different arguments.
@@ -46,7 +52,6 @@ sub determine_argument_io_direction_rec {
     return $stref;
 }    # determine_argument_io_direction_rec()
 
-# -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
 sub determine_argument_io_direction_core {
     ( my $stref, my $f ) = @_;
@@ -267,7 +272,6 @@ sub set_io_dir {
 }
 
 # -----------------------------------------------------------------------------
-# -----------------------------------------------------------------------------
 sub find_vars {
     ( my $line, my $args_ref, my $subref ) = @_;
     my %args = %{$args_ref};
@@ -279,3 +283,124 @@ sub find_vars {
     }
     return $args_ref;
 }    # END of find_vars()
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+sub get_iodirs_from_subcall {
+	( my $stref, my $f, my $index ) = @_;
+
+	# First refactor!
+	$stref = refactor_subroutine_call_args( $stref, $f, $index );
+	my $Sf    = $stref->{'Subroutines'}{$f};
+	my $tags  = $Sf->{'Info'}->[$index];
+	my $name  = $tags->{'SubroutineCall'}{'Name'};
+	my $Sname = $stref->{'Subroutines'}{$name};
+	my %args =
+	  map { $_ => 1 } @{ $Sf->{'RefactoredArgs'}{'List'} };
+	my $called_arg_iodirs = {};
+
+	# Now get the RefactoredArgs
+	my $ref_call_args =
+	  $Sf->{'Info'}->[$index]{'SubroutineCall'}{'RefactoredArgs'};
+
+#                print "CALL to $name in $f\n";#" (".join(',',@{ $Sf->{'RefactoredArgs'}{'List'} }).")\n";
+#               print "CALL $name: ",join(',',@{ $ref_call_args })."\n";
+# Get the RefactoredArgList
+	my $ref_sig_args = $Sname->{'RefactoredArgs'}{'List'};
+#FIXME: experimental!
+    croak "FIXME: need to make sure all calls & sigs are refactored before doing IO analysis!!!";
+    if ( scalar( @{$ref_sig_args} ) == 0) {
+        $ref_sig_args = $Sname->{'Args'};
+	    $Sname->{'RefactoredArgs'}={};
+	    $Sname->{'RefactoredArgs'}{'List'}=$Sname->{'Args'};
+    }
+	#               print " SIG $name: ",join(',',@{ $ref_sig_args })."\n";
+	my $ca = scalar( @{$ref_call_args} );
+	my $sa = scalar( @{$ref_sig_args} );
+	if ( $ca != $sa ) {
+        print "WARNING ($f): NOT SAME LENGTH! ($ca<>$sa)\n" if $W;
+		print $f.'->'.$name.': CALL:'.Dumper( $ref_call_args )."\nSIG:". Dumper( $ref_sig_args );
+        croak;
+	} else {
+		my $i = 0;
+		for my $call_arg ( @{$ref_call_args} ) {
+			my $sig_arg = $ref_sig_args->[$i];
+
+			# int is a FORTRAN primitive converting float to int
+			# int2|short is a FORTRAN primitive converting float to int
+			# int8|long is a FORTRAN primitive converting float to int
+			# float is a FORTRAN primitive converting int to float
+			# dfloat|dble is a FORTRAN primitive converting int to float
+			# sngl is a FORTRAN primitive converting double to float
+			$call_arg =~
+			  s/(^|\W)(?:int|int2|int8|short|long|sngl|dfloat|dble|float)\(//
+			  && $call_arg =~ s/\)$//;
+
+			# Clean up call args for comparison
+			$call_arg =~ s/(\w+)\(.*?\)/$1/g;
+			$i++;
+			if ( exists $args{$call_arg} ) {
+
+				# This means that $call_arg is an argument of the caller $f
+				# look up the IO direction for the corresponding $sig_arg
+				$called_arg_iodirs->{$call_arg} =
+				  $Sname->{'RefactoredArgs'}{$sig_arg}{'IODir'};
+			} else {
+				if ( $call_arg =~ /\W/ ) {
+					print
+"INFO: ARG $call_arg in call to $name in $f is an expression\n"
+					  if $V;
+					my @maybe_args = split( /\W+/, $call_arg );
+					for my $maybe_arg (@maybe_args) {
+						if ( exists $args{$maybe_arg}
+							and not exists $called_arg_iodirs->{$maybe_arg} )
+						{
+							print
+"INFO: Setting IO dir for $maybe_arg in call to $name in $f to In\n"
+							  if $V;
+							$called_arg_iodirs->{$maybe_arg} = 'In';
+							if (    scalar keys %{ $Sname->{'Callers'} } == 1
+								and $Sname->{'Callers'}{$f} == 1
+								and
+								$Sname->{'RefactoredArgs'}{$sig_arg}{'IODir'} ne
+								'In' )
+							{
+								print
+"INFO: $name in $f is called only once; $sig_arg is an expression, setting IODir to 'In'\n"
+								  if $I;
+								$Sname->{'RefactoredArgs'}{$sig_arg}{'IODir'} =
+								  'In';
+							}
+						}
+					}
+				} elsif ( $call_arg =~ /^\s*[\d\.]+\s*$/ ) {
+					if (    scalar keys %{ $Sname->{'Callers'} } == 1
+						and $Sname->{'Callers'}{$f} == 1
+						and $Sname->{'RefactoredArgs'}{$sig_arg}{'IODir'} ne
+						'In' )
+					{
+						print
+"INFO: $name in $f is called only once; $sig_arg is a numeric constant, setting IODir to 'In'\n"
+						  if $I;
+						$Sname->{'RefactoredArgs'}{$sig_arg}{'IODir'} = 'In';
+					}
+				} else {
+
+				   # This means the call argument must be a local variable of $f
+				   #					print "LOCAL $call_arg for call to $name in $f\n";
+                    if (exists $Sname->{'RefactoredArgs'}{$sig_arg}) {
+					$called_arg_iodirs->{$call_arg} =
+					  $Sname->{'RefactoredArgs'}{$sig_arg}{'IODir'};
+					if ( $called_arg_iodirs->{$call_arg} eq 'InOut' ) {
+						$called_arg_iodirs->{$call_arg} = 'InMaybeOut';
+					}
+                    } else {
+                        warn "Could not determine IODir for $call_arg in $name because there is no RefactoredArgs\n";
+                    }
+				}
+			}
+		}
+	}
+	return ( $called_arg_iodirs, $stref );
+}    # END of get_iodirs_from_subcall()
+
+# -----------------------------------------------------------------------------
