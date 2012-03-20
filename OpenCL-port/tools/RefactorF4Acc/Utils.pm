@@ -28,6 +28,7 @@ use Exporter;
 
 sub sub_func_or_incl {
     ( my $f, my $stref ) = @_;
+    die join(' ; ', caller ) if $stref!~/0x/;        
     if ( exists $stref->{'Subroutines'}{$f} ) {
         return 'Subroutines';
     } elsif ( exists $stref->{'Functions'}{$f} ) {

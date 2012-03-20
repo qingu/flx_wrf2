@@ -83,7 +83,8 @@ sub emit_refactored_include {
         my $mode = '>';
         open my $SRC, $mode, "$dir/$f" or die $!;
         my $prevline='C ';
-        for my $line ( @{$srcref} ) {
+        for my $annline ( @{$srcref} ) {
+        	my $line = $annline->[0];  
             if (not ($prevline =~/^\s*$/ and $line =~/^\s*$/)) {
             print $SRC "$line\n";
             print "$line\n" if $V;
@@ -127,7 +128,8 @@ sub emit_refactored_function {
             print $SRC "\nC *** FUNCTION $f ***\n";
         }
         my $prevline='C ';
-        for my $line ( @{$srcref} ) {
+        for my $annline ( @{$srcref} ) {
+        	my $line = $annline->[0]; 
             if (not ($prevline =~/^\s*$/ and $line =~/^\s*$/)) {
             print $SRC "$line\n";
             print "$line\n" if $V;
@@ -180,7 +182,8 @@ sub emit_refactored_subroutine {
             print $SRC "\nC *** SUBROUTINE $f ***\n";
         }
         my $prevline='C ';
-        for my $line ( @{$srcref} ) {
+        for my $annline ( @{$srcref} ) {
+        	my $line = $annline->[0]; 
             if (not ($prevline =~/^\s*$/ and $line =~/^\s*$/)) {
             print $SRC "$line\n";
             print "$line\n" if $V;

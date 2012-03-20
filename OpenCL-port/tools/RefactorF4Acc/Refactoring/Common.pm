@@ -21,8 +21,10 @@ use Exporter;
 @RefactorF4Acc::Refactoring::Common::ISA = qw(Exporter);
 
 @RefactorF4Acc::Refactoring::Common::EXPORT_OK = qw(
+    &context_free_refactorings
     &create_refactored_source
-    &split_long_line
+    &get_annotated_sourcelines
+    &split_long_line    
 );
 
 #* BeginDo: just remove the label
@@ -32,21 +34,23 @@ use Exporter;
 #* GotoTarget: Do nothing
 #* NoopBreakTarget: replace CONTINUE with "call noop"
 #* BreakTarget: Do nothing
-sub create_refactored_source {
-    ( my $stref, my $f, my $annlines ) = @_;
+sub context_free_refactorings {
+    ( my $stref, my $f ) = @_;
     print "CREATING FINAL $f CODE\n" if $V;
-#   my $rlines      = [];
     my @extra_lines = ();
     my $sub_or_func =
       ( exists $stref->{'Subroutines'}{$f} ) ? 'Subroutines' : 'Functions';
     my $Sf = $stref->{$sub_or_func}{$f};
-    $Sf->{'RefactoredCode'} = [];
-    
+    if ($Sf->{'Status'}!=2 ) {
+    	croak caller;
+    }    
+    my $annlines=get_annotated_sourcelines($stref,$f);
+    $Sf->{'RefactoredCode'} =[];
     for my $annline ( @{$annlines} ) {
         if (not defined $annline or not defined $annline->[0]) {
-            print "BOOM!";
+            croak "Undefined source code line for $f in create_refactored_source()";
         }
-        my $line = $annline->[0] || '';    # FIXME: why would line be undefined?
+        my $line = $annline->[0];
         my $tags_lref = $annline->[1] || {};
         my %tags = %{$tags_lref};
 
@@ -65,7 +69,7 @@ sub create_refactored_source {
                 $is_goto_target = 1;
             }
             my $count = $tags{'EndDo'}{'Count'};
-            if ( $line =~ /^\s{0,4}\d+\s+continue/ ) {
+            if ( exists $tags{'Continue'} ) {
                 if ( $is_goto_target == 0 ) {
                     $line = '      end do';
                     $count--;
@@ -90,10 +94,8 @@ sub create_refactored_source {
         }
         if ( exists $tags{'Break'} ) {
             $line .= '  !Break';
-
             # $line=~s/goto\s+(\d+)/call break($1)/;
         }
-
         if ( exists $tags{'PlaceHolders'} ) {
             my @phs = @{ $tags{'PlaceHolders'} };
             for my $ph (@phs) {
@@ -101,27 +103,45 @@ sub create_refactored_source {
                 $line =~ s/$ph/$str/;
             }
         }
-        if ( not exists $tags{'Comments'} ) {
-            print $line, "\n" if $V;
-            my @split_lines = split_long_line($line);
-            for my $sline (@split_lines) {
-                push @{ $Sf->{'RefactoredCode'} }, $sline;
-            }
+        push @{ $Sf->{'RefactoredCode'} }, [$line, $tags_lref];
             if (@extra_lines) {
                 for my $extra_line (@extra_lines) {
                     push @{ $Sf->{'RefactoredCode'} },
-                      $extra_line;
+                      [$extra_line,{'Extra'=>1}];
                 }
                 @extra_lines = ();
-            }
-        } else {
-            push @{ $Sf->{'RefactoredCode'} }, $line;
-        }
+            }        
     }
     return $stref;
-}    # END of create_refactored_source()
+}    # END of context_free_refactorings()
 
 # -----------------------------------------------------------------------------
+sub create_refactored_source {
+   ( my $stref, my $f,  ) = @_;
+    print "CREATING FINAL $f CODE\n" if $V;
+    die join(' ; ', caller ) if $stref!~/0x/;
+    my $sub_or_func_or_inc = sub_func_or_incl($f,$stref);
+    my $Sf = $stref->{$sub_or_func_or_inc}{$f};
+    my $annlines = get_annotated_sourcelines( $stref,  $f);
+    $Sf->{'RefactoredCode'} =[];
+    for my $annline ( @{$annlines} ) {
+        if (not defined $annline or not defined $annline->[0]) {
+            croak "Undefined source code line for $f in create_refactored_source()";
+        }
+        my $line = $annline->[0] || '';
+        my $tags_lref = $annline->[1] || {};
+        if ( not exists $tags_lref->{'Comments'} ) {
+            print $line, "\n" if $V;
+            my @split_lines = split_long_line($line);
+            for my $sline (@split_lines) {
+                push @{ $Sf->{'RefactoredCode'} }, [$sline,$tags_lref];
+            }
+        } else {
+            push @{ $Sf->{'RefactoredCode'} }, [$line, $tags_lref];
+        }
+    }
+    return $stref;	
+} # END of create_refactored_source()
 # -----------------------------------------------------------------------------
 
 # A convenience function to split long lines.
@@ -234,6 +254,26 @@ sub split_long_line {
         }
         return @split_lines;
     }
-}
+} # END of split_long_line()
 
 # -----------------------------------------------------------------------------
+sub get_annotated_sourcelines {
+    ( my $stref, my $f ) = @_;
+    my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
+    my $Sf = $stref->{$sub_or_func_or_inc}{$f};
+    
+    
+    my $annlines=[];    
+    if ($Sf->{'Status'}==2) {          
+    if (not exists $Sf->{'RefactoredCode'}) {
+        $Sf->{'RefactoredCode'} = [];
+        $annlines=[ @{ $Sf->{'AnnLines'} } ]; # We want a copy!
+    } else {
+        $annlines=$Sf->{'RefactoredCode'}; # Here a ref is OK
+    }	  
+    } else {
+    	warn "get_annotated_sourcelines( $f ) \n";
+    	die caller;
+    } 
+	return $annlines;
+} # END of get_annotated_sourcelines()

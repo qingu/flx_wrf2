@@ -31,7 +31,7 @@ Subroutines
 =cut
 
 # --------------------------------------------------------------------------------
-# This routine creates the actual refactored source text 
+# This routine creates the actual refactored source text of the sig
 sub create_refactored_subroutine_signature {
     ( my $stref, my $f, my $annline, my $rlines ) = @_;
     my $Sf        = $stref->{'Subroutines'}{$f};
@@ -49,27 +49,50 @@ sub create_refactored_subroutine_signature {
     $Sf->{'HasRefactoredArgs'} = 1;
     push @{$rlines}, [ $rline, $tags_lref ];
 
-    # IO direction information
-    for my $arg ( @{$args_ref} ) {
-        if ( exists $Sf->{'RefactoredArgs'}{$arg}{'IODir'} ) {
-            my $iodir = $Sf->{'RefactoredArgs'}{$arg}{'IODir'};
-            my $kind  = $Sf->{'RefactoredArgs'}{$arg}{'Kind'};
-            my $type  = $Sf->{'RefactoredArgs'}{$arg}{'Type'};
-            my $ntabs = ' ' x 8;
-            if ( $iodir eq 'In' and $kind eq 'Scalar' ) {
-                $ntabs = '';
-            } elsif ( $iodir eq 'Out' ) {
-                $ntabs = ' ' x 4;
-            }
-            my $comment = "C      $ntabs$arg:\t$iodir, $kind, $type";
-            push @${rlines}, [ $comment, { 'Comment' => 1 } ];
-        } else {
-            print "WARNING: No IO info for $arg in $f\n" if $W;
-        }
-    }
     return $rlines;
 }    # END of create_refactored_subroutine_signature()
 # -----------------------------------------------------------------------------
+sub refactor_kernel_signatures {
+    ( my $stref, my $f ) = @_;
+    my $Sf        = $stref->{'Subroutines'}{$f};
+#	my $lines=$Sf->{'Lines'};
+#	
+#    my $tags_lref = $annline->[1];    
+#    my $args_ref = $Sf->{'RefactoredArgs'}{'List'};
+#    my $args_str = join( ',', @{$args_ref} );
+#    print "NEW ARGS: $args_str\n" if $V;
+#    my $rline = '';
+#    if ( $Sf->{'Program'} ) {
+#        $rline = '      program ' . $f;
+#    } else {
+#        $rline = '      subroutine ' . $f . '(' . $args_str . ')';
+#    }
+#    $tags_lref->{'Refactored'} = 1;
+    $Sf->{'HasRefactoredArgs'} = 1;
+#    push @{$rlines}, [ $rline, $tags_lref ];
+#
+#    # IO direction information
+#    for my $arg ( @{$args_ref} ) {
+#        if ( exists $Sf->{'RefactoredArgs'}{$arg}{'IODir'} ) {
+#            my $iodir = $Sf->{'RefactoredArgs'}{$arg}{'IODir'};
+#            my $kind  = $Sf->{'RefactoredArgs'}{$arg}{'Kind'};
+#            my $type  = $Sf->{'RefactoredArgs'}{$arg}{'Type'};
+#            my $ntabs = ' ' x 8;
+#            if ( $iodir eq 'In' and $kind eq 'Scalar' ) {
+#                $ntabs = '';
+#            } elsif ( $iodir eq 'Out' ) {
+#                $ntabs = ' ' x 4;
+#            }
+#            my $comment = "C      $ntabs$arg:\t$iodir, $kind, $type";
+#            push @${rlines}, [ $comment, { 'Comment' => 1 } ];
+#        } else {
+#            print "WARNING: No IO info for $arg in $f\n" if $W;
+#        }
+#    }
+    return $stref;
+}    # END of refactor_kernel_signatures()
+# -----------------------------------------------------------------------------
+
 sub refactor_subroutine_signature {
     ( my $stref, my $f ) = @_;
     my $Sf = $stref->{'Subroutines'}{$f};
@@ -122,5 +145,7 @@ sub refactor_subroutine_signature {
     # and store in $Sf->{'RefactoredArgs'}{'List'} 
     my $args_ref = ordered_union( $Sf->{'Args'}, \@nexglobs );
     $Sf->{'RefactoredArgs'}{'List'} = $args_ref;
+    %{ $Sf->{'RefactoredArgs'}{'Set'}} = map {$_ => 1 } @{ $args_ref };
+    $Sf->{'HasRefactoredArgs'} = 1;
     return $stref;
 }    # END of refactor_subroutine_signature()

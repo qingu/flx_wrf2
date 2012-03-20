@@ -2,6 +2,8 @@ package RefactorF4Acc::Refactoring::Subroutines::Calls;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
+use RefactorF4Acc::Refactoring::Common qw( get_annotated_sourcelines );
+use RefactorF4Acc::Refactoring::Subroutines::Signatures qw( refactor_subroutine_signature );
 # 
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
 #   
@@ -20,7 +22,7 @@ use Exporter;
 
 @RefactorF4Acc::Refactoring::Subroutines::Calls::ISA = qw(Exporter);
 
-@RefactorF4Acc::Refactoring::Subroutines::Calls::EXPORT = qw(
+@RefactorF4Acc::Refactoring::Subroutines::Calls::EXPORT_OK = qw(
     &create_refactored_subroutine_call
     &refactor_subroutine_call_args
 );
@@ -111,11 +113,14 @@ sub determine_exglob_subroutine_call_args {
 sub refactor_subroutine_call_args {
     ( my $stref, my $f, my $idx ) = @_;
     my $Sf   = $stref->{'Subroutines'}{$f};
-    my $tags = $Sf->{'Info'}[$idx];
-
+    my $tags = ${get_annotated_sourcelines($stref,$f)}[$idx][1];
+    
     # simply tag the common vars onto the arguments
     my $name               = $tags->{'SubroutineCall'}{'Name'};
     my $Sname              = $stref->{'Subroutines'}{$name};
+    if (not exists $Sname->{'HasRefactoredArgs'} or $Sname->{'HasRefactoredArgs'}==0) {
+    	$stref = refactor_subroutine_signature( $stref, $name );
+    }
     my %conflicting_locals = ();
     my %conflicting_params = ();
     if ( exists $Sf->{'ConflictingParams'} ) {

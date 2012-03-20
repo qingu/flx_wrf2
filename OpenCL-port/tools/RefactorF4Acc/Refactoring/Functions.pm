@@ -2,7 +2,7 @@ package RefactorF4Acc::Refactoring::Functions;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
-use RefactorF4Acc::Refactoring::Common qw( create_refactored_source );
+use RefactorF4Acc::Refactoring::Common qw( context_free_refactorings create_refactored_source );
 
 # 
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
@@ -39,17 +39,10 @@ sub refactor_called_functions {
 
     for my $f ( keys %{ $stref->{'Functions'} } ) {
         my $Ff = $stref->{'Functions'}{$f};
-
-        #       warn "REFACTORING FUNCTION $f? ";
-        if ( defined $Ff->{'Called'} ) {
-
-            #           warn "YES\n";
+        if ( defined $Ff->{'Called'} ) {        	
             $stref = refactor_function( $f, $stref );
-        } else {
-
-            #           warn "NOT REFACTORING FUNCTION $f\n";
-            #           die if $f eq 'cspanf';
-        }
+            $stref = create_refactored_source($stref, $f);
+        } 
     }
     return $stref;
 }    # END of refactor_called_functions()
@@ -64,33 +57,15 @@ sub refactor_function {
         print "#" x 80, "\n";
     }
     my $Ff = $stref->{'Functions'}{$f};
-    print "REFACTORING FUNCTION $f\n" if $V;
-
-    #   die Dumper( $Ff ) if $f eq 'gser';
-    my @lines = @{ $Ff->{'Lines'} };
-
-    my @info =
-      defined $Ff->{'Info'}
-      ? @{ $Ff->{'Info'} }
-      : ();
-
-    my $annlines = [];
-    for my $line (@lines) {
-        my $tags = shift @info;
-        push @{$annlines}, [ $line, $tags ];
-    }
-
-    my $rlines = $annlines;
+    print "REFACTORING FUNCTION $f\n" if $V;    
 
     if (   not exists $Ff->{'RefactoredCode'}
         or $Ff->{'RefactoredCode'} == []
         or exists $stref->{'BuildSources'}{'C'}{ $Ff->{'Source'} } )
     {
-        $stref = create_refactored_source( $stref, $f, $rlines );
+        $stref = context_free_refactorings( $stref, $f );
     }
 
-    #   print STDERR "REFACTORED $f\n";
-    #    die Dumper($Ff->{'RefactoredCode'}) ;
     return $stref;
 
 }    # END of refactor_function()

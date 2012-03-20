@@ -2,11 +2,11 @@ package RefactorF4Acc::Refactoring::Subroutines;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
-use RefactorF4Acc::Refactoring::Common qw( create_refactored_source );
+use RefactorF4Acc::Refactoring::Common qw( get_annotated_sourcelines create_refactored_source );
 use RefactorF4Acc::Refactoring::Subroutines::Signatures; 
 use RefactorF4Acc::Refactoring::Subroutines::Includes;
 use RefactorF4Acc::Refactoring::Subroutines::Declarations;
-use RefactorF4Acc::Refactoring::Subroutines::Calls;
+use RefactorF4Acc::Refactoring::Subroutines::Calls qw( create_refactored_subroutine_call );
 
 # 
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
@@ -46,8 +46,8 @@ Subroutines
 #TODO: The latter must be done everywhere
 sub refactor_all_subroutines {
     ( my $stref ) = @_;
-    for my $f ( keys %{ $stref->{'Subroutines'} } ) {
-        my $Sf = $stref->{'Subroutines'}{$f};
+    for my $f ( keys %{ $stref->{'Subroutines'} } ) {    	
+        my $Sf = $stref->{'Subroutines'}{$f};        
         if ( not defined $Sf->{'Status'} ) {
             $Sf->{'Status'} = $UNREAD;
             print "WARNING: no Status for $f\n" if $W;
@@ -89,6 +89,7 @@ This is a node called 'RefactoredSubroutineCall'
 
 sub refactor_subroutine_main {
     ( my $f, my $stref ) = @_;
+#    local $V=1 if $f=~/interpol_all_/;
     if ($V) {
         print "\n\n";
         print "#" x 80, "\n";
@@ -97,23 +98,8 @@ sub refactor_subroutine_main {
         print "#" x 80, "\n";
     }
     my $Sf = $stref->{'Subroutines'}{$f};
-    # First merge source lines and tags into annotated lines @{$annlines}
-    my @lines = @{ $Sf->{'Lines'} };
-    my @info = defined $Sf->{'Info'} ? @{ $Sf->{'Info'} } : ();
-    my $annlines = [];
-    for my $line (@lines) {
-        my $tags = shift @info;
-        push @{$annlines}, [ $line, $tags ];
-    }
-    # @{$rlines} is the list of refactored lines
+    my $annlines = get_annotated_sourcelines($stref,$f);
     my $rlines = $annlines;
-
-#croak "FIXME: if a sub calls another sub that has 'RefactorGlobals' == 1, and itself has 'RefactorGlobals' == 2,
-# then this sub should be the root for the refactoring
-## This means that is should be the root for the includes, no need to go any higher! 
-## Also, the 'Common' includes from any sub with 'RefactorGlobals' == 1 must be lifted
-## The main task is to rewrite any subroutine signatures for 'RefactorGlobals' == 1 subs so they take the globals as arguments.
-#";
     if ( $Sf->{'HasCommons'} ) {
         if ( $Sf->{'RefactorGlobals'} == 1 ) {
           $rlines = refactor_globals( $stref, $f, $annlines );
@@ -121,13 +107,13 @@ sub refactor_subroutine_main {
             $rlines = refactor_calls_globals( $stref, $f, $annlines );
         }
     }
-
-    if (   not exists $Sf->{'RefactoredCode'}
-        or $Sf->{'RefactoredCode'} == []
-        or exists $stref->{'BuildSources'}{'C'}{ $Sf->{'Source'} } )
-    {
-        $stref = create_refactored_source( $stref, $f, $rlines );
-    }
+    $Sf->{'RefactoredCode'}=$rlines;
+#    if (   not exists $Sf->{'RefactoredCode'}
+#        or $Sf->{'RefactoredCode'} == []
+#        or exists $stref->{'BuildSources'}{'C'}{ $Sf->{'Source'} } )
+#    {
+#        $stref = create_refactored_source( $stref, $f, $rlines );
+#    }
     return $stref;
 }    # END of refactor_subroutine_main()
 
@@ -140,6 +126,7 @@ sub refactor_globals {
     
 #   croak "FIXME: the caller of a sub with RefactorGlobals should refactor its globals!";
     my $Sf = $stref->{'Subroutines'}{$f};
+#    my $annlines = get_annotated_sourcelines($stref,$f);
     if ($Sf->{'RefactorGlobals'}==2) {
         warn "FIXME: the caller of a sub with RefactorGlobals ($f) should refactor its globals!";
         # Which child has RefactorGlobals==1?
@@ -235,14 +222,15 @@ sub refactor_globals {
         push @{$rlines}, $annline unless $skip;
         $idx++;
     }
+#    $Sf->{'RefactoredCode'}=$rlines;
+#    return $stref;
     return $rlines;
-    
 }    # END of refactor_globals()
 
 # -----------------------------------------------------------------------------
 sub refactor_calls_globals {
     ( my $stref, my $f, my $annlines ) = @_;
-
+#    my $annlines = get_annotated_sourcelines($stref,$f);
     print "REFACTORING CALLS WITH GLOBALS in $f\n" if $V;
     my $rlines      = [];
     
@@ -292,8 +280,9 @@ sub refactor_calls_globals {
         $idx++;
     }
     
-    return $rlines;
-    
+#    $stref->{'Subroutines'}{$f}{'RefactoredCode'}=$rlines;
+#    return $stref;
+    return $rlines;    
 }    # END of refactor_calls_globals()
 
 # --------------------------------------------------------------------------------

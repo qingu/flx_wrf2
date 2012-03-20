@@ -97,9 +97,12 @@ sub identify_loops_breaks {
             };
 
             # continue can be end of do loop or break target (amongs others?)
-            $line =~ /^\s{0,4}(\d+)\s+(continue|\w)/ && do {
+            $line =~ /^\s*(\d+)\s+(continue|\w)/ && do { 
                 my $label = $1;
                 my $is_cont = $2 eq 'continue' ? 1 : 0;
+                if ($is_cont) {
+                	$Sf->{'Info'}->[$index]{'Continue'}{'Label'} = $label;
+                }                
                 if ( exists $do_loops{$label} ) {
                     if ( $nest == $do_loops{$label}[1] + 1 ) {
                         $Sf->{'Info'}

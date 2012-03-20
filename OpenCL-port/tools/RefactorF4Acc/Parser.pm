@@ -46,9 +46,10 @@ sub parse_fortran_src {
     }
 # 2. Parse the type declarations in the source, create a per-target table Vars and a per-line VarDecl list
 # We don't do this in functions at the moment, because we don't need to? NO! FIXME!
-    if ( not $is_func ) {
+#    if ( not $is_func ) {
+#    	die if $f eq 'cgszll';
         $stref = get_var_decls( $f, $stref );
-    }
+#    }
             # 3. Parse includes
     $stref = parse_includes( $f, $stref );
     if ( not $is_incl ) {
@@ -76,10 +77,31 @@ sub parse_fortran_src {
         $stref = get_commons_params_from_includes( $f, $stref );
         $stref->{'IncludeFiles'}{$f}{'Status'} = $PARSED;
     }
+    
+    $stref=create_annotated_lines($stref,$f);    
     return $stref;
 }    # END of parse_fortran_src()
 
 # -----------------------------------------------------------------------------
+
+sub create_annotated_lines {
+	(my $stref,my $f)=@_;	
+	my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
+	my $Sf = $stref->{$sub_or_func_or_inc}{$f};
+    # Merge source lines and tags into annotated lines @{$annlines}
+    my @lines = @{ $Sf->{'Lines'} };
+    my @info = defined $Sf->{'Info'} ? @{ $Sf->{'Info'} } : ();
+    my $annlines = [];
+    for my $line (@lines) {
+        my $tags = shift @info;
+        if (not defined $tags) {
+        	$tags={};
+        }
+        push @{$annlines}, [ $line, $tags ];
+    }
+	$Sf->{'AnnLines'}=$annlines;
+	return $stref;
+}
 # Create a table of all variables declared in the target, and a list of all the var names occuring on each line.
 # We record the type of the var and whether it's a scalar or array, because we need that information for translation to C.
 # Also check if the variable happens to be a function. If that is the case, mark that function as 'Called'; if we have not yet parsed its source, do it now.
@@ -194,12 +216,14 @@ sub get_var_decls {
                       ; # TODO: this should maybe not be a textual representation
                         # make it [$type,$var] ?
                     if ( exists $stref->{'Functions'}{$tvar} ) {
+                    	
                         $stref->{'Functions'}{$tvar}{'Called'} = 1;
                         $stref->{'Functions'}{$tvar}{'Callers'}{$f}++;
                         if ( not exists $stref->{'Functions'}{$tvar}{'Lines'} )
                         {
-                            $stref = read_fortran_src( $tvar, $stref );
-                        }
+                            $stref = parse_fortran_src( $tvar, $stref );
+#                            die Dumper($stref->{'Functions'}{$tvar}) if $tvar eq 'cgszll';    
+                        } 
                     }
                     push @varnames, $tvar;
                 }

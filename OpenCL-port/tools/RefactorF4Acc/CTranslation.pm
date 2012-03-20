@@ -21,12 +21,21 @@ use Exporter;
 @RefactorF4Acc::CTranslation::ISA = qw(Exporter);
 
 @RefactorF4Acc::CTranslation::EXPORT_OK = qw(
-    &refactor_C_targets
-    &emit_C_targets
-    &translate_to_C
-    &add_to_C_build_sources
+    &translate_to_C 
 );
-
+sub translate_to_C {
+	( my $stref ) = @_;
+    $translate = $GO;
+    for my $subname ( keys %{ $stref->{'SubsToTranslate'} }) {
+        print "\nTranslating $subname to C\n" if $V;
+        $gen_sub  = 1;
+        $stref = parse_fortran_src( $subname, $stref );
+        $stref = refactor_C_targets($stref);
+        emit_C_targets($stref);
+        translate_sub_to_C($stref);
+    }
+	return $stref;
+} # END of translate_to_C()
 #  -----------------------------------------------------------------------------
 sub refactor_C_targets {
     ( my $stref ) = @_;
@@ -57,7 +66,7 @@ sub emit_C_targets {
 }    # END of emit_C_targets()
 # -----------------------------------------------------------------------------
 
-sub translate_to_C {
+sub translate_sub_to_C {
     ( my $stref ) = @_;
 
 # At first, all we do is get the call tree and translate all sources to C with F2C_ACC
@@ -99,7 +108,7 @@ sub translate_to_C {
         system $cmd;
     }
 
-}    # END of translate_to_C()
+}    # END of translate_sub_to_C()
 
 # -----------------------------------------------------------------------------
 # We need a separate pass I think to get the C function signatures

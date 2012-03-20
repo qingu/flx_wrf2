@@ -1,4 +1,222 @@
 #!/usr/bin/perl
+use warnings::unused;
+use warnings;
+use warnings FATAL => qw(uninitialized);
+use strict;
+
+use RefactorF4Acc::Config;
+use RefactorF4Acc::Utils;
+use RefactorF4Acc::State qw( init_state );
+use RefactorF4Acc::Inventory qw( find_subroutines_functions_and_includes );
+use RefactorF4Acc::Parser qw( parse_fortran_src );
+use RefactorF4Acc::CallGraph qw( create_call_graph );
+use RefactorF4Acc::Analysis qw( analyse_all );
+use RefactorF4Acc::Refactoring qw( refactor_all );
+use RefactorF4Acc::Emitter qw( emit_all );
+use RefactorF4Acc::CTranslation qw( translate_to_C );
+use RefactorF4Acc::Builder qw( create_build_script build_flexpart );
+
+use Getopt::Std;
+
+our $usage = "
+    $0 [-hvwCTNbB] <toplevel subroutine name> 
+       [<subroutine name(s) for C translation>]
+    -h: help
+    -w: show warnings 
+    -v: verbose (implies -w)
+    -i: show info messages
+    -C: Only generate call tree, don't refactor or emit
+    -T: Translate <subroutine name> and dependencies to C 
+    -N: Don't replace CONTINUE by CALL NOOP
+    -b: Generate SCons build script, currently ignored 
+    -B: Build FLEXPART (implies -b)
+    -G: Generate Markdown documentation
+    \n";
+
+&main();
+
+# -----------------------------------------------------------------------------
+
+=pod
+
+=begin markdown
+
+## Main subroutine
+
+The `main()` subroutine performs following actions:
+
+- Argument parsing
+- `init_state()`: Initialise the global state
+- `find_subroutines_functions_and_includes()`: Find all subroutines, functions and includes (from now on, 'targets') in the source code tree. 
+The subroutine creates an entry in the state for every target:
+
+        $stref->{$target_type}{$target_name}{'Source'}  = $target_source;
+        $stref->{$target_type}{$target_name}{'Status'}  = $UNREAD;
+        
+- `parse_fortran_src()` :
+
+    - Read the source and do some minimal processsing 
+    
+            $stref = read_fortran_src( $f, $stref );
+        
+    - Parse the type declarations in the source, create a table `%vars`
+    - Get variable declarations unless the target is a function 
+    - Parse Subroutines & Functions
+    
+            $stref = detect_blocks( $f, $stref );     
+            $stref = parse_includes( $f, $stref );        
+            $stref = parse_subroutine_and_function_calls( $f, $stref );
+            
+        Set Status to PARSED    
+    - Parse Includes: parse common blocks and parameters, create `$stref->{'Commons'}`
+    
+            $stref = get_commons_params_from_includes( $f, $stref );
+        
+- `find_root_for_includes()` : Find the root for each include via a recursive descent. We look for the root of the smallest subtree.
+
+- `resolve_globals()` : Find the globals via recursive descent
+
+        $stateref = resolve_globals( $subname, $stateref );
+
+- `determine_argument_io_direction_rec()` : We need to know the IO direction for every subroutine argument in order to group subroutine arguments. Also, a further rewrite might decouple the Ins from the Outs, no more pesky InOuts.
+
+        $stateref = determine_argument_io_direction_rec( $subname, $stateref );
+
+- `analyse_sources()` : This routine analyses the code for goto-based loops and breaks, so that we can rewrite those horrible `DO`-blocks as proper loops. 
+
+        $stateref = analyse_sources($stateref);
+
+- Refactor the sources:
+
+        $stateref = refactor_all_subroutines($stateref);
+        $stateref = refactor_includes($stateref);
+        $stateref = refactor_called_functions($stateref);
+
+- Emit the refactored source:
+
+        if ( not $call_tree_only ) {
+            emit_all($stateref);
+        }
+
+- Translate to C:
+
+	    if ( $translate == $YES ) {
+	        $translate = $GO;
+	        for my $subname   (keys %subs_to_translate ) {
+	            $gen_sub  = 1;
+	            $stateref = parse_fortran_src( $subname, $stateref );
+	            $stateref = refactor_C_targets($stateref);
+	            emit_C_targets($stateref);
+	            &translate_to_C($stateref);
+	        }
+	    }
+    
+- Create build script:
+    
+	    create_build_script($stateref);
+	    if ($build) {
+	        build_flexpart();
+	    }
+    
+- Done.
+    
+    exit(0);
+
+    
+=end markdown
+
+=cut
+
+sub main {
+
+	(my $subname, my $subs_to_translate, my $build) = parse_args();
+	#  Initialise the global state.
+	my $stateref = init_state($subname);
+    $stateref->{'SubsToTranslate'}=$subs_to_translate;
+	# Find all subroutines in the source code tree
+	$stateref = find_subroutines_functions_and_includes($stateref);
+
+    # Parse the source
+	$stateref = parse_fortran_src( $subname, $stateref );
+    
+	if ( $call_tree_only and not $ARGV[1] ) {
+		create_call_graph($stateref,$subname);
+		exit(0);
+	}
+
+    # Analyse the source
+	$stateref = analyse_all($stateref,$subname);
+
+	# Refactor the source
+	$stateref = refactor_all($stateref,$subname);
+
+	if ( not $call_tree_only ) {
+		# Emit the refactored source
+		emit_all($stateref);
+	}
+
+	if ( $translate == $YES ) {
+		$translate = $GO;
+		for my $subname ( keys %{ $stateref->{'SubsToTranslate'} }) {
+			print "\nTranslating $subname to C\n";
+			$gen_sub  = 1;
+			$stateref = parse_fortran_src( $subname, $stateref );
+			$stateref = refactor_C_targets($stateref);
+			emit_C_targets($stateref);
+			translate_to_C($stateref);
+		}
+	}
+	create_build_script($stateref);
+	if ($build) {
+		build_flexpart();
+	}
+	exit(0);
+
+}    # END of main()
+# -----------------------------------------------------------------------------
+sub parse_args {
+ 	# Argument parsing. Factor out!
+	if ( not @ARGV ) {
+		die "Please specifiy FORTRAN subroutine or program to refactor\n";
+	}
+	my %opts = ();
+	getopts( 'vwihCTNbBG', \%opts );
+	my $subname = $ARGV[0];
+	if ($subname) {
+		$subname =~ s/\.f$//;
+	}
+
+	$V = ( $opts{'v'} ) ? 1 : 0;
+	$I = ( $opts{'i'} or $V ) ? 1 : 0;
+	$W = ( $opts{'w'} or $V ) ? 1 : 0;
+	my $help = ( $opts{'h'} ) ? 1 : 0;
+	if ($help) {
+		die $usage;
+	}
+	if ( $opts{'G'} ) {
+		print "Generating docs...\n";
+		generate_docs();
+		exit(0);
+	}
+	if ( $opts{'C'} ) {
+		$call_tree_only = 1;
+		$main_tree = $ARGV[1] ? 0 : 1;
+
+	}
+	my %subs_to_translate = ();
+	if ( $opts{'T'} ) {
+		if ( !@ARGV ) {
+			die "Please specify a target subroutine to translate.\n";
+		}
+		$translate = 1;
+		%subs_to_translate = map { $_ => 1 } @ARGV[ 1, -1 ];
+	}
+	$noop = ( $opts{'N'} ) ? 0 : 1;
+
+	my $build = ( $opts{'B'} ) ? 1 : 0;
+
+	return ($subname,\%subs_to_translate,$build);
+}
 
 =head1 SYNOPSIS
 
@@ -256,238 +474,4 @@ Nodes = Hash.Map Int Node
 
 =cut
 
-use warnings::unused;
-use warnings;
-use warnings FATAL => qw(uninitialized);
-use strict;
 
-use RefactorF4Acc::Config;
-use RefactorF4Acc::Utils;
-use RefactorF4Acc::State qw( init_state );
-use RefactorF4Acc::Inventory qw( find_subroutines_functions_and_includes );
-use RefactorF4Acc::Parser qw( parse_fortran_src );
-use RefactorF4Acc::CallGraph qw( create_call_graph );
-use RefactorF4Acc::Analysis::Includes qw( find_root_for_includes );
-use RefactorF4Acc::Analysis::Globals qw( resolve_globals );
-use RefactorF4Acc::Analysis::ArgumentIODirs qw( determine_argument_io_direction_rec );
-use RefactorF4Acc::Analysis::LoopsBreaks qw( analyse_sources );
-use RefactorF4Acc::Refactoring::Subroutines qw( refactor_all_subroutines );
-use RefactorF4Acc::Refactoring::Functions qw( refactor_called_functions );
-use RefactorF4Acc::Refactoring::Includes qw( refactor_includes );
-use RefactorF4Acc::Emitter qw( emit_all );
-use RefactorF4Acc::CTranslation qw( refactor_C_targets emit_C_targets translate_to_C );
-use RefactorF4Acc::Builder qw( create_build_script build_flexpart );
-
-use Getopt::Std;
-
-our $usage = "
-    $0 [-hvwCTNbB] <toplevel subroutine name> 
-       [<subroutine name(s) for C translation>]
-    -h: help
-    -w: show warnings 
-    -v: verbose (implies -w)
-    -i: show info messages
-    -C: Only generate call tree, don't refactor or emit
-    -T: Translate <subroutine name> and dependencies to C 
-    -N: Don't replace CONTINUE by CALL NOOP
-    -b: Generate SCons build script, currently ignored 
-    -B: Build FLEXPART (implies -b)
-    -G: Generate Markdown documentation
-    \n";
-
-&main();
-
-# -----------------------------------------------------------------------------
-
-=pod
-
-=begin markdown
-
-## Main subroutine
-
-The `main()` subroutine performs following actions:
-
-- Argument parsing
-- `init_state()`: Initialise the global state
-- `find_subroutines_functions_and_includes()`: Find all subroutines, functions and includes (from now on, 'targets') in the source code tree. 
-The subroutine creates an entry in the state for every target:
-
-        $stref->{$target_type}{$target_name}{'Source'}  = $target_source;
-        $stref->{$target_type}{$target_name}{'Status'}  = $UNREAD;
-        
-- `parse_fortran_src()` :
-
-    - Read the source and do some minimal processsing 
-    
-            $stref = read_fortran_src( $f, $stref );
-        
-    - Parse the type declarations in the source, create a table `%vars`
-    - Get variable declarations unless the target is a function 
-    - Parse Subroutines & Functions
-    
-            $stref = detect_blocks( $f, $stref );     
-            $stref = parse_includes( $f, $stref );        
-            $stref = parse_subroutine_and_function_calls( $f, $stref );
-            
-        Set Status to PARSED    
-    - Parse Includes: parse common blocks and parameters, create `$stref->{'Commons'}`
-    
-            $stref = get_commons_params_from_includes( $f, $stref );
-        
-- `find_root_for_includes()` : Find the root for each include via a recursive descent. We look for the root of the smallest subtree.
-
-- `resolve_globals()` : Find the globals via recursive descent
-
-        $stateref = resolve_globals( $subname, $stateref );
-
-- `determine_argument_io_direction_rec()` : We need to know the IO direction for every subroutine argument in order to group subroutine arguments. Also, a further rewrite might decouple the Ins from the Outs, no more pesky InOuts.
-
-        $stateref = determine_argument_io_direction_rec( $subname, $stateref );
-
-- `analyse_sources()` : This routine analyses the code for goto-based loops and breaks, so that we can rewrite those horrible `DO`-blocks as proper loops. 
-
-        $stateref = analyse_sources($stateref);
-
-- Refactor the sources:
-
-        $stateref = refactor_all_subroutines($stateref);
-        $stateref = refactor_includes($stateref);
-        $stateref = refactor_called_functions($stateref);
-
-- Emit the refactored source:
-
-        if ( not $call_tree_only ) {
-            emit_all($stateref);
-        }
-
-- Translate to C:
-
-	    if ( $translate == $YES ) {
-	        $translate = $GO;
-	        for my $subname   (keys %subs_to_translate ) {
-	            $gen_sub  = 1;
-	            $stateref = parse_fortran_src( $subname, $stateref );
-	            $stateref = refactor_C_targets($stateref);
-	            emit_C_targets($stateref);
-	            &translate_to_C($stateref);
-	        }
-	    }
-    
-- Create build script:
-    
-	    create_build_script($stateref);
-	    if ($build) {
-	        build_flexpart();
-	    }
-    
-- Done.
-    
-    exit(0);
-
-    
-=end markdown
-
-=cut
-
-sub main {
-
-	# Argument parsing. Factor out!
-	if ( not @ARGV ) {
-		die "Please specifiy FORTRAN subroutine or program to refactor\n";
-	}
-	my %opts = ();
-	getopts( 'vwihCTNbBG', \%opts );
-	my $subname = $ARGV[0];
-	if ($subname) {
-		$subname =~ s/\.f$//;
-	}
-
-	$V = ( $opts{'v'} ) ? 1 : 0;
-	$I = ( $opts{'i'} or $V ) ? 1 : 0;
-	$W = ( $opts{'w'} or $V ) ? 1 : 0;
-	my $help = ( $opts{'h'} ) ? 1 : 0;
-	if ($help) {
-		die $usage;
-	}
-	if ( $opts{'G'} ) {
-		print "Generating docs...\n";
-		generate_docs();
-		exit(0);
-	}
-	if ( $opts{'C'} ) {
-		$call_tree_only = 1;
-		$main_tree = $ARGV[1] ? 0 : 1;
-
-	}
-	my %subs_to_translate = ();
-	if ( $opts{'T'} ) {
-		if ( !@ARGV ) {
-			die "Please specify a target subroutine to translate.\n";
-		}
-		$translate = 1;
-		%subs_to_translate = map { $_ => 1 } @ARGV[ 1, -1 ];
-	}
-	$noop = ( $opts{'N'} ) ? 0 : 1;
-
-	my $build = ( $opts{'B'} ) ? 1 : 0;
-
-# ================================================================================
-	#  Initialise the global state.
-	my $stateref = init_state($subname);
-    $stateref->{'SubsToTranslate'}=\%subs_to_translate;
-	# Find all subroutines in the source code tree
-	$stateref = find_subroutines_functions_and_includes($stateref);
-
-# First we analyse the code for use of globals and blocks to be transformed into subroutines
-	$stateref = parse_fortran_src( $subname, $stateref );
-    
-	if ( $call_tree_only and not $ARGV[1] ) {
-		create_call_graph($stateref,$subname);
-		exit(0);
-	}
-
-	# Find the root for each include in a proper way
-	$stateref = find_root_for_includes( $stateref, $subname );
-
-	# Now we can do proper globals handling
-	# We need to walk the tree again, find the globals in rec descent.
-	$stateref = resolve_globals( $subname, $stateref );
-
-# I think we need to refactor the source first without creating the new sources,
-# then us this info to determine the IO direction
-
-	# Now we do the reformatting, block detection etc.
-	$stateref = determine_argument_io_direction_rec( $subname, $stateref );
-
-	$stateref = analyse_sources($stateref);
-
-	# So at this point all we need to do is the actual refactoring ...
-	#	die Dumper($stateref->{'Subroutines'}{'flexpart_wrf'});
-	# Refactor the source
-	$stateref = refactor_all_subroutines($stateref);
-	$stateref = refactor_includes($stateref);
-	$stateref = refactor_called_functions($stateref);
-
-	if ( not $call_tree_only ) {
-		# Emit the refactored source
-		emit_all($stateref);
-	}
-
-	if ( $translate == $YES ) {
-		$translate = $GO;
-		for my $subname ( keys %{ $stateref->{'SubsToTranslate'} }) {
-			print "\nTranslating $subname to C\n";
-			$gen_sub  = 1;
-			$stateref = parse_fortran_src( $subname, $stateref );
-			$stateref = refactor_C_targets($stateref);
-			emit_C_targets($stateref);
-			translate_to_C($stateref);
-		}
-	}
-	create_build_script($stateref);
-	if ($build) {
-		build_flexpart();
-	}
-	exit(0);
-
-}    # END of main()
