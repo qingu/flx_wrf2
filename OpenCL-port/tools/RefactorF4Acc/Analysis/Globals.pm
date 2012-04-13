@@ -61,15 +61,17 @@ sub resolve_globals {
         for my $csub (@csubs) {
             $stref = resolve_globals( $csub, $stref );
             my $Scsub = $stref->{'Subroutines'}{$csub};
-
-            # Merge them with globals for $f
-            for my $inc ( keys %{ $Sf->{'CommonIncludes'} } ) {
-                $Sf->{'Globals'}{$inc} = ordered_union( $Sf->{'Globals'}{$inc},
-                    $Scsub->{'Globals'}{$inc} );                    
-            }           
+            # If $csub has globasl, merge them with globals for $f
+            if (exists $Scsub->{'Globals'} ) {
+                for my $inc ( keys %{ $Sf->{'CommonIncludes'} } ) {
+            	   if ( exists $Scsub->{'Globals'}{$inc}) {
+                    $Sf->{'Globals'}{$inc} = ordered_union( $Sf->{'Globals'}{$inc},
+                        $Scsub->{'Globals'}{$inc} );
+            	   }                    
+                }    
+            }            
         }
     } else {
-
         # Leaf node, find globals
         print "SUB $f is LEAF\n" if $V;
         $stref = identify_globals_used_in_subroutine( $f, $stref );
@@ -194,12 +196,12 @@ sub determine_subroutine_arguments {
 
     #   local $V=1 if $f=~/interpol/;
     my $Sf     = $stref->{'Subroutines'}{$f};
-    my $srcref = $Sf->{'Lines'};
+    my $srcref = $Sf->{'AnnLines'};
     if ( defined $srcref ) {
 
         # First determine subroutine arguments. Factor out?
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-            my $line = $srcref->[$index];
+            my $line = $srcref->[$index][0];
 #           my $SfI  = $Sf->{'Info'};
             if ( $line =~ /^C\s+/ ) {
                 next;
@@ -207,13 +209,15 @@ sub determine_subroutine_arguments {
 
             # Determine the subroutine arguments
             if ( $line =~ /^\s+subroutine\s+(\w+)\s*\((.*)\)/ ) {
-                my $name   = $1;
+                my $name   = $1;                
                 my $argstr = $2;
                 $argstr =~ s/^\s+//;
                 $argstr =~ s/\s+$//;
                 my @args = split( /\s*,\s*/, $argstr );
                 $Sf->{'Info'}->[$index]{'Signature'}{'Args'} = [@args];
                 $Sf->{'Info'}->[$index]{'Signature'}{'Name'} = $name;
+                $srcref->[$index][1]{'Signature'}{'Args'} = [@args];
+                $srcref->[$index][1]{'Signature'}{'Name'} = $name;
                 $Sf->{'Args'}                                = [@args];
                 last;
             } elsif ( $line =~ /^\s+subroutine\s+(\w+)[^\(]*$/ ) {
@@ -229,11 +233,14 @@ sub determine_subroutine_arguments {
                         print "INFO: $f has 'implicit none'\n" if $V;
                         my $idx = $Sf->{'ImplicitNone'} + 1;
                         $Sf->{'Info'}->[$idx]{'ExGlobVarDecls'} = {};
+                        $srcref->[$idx][1]{'ExGlobVarDecls'}={};                                        
                     } else {
                         $Sf->{'Info'}->[$index]{'ExGlobVarDecls'} = {};
+                        $srcref->[$index][1]{'ExGlobVarDecls'}={};
                     }
                 }
                 $Sf->{'Info'}->[$index]{'Signature'}{'Name'} = $name;
+                $srcref->[$index][1]{'Signature'}{'Name'} = $name;
                 $Sf->{'Args'} = [];
                 last;
             } elsif ( $line =~ /^\s+program\s+(\w+)\s*$/ ) {
@@ -241,10 +248,13 @@ sub determine_subroutine_arguments {
                 my $name = $1;
                 $Sf->{'Info'}->[$index]{'Signature'}{'Args'} = [];
                 $Sf->{'Info'}->[$index]{'Signature'}{'Name'} = $name;
+                $srcref->[$index][1]{'Signature'}{'Args'} = [];
+                $srcref->[$index][1]{'Signature'}{'Name'} = $name;
                 last;
             }
         }    # for each line
     }
+    $Sf->{'AnnLines'}=$srcref;
     return $stref;
 }    # END of determine_subroutine_arguments()
 # -----------------------------------------------------------------------------

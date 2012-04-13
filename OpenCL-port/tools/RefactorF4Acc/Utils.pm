@@ -67,26 +67,41 @@ sub get_maybe_args_globs {
 # -----------------------------------------------------------------------------
 sub union {
     ( my $aref, my $bref ) = @_;
+    croak("union()") unless (defined $aref and defined $bref);    
+    if (not defined $aref) {
+        return $bref;
+    } elsif (not defined $bref) {
+        return $aref;
+    } else {    
+
     my %as = map { $_ => 1 } @{$aref};
     for my $elt ( @{$bref} ) {
         $as{$elt} = 1;
     }
     my @us = sort keys %as;
     return \@us;
+    }
 }    # END of union()
 
 # -----------------------------------------------------------------------------
 # This union is obtained by removing duplicates from @b. It is a bit slower but preserves the order
 sub ordered_union {
     ( my $aref, my $bref ) = @_;
-    my @us = @{$aref};
-    my %as = map { $_ => 1 } @{$aref};
-    for my $elt ( @{$bref} ) {
-        if ( not exists $as{$elt} ) {
-            push @us, $elt;
-        }
+    croak("ordered_union()") unless (defined $aref and defined $bref);   
+    if (not defined $aref) {
+    	return $bref;
+    } elsif (not defined $bref) {
+        return $aref;
+    } else {    
+	    my @us = @{$aref};
+	    my %as = map { $_ => 1 } @{$aref};
+	    for my $elt ( @{$bref} ) {
+	        if ( not exists $as{$elt} ) {
+	            push @us, $elt;
+	        }
+	    }
+	    return \@us;
     }
-    return \@us;
 }    # END of ordered_union()
 
 # -----------------------------------------------------------------------------

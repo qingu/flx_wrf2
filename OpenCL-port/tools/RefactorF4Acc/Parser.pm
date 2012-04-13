@@ -38,7 +38,7 @@ sub parse_fortran_src {
     my $sub_or_func = sub_func_or_incl( $f, $stref );
     my $Sf          = $stref->{$sub_or_func}{$f};
     my $is_incl     = exists $stref->{'IncludeFiles'}{$f} ? 1 : 0;
-    my $is_func     = exists $stref->{'Functions'}{$f} ? 1 : 0;
+#    my $is_func     = exists $stref->{'Functions'}{$f} ? 1 : 0;
     
     # Set 'RefactorGlobals' to 0, we only refactor the globals for subs that are kernel targets and their dependencies
     if (not exists $Sf->{'RefactorGlobals'} ){ 
