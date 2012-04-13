@@ -32,7 +32,7 @@ Subroutines
 =cut
 
 # --------------------------------------------------------------------------------
-# This routine renames the declarations of local variables than conflict with global variables
+# This routine renames the declarations of local variables that conflict with global variables
 sub create_refactored_vardecls {
     ( my $stref, my $f, my $annline, my $rlines, my $is_C_target ) = @_;
     my $Sf        = $stref->{'Subroutines'}{$f};
@@ -76,9 +76,10 @@ sub create_refactored_vardecls {
     if ( $line !~ /\(.*?\)/ ) {   
     # If the line does not contain array decls,
     # remove the spaces from the original line and use them for the new line
+#    warn "<$line>\n";
         $rline =
             $spaces
-          . $Sf->{'Vars'}{ $vars[0] }{'Type'} . ' '
+          . $Sf->{'Vars'}{ $vars[0] }{'Type'} . ' :: '
           . join( ',', @nvars ) . "\n";       
     } else {    
         # For arrays, we split the declaration over multiple lines

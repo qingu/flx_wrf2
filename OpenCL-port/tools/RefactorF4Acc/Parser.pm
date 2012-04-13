@@ -31,8 +31,8 @@ use Exporter;
 # All that should happen in a separate pass. But we do it here anyway
 sub parse_fortran_src {
     ( my $f, my $stref ) = @_;
-
-    #    print "PARSING $f\n ";
+local $V=1;
+        print "PARSING $f\n ";
     # 1. Read the source and do some minimal processsing
     $stref = read_fortran_src( $f, $stref );
     my $sub_or_func = sub_func_or_incl( $f, $stref );
@@ -109,11 +109,16 @@ sub get_var_decls {
 
     #           my $sub_or_incl = $is_incl ? 'Includes' : 'Subroutines';
     my $sub_func_incl = sub_func_or_incl( $f, $stref );
-    my $srcref = $stref->{$sub_func_incl}{$f}{'Lines'};
+    my $Sf=$stref->{$sub_func_incl}{$f};
+    my $srcref = $Sf->{'Lines'};
     if ( defined $srcref ) {
         print "\nVAR DECLS in $f:\n" if $V;
         my %vars  = ();
         my $first = 1;
+        my $is_vardecl=0;
+        my $type    = 'NONE';
+        my $varlst  = '';        
+        
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
             my $line = $srcref->[$index];
 
@@ -129,16 +134,26 @@ sub get_var_decls {
             if ( $line =~ /implicit\s+none/ ) {
 
                 #               print "INFO: $f has 'implicit none'\n";
-                $stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'ImplicitNone'} =
+                $Sf->{'Info'}->[$index]{'ImplicitNone'} =
                   {};
-                $stref->{$sub_func_incl}{$f}{'ImplicitNone'} = $index;
+                $Sf->{'ImplicitNone'} = $index;
             }
+            # Actual variable declaration line
+            
             if ( $line =~
 /(logical|integer|real|double\s*precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
               )
             {
-                my $type    = $1;
-                my $varlst  = $2;
+                $type    = $1;
+                $varlst  = $2;
+                $is_vardecl=1;
+            } elsif ($line=~/^\s*(.*)\s*::\s*(.*?)\s*$/) {
+                $type    = $1;
+                $varlst  = $2;
+                $is_vardecl=1;            	
+            }
+                if ($is_vardecl) {
+                	$is_vardecl=0;
                 my $tvarlst = $varlst;
 
                 if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
@@ -197,7 +212,7 @@ sub get_var_decls {
                          # this notation with type(number)
                          # Also, this is not limited to arrays, we could have e.g. integer v*4
                          if ($tvar =~ /\*(\d+)/) {                          
-                            $type="$type($1)";
+                            $type="$type, dimension($1)";
                             $tvar =~ s/\*\d+//;
                          }
                         $vars{$tvar}{'Kind'}  = 'Array';
@@ -208,6 +223,15 @@ sub get_var_decls {
                         $vars{$tvar}{'Shape'} = [];
                     }
                     $vars{$tvar}{'Type'} = $type;
+                    # Take IODir from INTENT
+                    if ($type=~/\Wintent\s*\(\s*(\w+)\s*\)/) {
+                    	my $iodir=$1;
+                    	$iodir=ucfirst($iodir);
+                    	if ($iodir eq 'Inout') {
+                    		$iodir = 'InOut';
+                    	}
+                    	$vars{$tvar}{'IODir'}=$iodir;
+                    }
                     $var =~ s/;/,/g;
                     $vars{$tvar}{'Decl'} = "        $type $var"
                       ; # TODO: this should maybe not be a textual representation
@@ -249,6 +273,7 @@ sub parse_includes {
     print "PARSING INCLUDES for $f\n" if $V;
     my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
     my $Sf=$stref->{$sub_or_func_or_inc}{$f};
+    
     my $srcref = $Sf->{'Lines'};
     for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
         my $line = $srcref->[$index];
@@ -801,7 +826,7 @@ sub read_fortran_src {
         };
         if ($ok) {
             print "READING SOURCE for $f ($sub_func_incl)\n" if $V;
-            local $V = 0;
+            
             my $lines    = [];
             my $prevline = '';
 
@@ -852,13 +877,14 @@ sub read_fortran_src {
                    $fix_or_free_test=0;
                    if ($line!~/^[\s\d]{6}.+/ and $line!~/^\t\w/) {
                     $free_form=1;
-                    die "$f is in FREE FORM:<$line>";
+                    print "$f is in FREE FORM (1)\n" if $V;
                    } else {
                    	print "$f is in FIXED layout\n" if $V;
                    }
                 }
                 if ($free_form==0 && $line=~/\&\s*$/) {
                 	$free_form=1;
+                	print "$f is in FREE FORM (2)\n" if $V;
                 	$cont=1;
                 	$prevline=$line;
                 }
@@ -894,7 +920,7 @@ sub read_fortran_src {
                     # A comment occuring after a continuation line. Skip!
                     next;                
                 } else {
-                    
+#                    warn "HERE: $line";
                     my $sixspaces = ' ' x 6;
                     $prevline =~ s/^\t/$sixspaces/;
                     $prevline =~ /^(\d+)\t/ && do {
@@ -904,7 +930,7 @@ sub read_fortran_src {
                         my $str    = $label . $spaces;
                         $prevline =~ s/^(\d+)\t/$str/;
                     };
-                    if ( substr( $prevline, 0, 2 ) ne 'C ' ) {
+                    if ( substr( $prevline, 0, 2 ) ne '! ' ) {
                         if ( $prevline !~ /^\s+include\s+\'/i ) {
 
                             # replace string constants by placeholders
@@ -922,7 +948,7 @@ sub read_fortran_src {
      #                  ( $prevline, my $comment ) = split( /\s+\!/, $prevline );
                     }
                     my $lcprevline =
-                      ( substr( $prevline, 0, 2 ) eq 'C ' )
+                      ( substr( $prevline, 0, 2 ) eq '! ' )
                       ? $prevline
                       : lc($prevline);
                     $lcprevline =~ s/__ph(\d+)__/__PH$1__/g;
@@ -942,7 +968,7 @@ sub read_fortran_src {
             if ( $line ne $prevline )
             {    # Too weak, if there are comments in between it breaks!
                 my $lcprevline =
-                  ( substr( $prevline, 0, 2 ) eq 'C ' )
+                  ( substr( $prevline, 0, 2 ) eq '! ' )
                   ? $prevline
                   : lc($prevline);
                 push @{$lines}, $lcprevline;
@@ -987,10 +1013,11 @@ sub read_fortran_src {
        # FIXME: weak, the return type of the function can be more than one word!
                 if (   $is_incl == 0
                     && $line =~
-                    /^\s+(program|subroutine|(?:\w+\s+)?function)\s+(\w+)/ )
+                    /^\s*(program|subroutine|(?:\w+\s+)?function)\s+(\w+)/ )
                 {
                     my $keyword = $1;
                     $name = $2;
+                    
                     if ( $keyword =~ /function/ ) {
                         $sub_func_incl = 'Functions';
                     } else {
@@ -1020,6 +1047,7 @@ sub read_fortran_src {
                 }
 
             }
+            
         }    # if OK
     }    # if Status==0
 

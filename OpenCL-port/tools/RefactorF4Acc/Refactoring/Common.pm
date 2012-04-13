@@ -103,7 +103,19 @@ sub context_free_refactorings {
                 $line =~ s/$ph/$str/;
             }
         }
+        if (exists $tags{'VarDecl'} ) {
+#        	warn "$sub_or_func $f: $line\n";
+        	my @vars=@{$tags{'VarDecl'}};
+        	for my $var (@vars) {
+        		my $spaces = $Sf->{'Vars'}{$var}{'Decl'};
+        		$spaces=~s/\S.*$//;
+        		my $extra_line = $spaces.$Sf->{'Vars'}{$var}{'Type'}.' :: '.$var;
+#        		warn $extra_line."\n";
+                push @{ $Sf->{'RefactoredCode'} },[$extra_line,{'Extra'=>1,'VarDecl'=>1}];        		
+        	}
+        } else {
         push @{ $Sf->{'RefactoredCode'} }, [$line, $tags_lref];
+        }
             if (@extra_lines) {
                 for my $extra_line (@extra_lines) {
                     push @{ $Sf->{'RefactoredCode'} },

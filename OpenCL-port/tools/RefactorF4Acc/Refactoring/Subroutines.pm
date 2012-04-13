@@ -201,6 +201,7 @@ sub refactor_globals {
 
         }
         if ( exists $tags{'VarDecl'} ) {
+#        	warn join(';',keys %tags)."\n";
             $rlines = create_refactored_vardecls( $stref, $f, $annline, $rlines,
                 $is_C_target );
             $skip = 1;

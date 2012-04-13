@@ -184,7 +184,7 @@ sub parse_args {
 	getopts( 'vwihCTNbBG', \%opts );
 	my $subname = $ARGV[0];
 	if ($subname) {
-		$subname =~ s/\.f$//;
+		$subname =~ s/\.f(?:90)?$//;
 	}
 
 	$V = ( $opts{'v'} ) ? 1 : 0;

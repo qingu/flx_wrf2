@@ -22,7 +22,7 @@ use Exporter;
 use File::Find;
 
 # Find all source files in the current directory
-sub find_subroutines_functions_and_includes {
+sub find_subroutines_functions_and_includes {	
     my $stref = shift;
     my $dir   = '.';
 
@@ -30,7 +30,7 @@ sub find_subroutines_functions_and_includes {
     my %src_files = ();
     my $tf_finder = sub {
         return if !-f;
-        return if !/\.f$/;
+        return if !/\.f(?:90)?$/ ;
         $src_files{$File::Find::name} = 1;
     };
     find( $tf_finder, $dir );
@@ -46,23 +46,23 @@ sub find_subroutines_functions_and_includes {
             $line =~ /^[C\*\!]/i && next;
 
             # Find subroutine/program signatures
-            $line =~ /^\s+(subroutine|program)\s+(\w+)/i && do {
-                my $is_prog = $1 eq 'program' ? 1 : 0;
+            $line =~ /^\s*(subroutine|program)\s+(\w+)/i && do {            	
+                my $is_prog = ($1 eq 'program') ? 1 : 0;
                 if ( $is_prog == 1 ) {
                     print "Found program $2 in $src\n" if $V;
-                }
+                }                
                 my $sub  = lc($2);
                 $stref->{'Subroutines'}{$sub}={};
                 my $Ssub = $stref->{'Subroutines'}{$sub};
                 if (
                     not exists $Ssub->{'Source'}
-                    or (    $src =~ /$sub\.f/
-                        and $Ssub->{'Source'} !~ /$sub\.f/ )
+                    or (    $src =~ /$sub\.f(?:90)?/
+                        and $Ssub->{'Source'} !~ /$sub\.f(?:90)?/ )
                   )
                 {
                     if (    exists $Ssub->{'Source'}
-                        and $src =~ /$sub\.f/
-                        and $Ssub->{'Source'} !~ /$sub\.f/ )
+                        and $src =~ /$sub\.f(?:90)?/
+                        and $Ssub->{'Source'} !~ /$sub\.f(?:90)?/ )
                     {
                         print "WARNING: Ignoring source "
                           . $Ssub->{'Source'}
