@@ -30,12 +30,24 @@ sub find_subroutines_functions_and_includes {
     my %src_files = ();
     my $tf_finder = sub {
         return if !-f;
-        return if !/\.f(?:90)?$/ ;
+        return if (!/\.f(?:90)?$/ &&!/\.c$/); # rather ad-hoc for Flexpart + WRF
+        # FIXME: we must have a list of folders to search or not to search!
         $src_files{$File::Find::name} = 1;
     };
     find( $tf_finder, $dir );
 
     for my $src ( keys %src_files ) {
+    	if  ($src=~/\.c$/) {
+    		warn "C SOURCE: $src\n";
+    		# FIXME: ugly ad-hoc hack!
+    		# WRF uses cpp to make subroutine names match with Fortran
+    		# So we need to call cpp first, but with all the correct macros ...
+    		# Without any defined macros, it's like this:    	
+    		my @lines=`grep -v '#include' $src  | cpp -P -`;
+    		# I guess we could use some command-line flag to add the macro definitions
+    		# And now we must parse C sources too ...
+#    		die; 
+    	}
         open my $SRC, '<', $src;
         while ( my $line = <$SRC> ) {
 
