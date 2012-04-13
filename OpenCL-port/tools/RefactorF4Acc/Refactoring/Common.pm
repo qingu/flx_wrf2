@@ -213,8 +213,13 @@ sub split_long_line {
         my @split_lines = ();
         if ( @chunks > 1 ) {
             my $fst = 1;
+            my $rest=scalar @chunks;
             for my $chunk (@chunks) {
-                if ($fst) {
+            	if ($rest>0) {
+            		$rest--;
+            		$chunk.= ' &'; # WARNING: FREE FORM!            		
+            	}
+                if ($fst) {                	
                     $fst = 0;
                 } else {
                     if ( $chunk =~ /^\s*$/ ) {
@@ -222,7 +227,8 @@ sub split_long_line {
                     } else {
 
                         #                       $chunk = '     &  ' . $chunk;
-                        $chunk = '     &' . $chunk;
+#                        $chunk = '     &' . $chunk;
+                        $chunk = '      ' . $chunk; # WARNING: free form but with 6 spaces ...
                     }
                 }
                 push @split_lines, $chunk;
@@ -230,7 +236,7 @@ sub split_long_line {
         } else {
             @split_lines = @chunks;
         }
-        if (   $split_lines[0] !~ /^C/
+        if (   $split_lines[0] !~ /^\!/
             && $split_lines[0] =~ /\t/
             && $split_lines[0] !~ /^\s{6}/
             && $split_lines[0] !~ /^\t/ )

@@ -45,12 +45,8 @@ sub parse_fortran_src {
         $Sf->{'RefactorGlobals'} = 0;
     }
 # 2. Parse the type declarations in the source, create a per-target table Vars and a per-line VarDecl list
-# We don't do this in functions at the moment, because we don't need to? NO! FIXME!
-#    if ( not $is_func ) {
-#    	die if $f eq 'cgszll';
         $stref = get_var_decls( $f, $stref );
-#    }
-            # 3. Parse includes
+# 3. Parse includes
     $stref = parse_includes( $f, $stref );
     if ( not $is_incl ) {
 
@@ -121,14 +117,15 @@ sub get_var_decls {
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
             my $line = $srcref->[$index];
 
-            if ( $line =~ /^C\s+/ ) {
+            if ( $line =~ /^\!\s+/ ) {
                 next;
             }
-            if ( $line =~ /^\!\s/ ) {
-                $stref->{$sub_func_incl}{$f}{'Info'}
-                  ->[$index]{'TrailingComments'} = {};
-                next;
-            }
+            # FIXME Trailing comments are ignored!
+#            if ( $line =~ /^\!\s/ ) {
+#                $stref->{$sub_func_incl}{$f}{'Info'}
+#                  ->[$index]{'TrailingComments'} = {};
+#                next;
+#            }
             if ( $line =~ /implicit\s+none/ ) {
 
                 #               print "INFO: $f has 'implicit none'\n";
@@ -255,7 +252,7 @@ sub parse_includes {
     my $srcref = $Sf->{'Lines'};
     for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
         my $line = $srcref->[$index];
-        if ( $line =~ /^C\s+/ or $line =~ /^\!\s/ ) {
+        if ( $line =~ /^\!\s/ ) {
             next;
         }
 
@@ -287,13 +284,13 @@ sub detect_blocks {
     $stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
     my $srcref = $stref->{$sub_func_incl}{$s}{'Lines'};
     for my $line ( @{$srcref} ) {       
-        if ( $line =~ /^C\s/i ) {
+        if ( $line =~ /^\!\s/ ) {
 
 # I'd like to use the OpenACC compliant pragma !$acc kernels , !$acc end kernels
 # but OpenACC does not allow to provide a name
 # so I propose my own tag: !$acc subroutine name, !$acc end subroutine
-            if (   $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/
-                or $line =~ /^C\s\$acc\ssubroutine\s(\w+)/i )
+            if (   $line =~ /^\!\s+BEGIN\sSUBROUTINE\s(\w+)/
+                or $line =~ /^\!\s\$acc\ssubroutine\s(\w+)/i )
             {
                 $stref->{$sub_func_incl}{$s}{'HasBlocks'} = 1;
                 my $tgt = uc( substr( $sub_func_incl, 0, 3 ) );
@@ -347,8 +344,8 @@ sub separate_blocks {
     
     for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
         my $line = $srcref->[$index];
-        if (   $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/
-            or $line =~ /^C\s\$acc\s+subroutine\s(\w+)/i )
+        if (   $line =~ /^\!\s+BEGIN\sSUBROUTINE\s(\w+)/
+            or $line =~ /^\!\s\$acc\s+subroutine\s(\w+)/i )
         {
             $in_block = 1;
             $block    = $1;
@@ -369,8 +366,8 @@ sub separate_blocks {
             $blocks{$block}{'BeginBlockIdx'} = $index;
             next;
         }
-        if (   $line =~ /^C\s+END\sSUBROUTINE\s(\w+)/
-            or $line =~ /^C\s\$acc\s+end\ssubroutine\s(\w+)/i )
+        if (   $line =~ /^\!\s+END\sSUBROUTINE\s(\w+)/
+            or $line =~ /^\!\s\$acc\s+end\ssubroutine\s(\w+)/i )
         {
             $in_block = 0;
             $block    = $1;
@@ -538,7 +535,7 @@ sub parse_subroutine_and_function_calls {
         #        my %called_subs         = ();
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
             my $line = $srcref->[$index];
-            next if $line =~ /^C\s+/;
+            next if $line =~ /^\!\s/;
 
       # Subroutine calls. Surprisingly, these even occur in functions! *shudder*
             if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )
@@ -695,7 +692,7 @@ sub get_commons_params_from_includes {
 
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
             my $line = $srcref->[$index];
-            if ( $line =~ /^C\s+/ ) {
+            if ( $line =~ /^\!\s/ ) {
                 next;
             }
             if ( $line =~ /^\s*common\s+\/\s*[\w\d]+\s*\/\s+(.+)$/ ) {
@@ -819,7 +816,9 @@ sub read_fortran_src {
             my @phs                   = ();
             my @placeholders_per_line = ();
             my $ct                    = 0;
-
+            
+            my $free_form=0;
+            my $fix_or_free_test=1;
             my $line = '';
             while (<$SRC>) {
                 $line = $_;
@@ -827,18 +826,17 @@ sub read_fortran_src {
 
                 # Skip blanks
                 $line =~ /^\s*$/ && next;
-
                 # Detect blocks
                 if ( $stref->{$sub_func_incl}{$s}{'HasBlocks'} == 0 ) {
-                    if ( $line =~ /^C\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
+                    if ( $line =~ /^\!\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
                         $stref->{$sub_func_incl}{$s}{'HasBlocks'} = 1;
                     }
                 }
 
-                # Detect and standardise comments
+                # Detect and standardise comments                
                 if ( $line =~ /^[CD\*\!]/i or $line =~ /^\ {6}\s*\!/i ) {
-                    $line =~ s/^\s*[CcDd\*\!]/C /;
-                } elsif ( $line =~ /\s+\!.*$/ )
+                    $line =~ s/^\s*[CcDd\*\!]/! /;
+                } elsif ( $line =~ /\S\s+\!.*$/ )
                 {    # FIXME: trailing comments are discarded!
                     my $tline = $line;
                     $tline =~ s/\'.+?\'//;
@@ -847,30 +845,56 @@ sub read_fortran_src {
                   # convert trailing comments into comments on the previous line
                         $line = ( split( /\s+\!/, $line ) )[0];
                     }
+                } elsif ($fix_or_free_test) {
+                	# If it's not a comment and we still have to check if it's fixed or free form
+                	# Testing a single line is maybe not enough, it might be 6-space by coincidence ...
+                	# The real test is on continuation lines
+                   $fix_or_free_test=0;
+                   if ($line!~/^[\s\d]{6}.+/ and $line!~/^\t\w/) {
+                    $free_form=1;
+                    die "$f is in FREE FORM:<$line>";
+                   } else {
+                   	print "$f is in FIXED layout\n" if $V;
+                   }
                 }
-
-                if ( $line =~ /^\ {5}[^0\s]/ ) {    # continuation line
+                if ($free_form==0 && $line=~/\&\s*$/) {
+                	$free_form=1;
+                	$cont=1;
+                	$prevline=$line;
+                }
+                if ($free_form==1 && $cont==1 and $line!~/^\!\s/) {
+                	if ( $line =~ /^\s*\&/ ) {
+                        $line =~ s/^\s*\&\s*/ /;
+                	}
+                	$prevline.=$line;
+                	if ($line!~/\&\s*$/) {
+                		# this is the end of the continuation line
+                		$cont=0;
+                	}
+                }
+                
+                if ($free_form==0 && $line =~ /^\ {5}[^0\s]/ ) {    # continuation line. Continuation character can be anything!
                     $line =~ s/^\s{5}.\s*/ /;
                     $prevline .= $line;
                     $cont = 1;
-                } elsif ( $line =~ /^\&/ ) {
+                } elsif ($free_form==0 && $line =~ /^\&/ ) {
                     $line =~ s/^\&\t*/ /;
                     $prevline .= $line;
                     $cont = 1;
-                } elsif ( $line =~ /^\t[1-9]/ ) {
+                } elsif ($free_form==0 && $line =~ /^\t[1-9]/ ) {
                     $line =~ s/^\t[0-9]/ /;
                     $prevline .= $line;
                     $cont = 1;
-                } elsif ( $prevline =~ /\&\s&$/ ) {
+                } elsif ($free_form==0 && $prevline =~ /\&\s&$/ ) { 
                     $prevline =~ s/\&\s&$//;
                     $prevline .= $line;
-                    $cont = 1;
-                } elsif ( $line =~ /^C\ / && ( $cont == 1 ) ) {
+                    $cont = 1;                
+                } elsif ( $line =~ /^\!\ / && ( $cont == 1 ) ) {
 
                     # A comment occuring after a continuation line. Skip!
-                    next;
+                    next;                
                 } else {
-
+                    
                     my $sixspaces = ' ' x 6;
                     $prevline =~ s/^\t/$sixspaces/;
                     $prevline =~ /^(\d+)\t/ && do {
@@ -985,7 +1009,7 @@ sub read_fortran_src {
                 }
                 if ( $ok == 1 ) {
                     push @{ $stref->{$sub_func_incl}{$name}{'Lines'} }, $line;
-                    if ( $line =~ /^C/ ) {
+                    if ( $line =~ /^\!/ ) {
                         $stref->{$sub_func_incl}{$name}{'Info'}
                           ->[$index]{'Comments'} = {};
                     }

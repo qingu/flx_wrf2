@@ -160,7 +160,7 @@ sub identify_globals_used_in_subroutine {
             my $tvars = $commons{$cinc};
             for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
                 my $line = $srcref->[$index];
-                if ( $line =~ /^C\s+/ )                            { next; }
+                if ( $line =~ /^\!\s+/ )                            { next; }
                 if ( $line =~ /^\s+end/ )                          { next; }
                 if ( $line =~ /^\s+(subroutine|program)\s+(\w+)/ ) { next; }
 
@@ -203,7 +203,7 @@ sub determine_subroutine_arguments {
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
             my $line = $srcref->[$index][0];
 #           my $SfI  = $Sf->{'Info'};
-            if ( $line =~ /^C\s+/ ) {
+            if ( $line =~ /^\!\s/ ) {
                 next;
             }
 

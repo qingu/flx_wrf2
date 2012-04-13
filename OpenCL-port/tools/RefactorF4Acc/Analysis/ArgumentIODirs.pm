@@ -321,7 +321,7 @@ sub analyse_src_for_iodirs {
             my $tags = $annlines->[$index][1];
 #            print $line,"\n";
 #            print Dumper( $tags );
-            if ( $line =~ /^C\s+/ ) {
+            if ( $line =~ /^\!\s+/ ) {
                 next;
             }
             # Skip the signature            

@@ -68,7 +68,7 @@ sub identify_loops_breaks {
         my $nest = 0;
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
             my $line = $srcref->[$index];
-            next if $line =~ /^C\s+/;
+            next if $line =~ /^\!\s+/;
 
             # BeginDo:
             $line =~ /^\s+do\s+(\d+)\s+\w/ && do {
