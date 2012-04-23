@@ -132,7 +132,7 @@ sub resolve_conflicts_with_params {
 sub identify_globals_used_in_subroutine {
     ( my $f, my $stref ) = @_;
 
-#       local $V=1 if $f=~/main_loop/;
+#       local $V=1 if $f eq 'interpol_all';
     my $Sf = $stref->{'Subroutines'}{$f};
 
     # First determine subroutine arguments.
@@ -143,8 +143,12 @@ sub identify_globals_used_in_subroutine {
     if ( not exists $Sf->{'Commons'} ) {
         for my $inc ( keys %{ $Sf->{'CommonIncludes'} } ) {
             print "COMMONS from $inc in $f? \n" if $V;
-            $commons{$inc} = $stref->{'IncludeFiles'}{$inc}{'Commons'};         
+            $commons{$inc} = { %{ $stref->{'IncludeFiles'}{$inc}{'Commons'} } }; # This was a bug: ref insteaf of copy!         
         }
+# Commons in Includes OK here        
+#print "SUB: $f\n";
+#        	print Dumper( $stref->{'IncludeFiles'}{'includecom'}{'Commons'}{'vdepn'}) ;
+
         $Sf->{'Commons'}    = \%commons;
         $Sf->{'HasCommons'} = 1;
     } else {
@@ -153,7 +157,8 @@ sub identify_globals_used_in_subroutine {
     }
 
     my $srcref = $Sf->{'Lines'};
-    if ( defined $srcref ) {
+    print "GLOBALS ANALYSIS in $f\n" if $V; 
+    if ( defined $srcref and not exists $Sf->{'Globals'} ) {
         for my $cinc ( keys %{ $Sf->{'CommonIncludes'} } ) {
             print "\nGLOBAL VAR ANALYSIS for $cinc in $f\n" if $V;
             my @globs = ();
@@ -183,10 +188,12 @@ sub identify_globals_used_in_subroutine {
                 }
                 print "\n";
             }
+#            $Sf->{'Globals'}{$cinc} = \@globs;
             $Sf->{'Globals'}{$cinc} = \@globs;
         }
     }
-#   die if $f=~/main_loop/;
+#   print Dumper($stref->{'IncludeFiles'}{'includecom'}{'Commons'}{'vdepn'}) if $f eq 'interpol_all'; OK here ...
+#   die if $f eq 'interpol_all';
     return $stref;
 }    # END of identify_globals_used_in_subroutine()
 # -----------------------------------------------------------------------------

@@ -2,8 +2,8 @@ package RefactorF4Acc::Refactoring::Subroutines;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
-use RefactorF4Acc::Refactoring::Common qw( get_annotated_sourcelines create_refactored_source );
-use RefactorF4Acc::Refactoring::Subroutines::Signatures; 
+use RefactorF4Acc::Refactoring::Common qw( get_annotated_sourcelines create_refactored_source context_free_refactorings );
+use RefactorF4Acc::Refactoring::Subroutines::Signatures qw( create_refactored_subroutine_signature refactor_subroutine_signature refactor_kernel_signatures ); 
 use RefactorF4Acc::Refactoring::Subroutines::Includes;
 use RefactorF4Acc::Refactoring::Subroutines::Declarations;
 use RefactorF4Acc::Refactoring::Subroutines::Calls qw( create_refactored_subroutine_call );
@@ -28,6 +28,7 @@ use Exporter;
 
 @RefactorF4Acc::Refactoring::Subroutines::EXPORT_OK = qw(
     &refactor_all_subroutines
+    &refactor_kernel_signatures
 );
 
 =pod
@@ -97,8 +98,11 @@ sub refactor_subroutine_main {
         print "REFACTORING SUBROUTINE $f\n";
         print "#" x 80, "\n";
     }
+    $stref = context_free_refactorings( $stref, $f );    
     my $Sf = $stref->{'Subroutines'}{$f};
     my $annlines = get_annotated_sourcelines($stref,$f);
+#    print Dumper($annlines) if $f eq 'interpol_vdep_nests';
+#    die if $f eq 'interpol_vdep_nests'; 
     my $rlines = $annlines;
     if ( $Sf->{'HasCommons'} ) {
         if ( $Sf->{'RefactorGlobals'} == 1 ) {
@@ -114,6 +118,7 @@ sub refactor_subroutine_main {
 #    {
 #        $stref = create_refactored_source( $stref, $f, $rlines );
 #    }
+#die Dumper($Sf->{'RefactoredCode'}) if $f eq 'interpol_all';
     return $stref;
 }    # END of refactor_subroutine_main()
 
@@ -165,7 +170,7 @@ sub refactor_globals {
             $rlines =
               create_refactored_subroutine_signature( $stref, $f, $annline,
                 $rlines );
-#               croak Dumper($rlines) if $f eq 'particles_main_loop';
+#               croak Dumper($rlines) if $f eq 'interpol_all';
             $skip = 1;
         }
 
@@ -175,14 +180,14 @@ sub refactor_globals {
 
         if ( exists $tags{'ExGlobVarDecls'} ) {            
 
-            # First, abuse ExGlobVarDecls as a hook for the addional includes
+            # First, abuse ExGlobVarDecls as a hook for the addional includes, if any
             $rlines =
               create_new_include_statements( $stref, $f, $annline, $rlines );
 
             # Then generate declarations for ex-globals
             $rlines =
               create_exglob_var_declarations( $stref, $f, $annline, $rlines );
-
+#            warn Dumper($rlines) ;
 # While we're here, might as well generate the declarations for remapping and reshaping.
 # If the subroutine contains a call to a function that requires this, of course.
 # Executive decision: do this only for the routines to be translated to C/OpenCL
@@ -225,6 +230,7 @@ sub refactor_globals {
     }
 #    $Sf->{'RefactoredCode'}=$rlines;
 #    return $stref;
+# die  if $f eq 'interpol_all'; 
     return $rlines;
 }    # END of refactor_globals()
 

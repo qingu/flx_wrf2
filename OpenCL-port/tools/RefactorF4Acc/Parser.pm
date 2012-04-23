@@ -31,8 +31,8 @@ use Exporter;
 # All that should happen in a separate pass. But we do it here anyway
 sub parse_fortran_src {
     ( my $f, my $stref ) = @_;
-local $V=1;
-        print "PARSING $f\n ";
+#local $V=1;
+        print "PARSING $f\n " if $V;
     # 1. Read the source and do some minimal processsing
     $stref = read_fortran_src( $f, $stref );
     my $sub_or_func = sub_func_or_incl( $f, $stref );
@@ -798,6 +798,7 @@ sub get_commons_params_from_includes {
             }
         }
     }
+#    croak Dumper($stref->{'IncludeFiles'}{$f}{'Commons'}{'memind'}) if $f eq 'includecom'; #OK here
     return $stref;
 }    # END of get_commons_params_from_includes()
 # -----------------------------------------------------------------------------

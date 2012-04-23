@@ -2,6 +2,8 @@ package RefactorF4Acc::Refactoring::Subroutines::Declarations;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
+use RefactorF4Acc::Refactoring::Common qw( format_f95_decl );
+
 # 
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
 #   
@@ -34,7 +36,10 @@ Subroutines
 # --------------------------------------------------------------------------------
 # This routine renames the declarations of local variables that conflict with global variables
 sub create_refactored_vardecls {
+	
     ( my $stref, my $f, my $annline, my $rlines, my $is_C_target ) = @_;
+    print "create_refactored_vardecls( $f )\n" if $V;
+#    die "Bug to be fixed: applying context-free refactoring breaks the next stage!";
     my $Sf        = $stref->{'Subroutines'}{$f};
     my $line      = $annline->[0] || '';
     my $tags_lref = $annline->[1];
@@ -85,9 +90,10 @@ sub create_refactored_vardecls {
         # For arrays, we split the declaration over multiple lines
         # And we use the declaration from the include                   
         for my $tnvar (@nvars) {
-            $rline=$Sf->{'Vars'}{ $tnvar }{'Decl'};
-            $rline=~s/^\s+//;
-            $rline= $spaces.$rline;
+#            $rline=$Sf->{'Vars'}{ $tnvar }{'Decl'};
+#            $rline=~s/^\s+//;
+#            $rline= $spaces.$rline;
+            $rline = format_f95_decl($Sf->{'Vars'}, $tnvar);
             $tags_lref->{'VarDecl'} = [$tnvar];
             push @{$rlines}, [ $rline, $tags_lref ];
         }
@@ -104,9 +110,10 @@ sub create_exglob_var_declarations {
     my $Sf                 = $stref->{'Subroutines'}{$f};
     my $tags_lref          = $annline->[1];
     my %args               = map { $_ => 1 } @{ $Sf->{'Args'} };
-
+#local $V=1;
     for my $inc ( keys %{ $Sf->{'Globals'} } ) {
         print "INFO: GLOBALS from INC $inc in $f\n" if $V;
+#        print Dumper(@{ $Sf->{'Globals'}{$inc} }) if $V;
         for my $var ( @{ $Sf->{'Globals'}{$inc} } ) {
             if ( exists $args{$var} ) {
                 my $rline = "*** ARG MASKS GLOB $var in $f!";
@@ -114,8 +121,13 @@ sub create_exglob_var_declarations {
             } else {
                 if ( exists $Sf->{'Commons'}{$inc} ) {
                     if ( $f ne $stref->{'IncludeFiles'}{$inc}{'Root'} ) {
-                        print "\tGLOBAL $var from $inc in $f\n" if $V;                      
-                        my $rline = $Sf->{'Commons'}{$inc}{$var}{'Decl'};
+                        print "\tGLOBAL $var from $inc in $f\n" if $V;                        
+#                        print "\nINCLUDE:\n";
+#                        print Dumper($stref->{'IncludeFiles'}{$inc}{'Commons'});
+#                        die if $f eq 'interpol_all';                      
+#                        my $rline = $Sf->{'Commons'}{$inc}{$var}{'Decl'};
+#    print "VAR $var:",Dumper( $stref->{'IncludeFiles'}{'includecom'}{'Commons'}{$var}) ; #OK HERE!
+                        my $rline = format_f95_decl( $stref->{'IncludeFiles'}{$inc}{'Commons'},$var);
                         if ( exists $Sf->{'ConflictingParams'}{$var} ) {
                             my $gvar = $Sf->{'ConflictingParams'}{$var};
                             print
@@ -127,8 +139,12 @@ sub create_exglob_var_declarations {
                             print "*** NO DECL for $var in $f, taking from INC $inc!\n" if $V;
 #                           $rline = "*** NO DECL for $var in $f!";
                             # FIXME: is it OK to just generate the decls here?
-                            my $decl_from_inc = $stref->{IncludeFiles}{$inc}{Vars}{$var}{Decl};
-                            $rline ="$decl_from_inc"." ! from $inc";            
+#                            my $decl_from_inc = $stref->{IncludeFiles}{$inc}{Vars}{$var}{Decl};
+                            # FIXME: make this decl Fortran-95 style!!
+                            $rline = format_f95_decl($stref->{IncludeFiles}{$inc}{'Vars'},$var);
+#                            $rline ="$decl_from_inc"." ! from $inc";
+                            $rline .= " ! from $inc";   
+#                            die $rline,"\n" if $f eq 'interpol_all';         
                         }
                         push @{$rlines}, [ $rline, $tags_lref ];
                     } elsif ($V) {
@@ -146,6 +162,9 @@ sub create_exglob_var_declarations {
             }
         }    # for
     }
+#    croak Dumper($rlines);
+
+#    die 'create_exglob_var_declarations()' if $f eq 'interpol_all';
 #   die if $f=~/particles_main/;
     return $rlines;
 }    # END of create_exglob_var_declarations()

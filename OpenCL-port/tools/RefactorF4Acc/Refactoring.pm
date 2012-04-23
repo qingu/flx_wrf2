@@ -6,7 +6,8 @@ package RefactorF4Acc::Refactoring;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
-use RefactorF4Acc::Refactoring::Subroutines qw( refactor_all_subroutines );
+use RefactorF4Acc::Refactoring::Common qw( create_refactored_source );
+use RefactorF4Acc::Refactoring::Subroutines qw( refactor_all_subroutines refactor_kernel_signatures );
 use RefactorF4Acc::Refactoring::Functions qw( refactor_called_functions );
 use RefactorF4Acc::Refactoring::Includes qw( refactor_includes );
 use RefactorF4Acc::Analysis::ArgumentIODirs qw( determine_argument_io_direction_rec );
@@ -41,16 +42,24 @@ sub refactor_all {
     $stref = determine_argument_io_direction_rec( $subname, $stref );
 # Now somehow we should use the IO direction, at first simply as annotation
 #FIXME: This does not work! refactor_all_subroutines produces the refactored source!!!
-    print "DONE determine_argument_io_direction_rec()\n";    
-    croak();
+    print "DONE determine_argument_io_direction_rec()\n" if $V;    
+#    croak();
     # What I need to do here is use the IODir information
     # Initially this is just adding some comments to the refactored source;
     # Later it means rewriting the kernel signatures
     # Basically need this for every factored-out kernel candidate
     # But it doesn't hurt to annotate every subroutine of course 
-    $stref = refactor_kernel_signatures( $subname, $stref ); # It would be better if I could do this in determine_argument_io_direction_rec() 
-    $stref = create_all_refactored_subroutine_sources($stref);
+    $stref = refactor_kernel_signatures( $stref, $subname); # It would be better if I could do this in determine_argument_io_direction_rec() 
+#    $stref = create_all_refactored_subroutine_sources($stref);
     # When all this is done, we can finally create the refactored sources for the subroutines
+    for my $f ( keys %{ $stref->{'Subroutines'} } ) {
+    	if (scalar keys %{$stref->{'Subroutines'}{$f}{'Callers'} } or $stref->{'Subroutines'}{$f}{'Program'} ) {
+        $stref=create_refactored_source(  $stref, $f );
+    	} else {
+    		print "WARNING: SKIPPING $f: Callers: ",scalar keys %{$stref->{'Subroutines'}{$f}{'Callers'} },'; Program: ',$stref->{'Subroutines'}{$f}{'Program'},"\n" if $W;
+    	}
+    }
+    
     
     return $stref;	
 } # END of  

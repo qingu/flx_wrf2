@@ -25,6 +25,7 @@ use Exporter;
     &create_refactored_source
     &get_annotated_sourcelines
     &split_long_line    
+    &format_f95_decl
 );
 
 #* BeginDo: just remove the label
@@ -41,10 +42,11 @@ sub context_free_refactorings {
     my $sub_or_func =
       ( exists $stref->{'Subroutines'}{$f} ) ? 'Subroutines' : 'Functions';
     my $Sf = $stref->{$sub_or_func}{$f};
-    if ($Sf->{'Status'}!=2 ) {
+    if ($Sf->{'Status'}!=$PARSED ) {
     	croak caller;
     }    
     my $annlines=get_annotated_sourcelines($stref,$f);
+
     $Sf->{'RefactoredCode'} =[];
     for my $annline ( @{$annlines} ) {
         if (not defined $annline or not defined $annline->[0]) {
@@ -103,15 +105,18 @@ sub context_free_refactorings {
                 $line =~ s/$ph/$str/;
             }
         }
-        if (exists $tags{'VarDecl'} ) {
+        croak "FIXME: this VarDecl refactoring breaks the comparison in ArgumentIODirs.pm line 214!!!";
+        if (exists $tags{'VarDecl'} and 0) {
+        	
 #        	warn "$sub_or_func $f: $line\n";
         	my @vars=@{$tags{'VarDecl'}};
         	for my $var (@vars) {
-        		my $spaces = $Sf->{'Vars'}{$var}{'Decl'};
-        		$spaces=~s/\S.*$//;
-        		my $extra_line = $spaces.$Sf->{'Vars'}{$var}{'Type'}.' :: '.$var;
+        		my $extra_line = format_f95_decl($Sf->{'Vars'},$var);
+#        		my $spaces = $Sf->{'Vars'}{$var}{'Decl'};
+#        		$spaces=~s/\S.*$//;
+#        		my $extra_line = $spaces.$Sf->{'Vars'}{$var}{'Type'}.' :: '.$var;
 #        		warn $extra_line."\n";
-                push @{ $Sf->{'RefactoredCode'} },[$extra_line,{'Extra'=>1,'VarDecl'=>1}];        		
+                push @{ $Sf->{'RefactoredCode'} },[$extra_line,{'Extra'=>1,'VarDecl'=>[$var] }];        		
         	}
         } else {
         push @{ $Sf->{'RefactoredCode'} }, [$line, $tags_lref];
@@ -282,16 +287,31 @@ sub get_annotated_sourcelines {
     
     
     my $annlines=[];    
-    if ($Sf->{'Status'}==2) {          
-    if (not exists $Sf->{'RefactoredCode'}) {
-        $Sf->{'RefactoredCode'} = [];
-        $annlines=[ @{ $Sf->{'AnnLines'} } ]; # We want a copy!
-    } else {
-        $annlines=$Sf->{'RefactoredCode'}; # Here a ref is OK
-    }	  
+    if ($Sf->{'Status'}==$PARSED) {          
+	    if (not exists $Sf->{'RefactoredCode'}) {
+	        $Sf->{'RefactoredCode'} = [];
+	        $annlines=[ @{ $Sf->{'AnnLines'} } ]; # We want a copy!
+	    } else {
+	        $annlines=$Sf->{'RefactoredCode'}; # Here a ref is OK
+	    }	  
     } else {
     	warn "get_annotated_sourcelines( $f ) \n";
+    	warn "STATUS: $Sf->{'Status'} \n";
+    	warn Dumper($Sf); 
     	die caller;
     } 
 	return $annlines;
 } # END of get_annotated_sourcelines()
+# -----------------------------------------------------------------------------
+
+sub format_f95_decl {
+	(my $Sfv,my $var) = @_;
+	my $Sv=$Sfv->{$var};
+	if (not exists $Sv->{'Decl'}) {
+		print "WARNING: VAR $var does not exist in format_f95_decl()!\n" if $W;croak $var;
+	}
+    my $spaces = $Sv->{'Decl'};
+    $spaces=~s/\S.*$//;
+    my $decl_line = $spaces.$Sv->{'Type'}.' :: '.$var;
+	return $decl_line
+} # format_f95_decl() 

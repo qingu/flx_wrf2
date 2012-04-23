@@ -46,6 +46,7 @@ sub find_subroutines_functions_and_includes {
     		my @lines=`grep -v '#include' $src  | cpp -P -`;
     		# I guess we could use some command-line flag to add the macro definitions
     		# And now we must parse C sources too ...
+    		
 #    		die; 
     	}
         open my $SRC, '<', $src;
@@ -84,6 +85,7 @@ sub find_subroutines_functions_and_includes {
                     $Ssub->{'Source'}  = $src;
                     $Ssub->{'Status'}  = $UNREAD;
                     $Ssub->{'Program'} = $is_prog;
+                    $Ssub->{'Callers'}  = {};
 
                 } else {
                     print

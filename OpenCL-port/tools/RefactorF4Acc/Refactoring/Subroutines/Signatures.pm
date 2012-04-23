@@ -20,9 +20,10 @@ use Exporter;
 
 @RefactorF4Acc::Refactoring::Subroutines::Signatures::ISA = qw(Exporter);
 
-@RefactorF4Acc::Refactoring::Subroutines::Signatures::EXPORT = qw(
+@RefactorF4Acc::Refactoring::Subroutines::Signatures::EXPORT_OK = qw(
     &create_refactored_subroutine_signature
     &refactor_subroutine_signature
+    &refactor_kernel_signatures
 );
 
 =pod
