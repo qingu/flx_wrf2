@@ -210,6 +210,9 @@ sub get_iodirs_from_subcall {
 #	#               print " SIG $name: ",join(',',@{ $ref_sig_args })."\n";
 	my $ca = scalar( @{$ref_call_args} );
 	my $sa = scalar( @{$ref_sig_args} );
+#	if ($name eq 'calcfluxes') {
+#		die Dumper($Sname);
+#	}
 	if ( $ca != $sa ) {
         print "WARNING ($f): NOT SAME LENGTH! ($ca<>$sa)\n" if $W;
 		print $f.'->'.$name.': CALL:'.Dumper( $ref_call_args )."\nSIG:". Dumper( $ref_sig_args );

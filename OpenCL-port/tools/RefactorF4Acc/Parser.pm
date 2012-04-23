@@ -736,7 +736,8 @@ sub get_commons_params_from_includes {
                 }
                 $stref->{'IncludeFiles'}{$f}{'Info'}->[$index]{'Common'} = {};
             }
-
+# FIXME: need parameter detection in subs/functions as well!
+croak("FIXME: need parameter detection in subs/functions as well!");
             if ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) {
 
                 my $parliststr = $1;
@@ -754,8 +755,25 @@ sub get_commons_params_from_includes {
                           $vars{$var};
                     }
                 }
+                $stref->{'IncludeFiles'}{$f}{'Info'}->[$index]{'Parameter'} = $stref->{'IncludeFiles'}{$f}{'Parameters'};
+            } elsif ( $line=~/,\s*parameter\s*.*?::\s*(\w+)\s*=\s*(.+?)\s*$/) { # F95-style parameters
+                my $parliststr = $1;
+                $has_pars = 1;
+                my @partups = split( /\s*,\s*/, $parliststr );
+                my @pvars =
+                  map { s/\s*=.+//; $_ } @partups;    # Perl::Critic, EYHO
+                for my $var (@pvars) {
+                    if ( not defined $vars{$var} ) {
+                        print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
+                          if $W;
+                    } else {
+                        $stref->{'IncludeFiles'}{$f}{'Parameters'}{$var} =
+                          $vars{$var};
+                    }
+                }
                 $stref->{'IncludeFiles'}{$f}{'Info'}->[$index]{'Parameter'} =
                   {};
+            	
             }
         }
 

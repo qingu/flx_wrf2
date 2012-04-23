@@ -105,24 +105,35 @@ sub context_free_refactorings {
                 $line =~ s/$ph/$str/;
             }
         }
-        croak "FIXME: this VarDecl refactoring breaks the comparison in ArgumentIODirs.pm line 214!!!";
-        if (exists $tags{'VarDecl'} and 0) {
-        	
-#        	warn "$sub_or_func $f: $line\n";
+#        croak "FIXME: this VarDecl refactoring breaks the comparison in ArgumentIODirs.pm line 214!!!";
+        if (exists $tags{'VarDecl'} ) {
         	my @vars=@{$tags{'VarDecl'}};
-        	for my $var (@vars) {
-        		my $extra_line = format_f95_decl($Sf->{'Vars'},$var);
-#        		my $spaces = $Sf->{'Vars'}{$var}{'Decl'};
-#        		$spaces=~s/\S.*$//;
-#        		my $extra_line = $spaces.$Sf->{'Vars'}{$var}{'Type'}.' :: '.$var;
-#        		warn $extra_line."\n";
-                push @{ $Sf->{'RefactoredCode'} },[$extra_line,{'Extra'=>1,'VarDecl'=>[$var] }];        		
+        	if (scalar @vars==1) { 
+        		$line = format_f95_decl($Sf->{'Vars'},$vars[0]);
+        	} else {
+        		$line = format_f95_multiple_decl($Sf->{'Vars'},@vars);
         	}
-        } else {
+
+#        	warn "$sub_or_func $f: $line\n";
+        	
+#        	for my $var (@vars) {
+#        		my $extra_line = format_f95_decl($Sf->{'Vars'},$var);
+##        		my $spaces = $Sf->{'Vars'}{$var}{'Decl'};
+##        		$spaces=~s/\S.*$//;
+##        		my $extra_line = $spaces.$Sf->{'Vars'}{$var}{'Type'}.' :: '.$var;
+##        		warn $extra_line."\n";
+#                push @{ $Sf->{'RefactoredCode'} },[$extra_line,{'Extra'=>1,'VarDecl'=>[$var] }];        		
+#        	}
+        }# else {
+    if (exists $tags{'Parameter'}) { 
+        warn "Found PARAMTER: $line\n";    	 	
+    }
         push @{ $Sf->{'RefactoredCode'} }, [$line, $tags_lref];
-        }
+        #}
             if (@extra_lines) {
+#            	warn "Extra lines in context free refactoring:\n";
                 for my $extra_line (@extra_lines) {
+#                	warn $extra_line ,"\n";
                     push @{ $Sf->{'RefactoredCode'} },
                       [$extra_line,{'Extra'=>1}];
                 }
@@ -314,4 +325,17 @@ sub format_f95_decl {
     $spaces=~s/\S.*$//;
     my $decl_line = $spaces.$Sv->{'Type'}.' :: '.$var;
 	return $decl_line
+} # format_f95_decl() 
+
+# -----------------------------------------------------------------------------
+sub format_f95_multiple_decl {
+    (my $Sfv,my @vars) = @_;
+    my $Sv=$Sfv->{$vars[0]};
+    if (not exists $Sv->{'Decl'}) {
+        print "WARNING: VAR $vars[0] does not exist in format_f95_decl()!\n" if $W;croak $vars[0];
+    }
+    my $spaces = $Sv->{'Decl'};
+    $spaces=~s/\S.*$//;
+    my $decl_line = $spaces.$Sv->{'Type'}.' :: '.join(', ',@vars);
+    return $decl_line
 } # format_f95_decl() 
