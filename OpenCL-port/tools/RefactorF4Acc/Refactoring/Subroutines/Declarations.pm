@@ -82,18 +82,31 @@ sub create_refactored_vardecls {
     # If the line does not contain array decls,
     # remove the spaces from the original line and use them for the new line
 #    warn "<$line>\n";
-        $rline =
+        if ($line=~/\s+\:\:\s+/) { # FIXME: weak test to see if already refactored!
+#	       warn "create_refactored_vardecls(): LINE: $line\n";
+	       $rline=$line;
+        } else {
+            croak "PARAM! $line" if $line=~/parameter/;
+            $rline =
             $spaces
           . $Sf->{'Vars'}{ $vars[0] }{'Type'} . ' :: '
-          . join( ',', @nvars ) . "\n";       
+          . join( ',', @nvars ) . "\n";
+        }       
     } else {    
         # For arrays, we split the declaration over multiple lines
-        # And we use the declaration from the include                   
+        # And we use the declaration from the include
+        warn "create_refactored_vardecls(): LINE: $line\n";                   
         for my $tnvar (@nvars) {
 #            $rline=$Sf->{'Vars'}{ $tnvar }{'Decl'};
 #            $rline=~s/^\s+//;
 #            $rline= $spaces.$rline;
-            $rline = format_f95_decl($Sf->{'Vars'}, $tnvar);
+                my $is_par=0;
+                my $val=0;
+                if (exists ($Sf->{'Parameters'}{$vars[0]} ) ){
+                    $is_par=1;
+                    $val=$Sf->{'Parameters'}{$vars[0]}{'Val'};
+                }
+            $rline = format_f95_decl($Sf->{'Vars'}, [$tnvar,$is_par,$val]);
             $tags_lref->{'VarDecl'} = [$tnvar];
             push @{$rlines}, [ $rline, $tags_lref ];
         }
@@ -127,7 +140,7 @@ sub create_exglob_var_declarations {
 #                        die if $f eq 'interpol_all';                      
 #                        my $rline = $Sf->{'Commons'}{$inc}{$var}{'Decl'};
 #    print "VAR $var:",Dumper( $stref->{'IncludeFiles'}{'includecom'}{'Commons'}{$var}) ; #OK HERE!
-                        my $rline = format_f95_decl( $stref->{'IncludeFiles'}{$inc}{'Commons'},$var);
+                        my $rline = format_f95_decl( $stref->{'IncludeFiles'}{$inc}{'Commons'},[$var,0,0]);
                         if ( exists $Sf->{'ConflictingParams'}{$var} ) {
                             my $gvar = $Sf->{'ConflictingParams'}{$var};
                             print
@@ -141,7 +154,7 @@ sub create_exglob_var_declarations {
                             # FIXME: is it OK to just generate the decls here?
 #                            my $decl_from_inc = $stref->{IncludeFiles}{$inc}{Vars}{$var}{Decl};
                             # FIXME: make this decl Fortran-95 style!!
-                            $rline = format_f95_decl($stref->{IncludeFiles}{$inc}{'Vars'},$var);
+                            $rline = format_f95_decl($stref->{IncludeFiles}{$inc}{'Vars'},[$var,0,0]);
 #                            $rline ="$decl_from_inc"." ! from $inc";
                             $rline .= " ! from $inc";   
 #                            die $rline,"\n" if $f eq 'interpol_all';         

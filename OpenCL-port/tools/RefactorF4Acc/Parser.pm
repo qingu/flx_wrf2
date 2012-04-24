@@ -116,6 +116,7 @@ sub get_var_decls {
         my %vars  = ();
         my $first = 1;
         my $is_vardecl=0;
+#        my $has_pars = 0;
         my $type    = 'NONE';
         my $varlst  = '';        
         
@@ -147,10 +148,47 @@ sub get_var_decls {
                 $type    = $1;
                 $varlst  = $2;
                 $is_vardecl=1;
-            } elsif ($line=~/^\s*(.*)\s*::\s*(.*?)\s*$/) {
+            } elsif ($line=~/^\s*(.*)\s*::\s*(.*?)\s*$/) { #F95
                 $type    = $1;
                 $varlst  = $2;
+                # But this could be a parameter declaration, with an assignment ...
+                if ( $line=~/,\s*parameter\s*.*?::\s*(\w+)\s*=\s*(.+?)\s*$/) { # F95-style parameters
+	                my $parliststr = $1;	           
+	                my @partups = split( /\s*,\s*/, $parliststr );
+	                my %pvars =
+	                  map { split(/\s*=\s*/,$_) } @partups;    # Perl::Critic, EYHO
+	                  $Sf->{'Parameters'}={};
+	                  my $pars=[];
+	                for my $var (keys %pvars) {
+	                    if ( not defined $vars{$var} ) {
+	                        print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
+	                          if $W;
+	                    } else {
+	                        $Sf->{'Parameters'}{$var} = {'Type' => $type,  'Var' => $vars{$var}, 'Val'=>$pvars{$var}};
+	                        push @{$pars},$var;
+	                    }
+	                }
+	                $Sf->{'Info'}[$index]{'Parameter'} =  $pars;                                  
+                }
                 $is_vardecl=1;            	
+            } elsif ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) { # F77-style parameters
+
+                my $parliststr = $1;
+                
+                my @partups = split( /\s*,\s*/, $parliststr );
+                my %pvars =
+                  map { split(/\s*=\s*/,$_) } @partups;    # Perl::Critic, EYHO
+                my $pars=[];
+                for my $var (keys %pvars) {
+                    if ( not defined $vars{$var} ) {
+                        print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
+                          if $W;
+                    } else {
+                        $Sf->{'Parameters'}{$var} = {'Type' => 'Unknown',  'Var' => $vars{$var}, 'Val'=>$pvars{$var}};
+                        push @{$pars},$var;
+                    }
+                }
+                $Sf->{'Info'}[$index]{'Parameter'} =  $pars;
             }
                 if ($is_vardecl) {
                 	$is_vardecl=0;
@@ -736,39 +774,40 @@ sub get_commons_params_from_includes {
                 }
                 $stref->{'IncludeFiles'}{$f}{'Info'}->[$index]{'Common'} = {};
             }
-# FIXME: need parameter detection in subs/functions as well!
-croak("FIXME: need parameter detection in subs/functions as well!");
+
             if ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) {
 
                 my $parliststr = $1;
+#                warn "PARAM:$parliststr\n";
                 $has_pars = 1;
                 my @partups = split( /\s*,\s*/, $parliststr );
-                my @pvars =
-                  map { s/\s*=.+//; $_ } @partups;    # Perl::Critic, EYHO
-
-                for my $var (@pvars) {
+                my %pvars =
+                  map { split(/\s*=\s*/,$_) } @partups;    # Perl::Critic, EYHO # s/\s*=.+//; $_
+#                warn Dumper(%pvars);
+                for my $var (keys %pvars) {
                     if ( not defined $vars{$var} ) {
                         print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
                           if $W;
                     } else {
                         $stref->{'IncludeFiles'}{$f}{'Parameters'}{$var} =
-                          $vars{$var};
+                         {'Type' => 'Unknown',  'Var' => $vars{$var}, 'Val'=>$pvars{$var}  };
                     }
                 }
                 $stref->{'IncludeFiles'}{$f}{'Info'}->[$index]{'Parameter'} = $stref->{'IncludeFiles'}{$f}{'Parameters'};
             } elsif ( $line=~/,\s*parameter\s*.*?::\s*(\w+)\s*=\s*(.+?)\s*$/) { # F95-style parameters
+            my $type=$line; $type=~s/^\s+//;$type=~s/\s*\:\:.*$//;
                 my $parliststr = $1;
                 $has_pars = 1;
                 my @partups = split( /\s*,\s*/, $parliststr );
-                my @pvars =
-                  map { s/\s*=.+//; $_ } @partups;    # Perl::Critic, EYHO
-                for my $var (@pvars) {
+                my %pvars =
+                  map { split(/\s*=\s*/,$_) } @partups;    # Perl::Critic, EYHO
+                for my $var (keys %pvars) {
                     if ( not defined $vars{$var} ) {
                         print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
                           if $W;
                     } else {
                         $stref->{'IncludeFiles'}{$f}{'Parameters'}{$var} =
-                          $vars{$var};
+                          {'Type' => $type,  'Var' => $vars{$var}, 'Val'=>$pvars{$var}  };
                     }
                 }
                 $stref->{'IncludeFiles'}{$f}{'Info'}->[$index]{'Parameter'} =
@@ -944,11 +983,21 @@ sub read_fortran_src {
                     $prevline =~ s/^\t/$sixspaces/;
                     $prevline =~ /^(\d+)\t/ && do {
                         my $label  = $1;
+                        warn "$f: LABEL $label \n" if $f=~/advance/;
                         my $ndig   = length($label);
                         my $spaces = ' ' x ( 6 - $ndig );
                         my $str    = $label . $spaces;
                         $prevline =~ s/^(\d+)\t/$str/;
                     };
+                    $prevline =~ /^(\d+)\s+/ && do {
+                        my $label  = $1;
+                        warn "$f: LABEL $label \n" if $f=~/advance/;
+                        my $ndig   = length($label);
+                        my $spaces = ' ' x ( 6 - $ndig );
+                        my $str    = $label . $spaces;
+                        $prevline =~ s/^(\d+)\s+/$str/;
+                    };
+
                     if ( substr( $prevline, 0, 2 ) ne '! ' ) {
                         if ( $prevline !~ /^\s+include\s+\'/i ) {
 
@@ -1074,3 +1123,4 @@ sub read_fortran_src {
 }    # END of read_fortran_src()
 
 # -----------------------------------------------------------------------------
+

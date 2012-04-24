@@ -109,9 +109,29 @@ sub context_free_refactorings {
         if (exists $tags{'VarDecl'} ) {
         	my @vars=@{$tags{'VarDecl'}};
         	if (scalar @vars==1) { 
-        		$line = format_f95_decl($Sf->{'Vars'},$vars[0]);
+        		my $is_par=0;
+        		my $val=0;
+        		if (exists ($Sf->{'Parameters'}{$vars[0]} ) ){
+#        			warn "$vars[0] is a PARAMETER with value $Sf->{'Parameters'}{$vars[0]}{'Val'}\n";
+        			$is_par=1;
+        			$val=$Sf->{'Parameters'}{$vars[0]}{'Val'};
+        		}
+        		$line = format_f95_decl($Sf->{'Vars'},[$vars[0], $is_par,$val]);
         	} else {
-        		$line = format_f95_multiple_decl($Sf->{'Vars'},@vars);
+        		my $var_is_par_tups=[];
+        		for my $var (@vars) {
+        			
+        			my $is_par=0;
+        			my $val=0;
+                if (exists ($Sf->{'Parameters'}{$var} ) ){
+#                    warn "$var is a PARAMETER with value $Sf->{'Parameters'}{$var}{'Val'}\n";
+                    $is_par=1;
+                    $val=$Sf->{'Parameters'}{$var}{'Val'}
+                }
+                push @{$var_is_par_tups},[$var,$is_par,$val];
+        		}
+        		
+        		$line = format_f95_multiple_decl($Sf->{'Vars'},$var_is_par_tups);
         	}
 
 #        	warn "$sub_or_func $f: $line\n";
@@ -126,7 +146,14 @@ sub context_free_refactorings {
 #        	}
         }# else {
     if (exists $tags{'Parameter'}) { 
-        warn "Found PARAMTER: $line\n";    	 	
+#        warn "Found PARAMETER in $f: $line\n";
+        for my $par (@{ $tags{'Parameter'}} ) {
+#                warn "$par:\n";
+#                warn Dumper($Sf->{'Parameters'}{$par}),"\n";
+            if ($Sf->{'Parameters'}{$par}{'Type'} eq 'Unknown') {
+            	                $line = '!'.$line;
+        	}
+        }
     }
         push @{ $Sf->{'RefactoredCode'} }, [$line, $tags_lref];
         #}
@@ -178,6 +205,7 @@ sub create_refactored_source {
 
 sub split_long_line {
     my $line   = shift;
+    
     my @chunks = @_;
 
     my $nchars = 64;
@@ -189,7 +217,7 @@ sub split_long_line {
     my $split_on2 = ' ';
     my $split_on3 = '.ro.';
     my $split_on4 = '.dna.';
-
+# FIXME: add split on ';' and on operators (F95)
     my $smart = 0;
     if ( length($line) > $nchars ) {
         my $patt  = '';
@@ -286,7 +314,22 @@ sub split_long_line {
             $split_lines[0] = $sixspaces . $split_lines[0]
               unless $split_lines[0] =~ /^\s+\d+/;
         }
-        return @split_lines;
+        
+        my @fin_lines=();
+        for my $chunk (@split_lines) {
+        if ($chunk=~/^\s*\&\s*$/) {        	
+        	$chunk='';        	
+        } elsif ($chunk=~/\n\s*\&\s*$/m){
+            $chunk=~s/\n.*$//m;                    	
+        }
+        push @fin_lines, $chunk;
+        }
+        if ($fin_lines[-1]=~/\&\s*$/) {
+        	$fin_lines[-1]=~s/\s*\&\s*$//;
+        }
+#        return @split_lines;
+$V=0;
+        return @fin_lines;
     }
 } # END of split_long_line()
 
@@ -316,26 +359,54 @@ sub get_annotated_sourcelines {
 # -----------------------------------------------------------------------------
 
 sub format_f95_decl {
-	(my $Sfv,my $var) = @_;
+	(my $Sfv,my $var_is_par ) = @_;
+	(my $var, my $is_par, my $val)=@{$var_is_par};
 	my $Sv=$Sfv->{$var};
 	if (not exists $Sv->{'Decl'}) {
 		print "WARNING: VAR $var does not exist in format_f95_decl()!\n" if $W;croak $var;
 	}
     my $spaces = $Sv->{'Decl'};
     $spaces=~s/\S.*$//;
-    my $decl_line = $spaces.$Sv->{'Type'}.' :: '.$var;
+    
+    my $decl_line = $spaces.$Sv->{'Type'}.($is_par ? ', parameter ' : '').' :: '.$var.($is_par ? ' = '.$val : '');
 	return $decl_line
 } # format_f95_decl() 
 
 # -----------------------------------------------------------------------------
 sub format_f95_multiple_decl {
-    (my $Sfv,my @vars) = @_;
+    (my $Sfv,my $var_is_par_tups) = @_;
+    my @vars=map { $_->[0] } @{$var_is_par_tups};
+    
+    my @var_vals = map {"$_->[0] = $_->[2]"} @{$var_is_par_tups};
+    my %test = map { ($_->[1],1) } @{$var_is_par_tups};
     my $Sv=$Sfv->{$vars[0]};
     if (not exists $Sv->{'Decl'}) {
         print "WARNING: VAR $vars[0] does not exist in format_f95_decl()!\n" if $W;croak $vars[0];
-    }
+    } 
     my $spaces = $Sv->{'Decl'};
     $spaces=~s/\S.*$//;
-    my $decl_line = $spaces.$Sv->{'Type'}.' :: '.join(', ',@vars);
-    return $decl_line
-} # format_f95_decl() 
+    my $type=$Sv->{'Type'};
+    if (exists $test{0} and exists $test{1}) {
+        
+        my $decl_line = $spaces;#.$Sv->{'Type'}.' :: '.join(', ',@vars);
+    	# What we need to do is split these into separate statements with semicolons
+    	for my $tup (@{$var_is_par_tups}) {
+    		(my $var, my $is_par, my $val)=@{$tup};
+    		my $decl='';
+    		if ($is_par) {
+    			$decl = "$type, parameter :: $var = $val; ";
+    		} else {
+    			$decl = "$type :: $var; ";
+    		}
+    		$decl_line.=$decl;    	
+    	}
+    	return $decl_line;
+    } elsif (exists $test{1}) {
+        my $decl_line = $spaces.$type.' parameter :: '.join(', ',@var_vals);
+        return $decl_line;
+
+    } else {
+        my $decl_line = $spaces.$type.' :: '.join(', ',@vars);
+        return $decl_line;
+    }
+} # format_f95_multiple_decl() 
