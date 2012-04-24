@@ -2,15 +2,17 @@ SHELL = /bin/bash
 MAIN = flexpart_wrf
 INCF	= incl*
 #NETCDF = /Users/wim/SoC_Research/FLEXPART/flx_wrf2/src_gfortran2
-NETCDF = /opt/local
+NETCDF = /usr/
+#/opt/local
 # /mnt/disk1/work/saji/GNU/
 
 
 # -m64 :: a 64-bit environment allows access to memory and files in excess of 2GB
 # frecord-marker=4 ::  use 4-byte record markers by default for 
 # unformatted files to be compatible with g77 and most other compilers
+FC      = gfortran
 #FC      = gfortran-4.6
-FC      = gfortran-mp-4.3
+#FC      = gfortran-mp-4.3
 FFLAGS  = -O3 -m64 -fconvert=little-endian -frecord-marker=4 -I$(NETCDF)/include
 LDFLAGS =  -L$(NETCDF)/lib -lnetcdff -lm
 

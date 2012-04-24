@@ -72,8 +72,6 @@ sub identify_loops_breaks {
 
             # BeginDo:
             $line =~ /^\s+do\s+(\d+)\s+\w/ && do {
-            	warn "FIXME: must deal with labels on non-CONTINUE lines!!!!";
-            	croak $line if $f eq 'advance';
                 my $label = $1;
                 $Sf->{'Info'}
                   ->[$index]{'BeginDo'}{'Label'} = $label;

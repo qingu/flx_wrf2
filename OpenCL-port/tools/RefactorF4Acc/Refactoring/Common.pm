@@ -46,6 +46,11 @@ sub context_free_refactorings {
     	croak caller;
     }    
     my $annlines=get_annotated_sourcelines($stref,$f);
+croak "The previous refactoring removed the Loops/Breaks info!!!";
+if ($f eq 'advance') {
+#print Dumper($stref->{'Subroutines'}{'advance'}{'RefactoredSources'}) ; die;
+print Dumper($annlines) ; die;
+}
 
     $Sf->{'RefactoredCode'} =[];
     for my $annline ( @{$annlines} ) {
@@ -63,6 +68,7 @@ sub context_free_refactorings {
         # EndDo: replace label CONTINUE by END DO; 
         # if no continue, remove label & add end do on next line
         if ( exists $tags{'EndDo'} ) {
+warn "$f: END DO $line\n";
             my $is_goto_target = 0;
             if (
                 $Sf->{'Gotos'}{ $tags{'EndDo'}{'Label'} } )

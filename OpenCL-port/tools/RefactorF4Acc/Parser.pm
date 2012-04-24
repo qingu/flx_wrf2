@@ -983,7 +983,6 @@ sub read_fortran_src {
                     $prevline =~ s/^\t/$sixspaces/;
                     $prevline =~ /^(\d+)\t/ && do {
                         my $label  = $1;
-                        warn "$f: LABEL $label \n" if $f=~/advance/;
                         my $ndig   = length($label);
                         my $spaces = ' ' x ( 6 - $ndig );
                         my $str    = $label . $spaces;
@@ -991,7 +990,6 @@ sub read_fortran_src {
                     };
                     $prevline =~ /^(\d+)\s+/ && do {
                         my $label  = $1;
-                        warn "$f: LABEL $label \n" if $f=~/advance/;
                         my $ndig   = length($label);
                         my $spaces = ' ' x ( 6 - $ndig );
                         my $str    = $label . $spaces;
