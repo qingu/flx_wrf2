@@ -74,30 +74,30 @@ sub parse_fortran_src {
         $stref->{'IncludeFiles'}{$f}{'Status'} = $PARSED;
     }
     
-    $stref=create_annotated_lines($stref,$f);    
+#    $stref=create_annotated_lines($stref,$f);    
     return $stref;
 }    # END of parse_fortran_src()
 
 # -----------------------------------------------------------------------------
 
-sub create_annotated_lines {
-	(my $stref,my $f)=@_;	
-	my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
-	my $Sf = $stref->{$sub_or_func_or_inc}{$f};
-    # Merge source lines and tags into annotated lines @{$annlines}
-    my @lines = @{ $Sf->{'Lines'} };
-    my @info = defined $Sf->{'Info'} ? @{ $Sf->{'Info'} } : ();
-    my $annlines = [];
-    for my $line (@lines) {
-        my $tags = shift @info;
-        if (not defined $tags) {
-        	$tags={};
-        }
-        push @{$annlines}, [ $line, $tags ];
-    }
-	$Sf->{'AnnLines'}=$annlines;
-	return $stref;
-}
+#sub create_annotated_lines {
+#	(my $stref,my $f)=@_;	
+#	my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
+#	my $Sf = $stref->{$sub_or_func_or_inc}{$f};
+#    # Merge source lines and tags into annotated lines @{$annlines}
+#    my @lines = @{ $Sf->{'Lines'} };
+#    my @info = defined $Sf->{'Info'} ? @{ $Sf->{'Info'} } : ();
+#    my $annlines = [];
+#    for my $line (@lines) {
+#        my $tags = shift @info;
+#        if (not defined $tags) {
+#        	$tags={};
+#        }
+#        push @{$annlines}, [ $line, $tags ];
+#    }
+#	$Sf->{'AnnLines'}=$annlines;
+#	return $stref;
+#}
 # Create a table of all variables declared in the target, and a list of all the var names occuring on each line.
 # We record the type of the var and whether it's a scalar or array, because we need that information for translation to C.
 # Also check if the variable happens to be a function. If that is the case, mark that function as 'Called'; if we have not yet parsed its source, do it now.
@@ -110,7 +110,7 @@ sub get_var_decls {
     #           my $sub_or_incl = $is_incl ? 'Includes' : 'Subroutines';
     my $sub_func_incl = sub_func_or_incl( $f, $stref );
     my $Sf=$stref->{$sub_func_incl}{$f};
-    my $srcref = $Sf->{'Lines'};
+    my $srcref = $Sf->{'AnnLines'};
     if ( defined $srcref ) {
         print "\nVAR DECLS in $f:\n" if $V;
         my %vars  = ();
@@ -121,8 +121,8 @@ sub get_var_decls {
         my $varlst  = '';        
         
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-            my $line = $srcref->[$index];
-
+            my $line = $srcref->[$index][0];
+            my $info= $srcref->[$index][1];
             if ( $line =~ /^\!\s+/ ) {
                 next;
             }
@@ -135,8 +135,9 @@ sub get_var_decls {
             if ( $line =~ /implicit\s+none/ ) {
 
                 #               print "INFO: $f has 'implicit none'\n";
-                $Sf->{'Info'}->[$index]{'ImplicitNone'} =
-                  {};
+                $info->{'ImplicitNone'}=1;
+#                $Sf->{'Info'}->[$index]{'ImplicitNone'} =
+#                  {};
                 $Sf->{'ImplicitNone'} = $index;
             }
             # Actual variable declaration line
@@ -168,7 +169,8 @@ sub get_var_decls {
 	                        push @{$pars},$var;
 	                    }
 	                }
-	                $Sf->{'Info'}[$index]{'Parameter'} =  $pars;                                  
+#	                $Sf->{'Info'}[$index]{'Parameter'} =  $pars;            
+	                $info->{'Parameter'} =  $pars;                      
                 }
                 $is_vardecl=1;            	
             } elsif ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) { # F77-style parameters
@@ -188,7 +190,8 @@ sub get_var_decls {
                         push @{$pars},$var;
                     }
                 }
-                $Sf->{'Info'}[$index]{'Parameter'} =  $pars;
+#                $Sf->{'Info'}[$index]{'Parameter'} =  $pars;
+                $info->{'Parameter'} =  $pars;  
             }
                 if ($is_vardecl) {
                 	$is_vardecl=0;
@@ -278,7 +281,7 @@ sub get_var_decls {
                     	
                         $stref->{'Functions'}{$tvar}{'Called'} = 1;
                         $stref->{'Functions'}{$tvar}{'Callers'}{$f}++;
-                        if ( not exists $stref->{'Functions'}{$tvar}{'Lines'} )
+                        if ( not exists $stref->{'Functions'}{$tvar}{'AnnLines'} )
                         {
                             $stref = parse_fortran_src( $tvar, $stref );
 #                            die Dumper($stref->{'Functions'}{$tvar}) if $tvar eq 'cgszll';    
@@ -287,15 +290,16 @@ sub get_var_decls {
                     push @varnames, $tvar;
                 }
                 print "\t", join( ',', @varnames ), "\n" if $V;
-                $stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'VarDecl'} =
-                  \@varnames;
+#                $stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'VarDecl'} = \@varnames;
+                $info->{'VarDecl'} = \@varnames;
                 if ($first) {
                     $first = 0;
-                    $stref->{$sub_func_incl}{$f}{'Info'}
-                      ->[$index]{'ExGlobVarDecls'} = {};
+#                    $stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'ExGlobVarDecls'} = {};
+                    $info->{'ExGlobVarDecls'} = {};
                 }
             }
-        }
+            $srcref->[$index]= [$line, $info];
+        } # Loop over lines
         $stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;
     }
 
@@ -312,9 +316,10 @@ sub parse_includes {
     my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
     my $Sf=$stref->{$sub_or_func_or_inc}{$f};
     
-    my $srcref = $Sf->{'Lines'};
+    my $srcref = $Sf->{'AnnLines'};
     for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-        my $line = $srcref->[$index];
+        my $line = $srcref->[$index][0];
+        my $info = $srcref->[$index][1];
         if ( $line =~ /^\!\s/ ) {
             next;
         }
@@ -323,7 +328,9 @@ sub parse_includes {
             my $name = $1;
             print "FOUND include $name in $f\n" if $V;
             $Sf->{'Includes'}{$name} = $index;
-            $Sf->{'Info'}->[$index]{'Include'}{'Name'} = $name;
+#            $Sf->{'Info'}->[$index]{'Include'}{'Name'} = $name;
+            $info->{'Include'}={};
+            $info->{'Include'}{'Name'} = $name;
             if ( $stref->{'IncludeFiles'}{$name}{'Status'} == $UNREAD ) {
                 print $line, "\n" if $V;
                 # Initial guess for Root. OK? FIXME?
@@ -334,6 +341,7 @@ sub parse_includes {
                 print $line, " already processed\n" if $V;
             }
         }
+        $srcref->[$index]= [$line, $info];
     }
 
     return $stref;
@@ -345,8 +353,9 @@ sub detect_blocks {
     print "CHECKING BLOCKS in $s\n" if $V;
     my $sub_func_incl = sub_func_or_incl( $s, $stref );
     $stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
-    my $srcref = $stref->{$sub_func_incl}{$s}{'Lines'};
-    for my $line ( @{$srcref} ) {       
+    my $srcref = $stref->{$sub_func_incl}{$s}{'AnnLines'};
+    for my $annline ( @{$srcref} ) {
+    	my $line=$annline->[0];       
         if ( $line =~ /^\!\s/ ) {
 
 # I'd like to use the OpenACC compliant pragma !$acc kernels , !$acc end kernels
@@ -385,7 +394,7 @@ sub separate_blocks {
 #    die "separate_blocks(): FIXME: we need to add in the locals from the parent subroutine as locals in the new subroutine!";
     my $sub_or_func = sub_func_or_incl( $f, $stref );
     my $Sf          = $stref->{$sub_or_func}{$f};
-    my $srcref      = $Sf->{'Lines'};
+    my $srcref      = $Sf->{'AnnLines'};
     # All local variables in the parent subroutine
     my %vars        = %{ $Sf->{'Vars'} };
     # Occurence
@@ -395,7 +404,7 @@ sub separate_blocks {
     my $in_block    = 0;
     # Initial settings
     my $block       = 'OUTER';
-    $blocks{'OUTER'} = { 'Lines' => [] };
+    $blocks{'OUTER'} = { 'AnnLines' => [] };
 #   my $block_idx = 0;
     
     # 1. Process every line in $f, scan for blocks marked with pragmas.
@@ -406,26 +415,35 @@ sub separate_blocks {
 #    (my $stref, my $blocksref) = separate_into_blocks($stref,$f);
     
     for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-        my $line = $srcref->[$index];
+        my $line = $srcref->[$index][0];
+        my $info = $srcref->[$index][1];
         if (   $line =~ /^\!\s+BEGIN\sSUBROUTINE\s(\w+)/
             or $line =~ /^\!\s\$acc\s+subroutine\s(\w+)/i )
         {
             $in_block = 1;
             $block    = $1;
             print "FOUND BLOCK $block\n" if $V;
+#            # Enter the name of the block in the metadata for the line
+#            $Sf->{'Info'}[$index]{'RefactoredSubroutineCall'}{'Name'} = $block;
+#            $Sf->{'Info'}[$index]{'SubroutineCall'}{'Name'} = $block;
+#            delete $Sf->{'Info'}[$index]{'Comments'};
+#            $Sf->{'Info'}[$index]{'BeginBlock'}{'Name'} = $block;
+            
             # Enter the name of the block in the metadata for the line
-            $Sf->{'Info'}[$index]{'RefactoredSubroutineCall'}{'Name'} = $block;
-            $Sf->{'Info'}[$index]{'SubroutineCall'}{'Name'} = $block;
-            delete $Sf->{'Info'}[$index]{'Comments'};
-            $Sf->{'Info'}[$index]{'BeginBlock'}{'Name'} = $block;
+            $info->{'RefactoredSubroutineCall'}{'Name'} = $block;
+            $info->{'SubroutineCall'}{'Name'} = $block;
+            delete $info->{'Comments'};
+            $info->{'BeginBlock'}{'Name'} = $block;
+            
+            
             # Push the line with the pragma onto the list of 'OUTER' lines
-            push @{ $blocks{'OUTER'}{'Lines'} }, "C *** Refactored code into $block ***";
+            push @{ $blocks{'OUTER'}{'AnnLines'} }, [ "C *** Refactored code into $block ***", {} ];
             # Push the line with the pragma onto the list of lines for the block,
             # to be replaced by function signature
-            push @{ $blocks{$block}{'Lines'} }, "C *** Original code from $f starts here ***";
-            # Add the name and index to %blocks  
-            push @{ $blocks{$block}{'Info'} },
-              { 'RefactoredSubroutineCall' => { 'Name' => $block } };
+            push @{ $blocks{$block}{'AnnLines'} }, [ "C *** Original code from $f starts here ***",  { 'RefactoredSubroutineCall' => { 'Name' => $block } } ];
+#            # Add the name and index to %blocks  
+#            push @{ $blocks{$block}{'Info'} },
+#              { 'RefactoredSubroutineCall' => { 'Name' => $block } };
             $blocks{$block}{'BeginBlockIdx'} = $index;
             next;
         }
@@ -435,26 +453,28 @@ sub separate_blocks {
             $in_block = 0;
             $block    = $1;
             # Push end-of-block pragma onto 'OUTER'
-            push @{ $blocks{'OUTER'}{'Lines'} }, $line;
+            push @{ $blocks{'OUTER'}{'AnnLines'} }, [$line, {}];
             # Push 'end' onto the list of lines for the block,
-            push @{ $blocks{$block}{'Lines'} }, '      end';
+            push @{ $blocks{$block}{'AnnLines'} }, [ '      end', $info ];
             # Add info to %blocks. 
-            push @{ $blocks{$block}{'Info'} }, $Sf->{'Info'}[$index];
-            $Sf->{'Info'}[$index]{'EndBlock'}{'Name'} = $block;
+#            push @{ $blocks{$block}{'Info'} }, $Sf->{'Info'}[$index];
+#            $Sf->{'Info'}[$index]{'EndBlock'}{'Name'} = $block;
+            $info->{'EndBlock'}{'Name'} = $block;
             $blocks{$block}{'EndBlockIdx'} = $index; 
             next;
         }
         if ($in_block) {
             # Push the line onto the list of lines for the block
-            push @{ $blocks{$block}{'Lines'} }, $line;
+            push @{ $blocks{$block}{'AnnLines'} }, [$line,$info];
             # and the index onto Info in %blocks and $Sf
-            push @{ $blocks{$block}{'Info'} }, $Sf->{'Info'}->[$index];         
-            $Sf->{'Info'}[$index]{'InBlock'}{'Name'} = $block;
+#            push @{ $blocks{$block}{'Info'} }, $info;         
+            $info->{'InBlock'}{'Name'} = $block;
         } else {
             # Other lines go onto 'OUTER'
-            push @{ $blocks{'OUTER'}{'Lines'} }, $line;
+            push @{ $blocks{'OUTER'}{'AnnLines'} }, [$line, $info];
         }
-    }
+        $srcref->[$index]= [$line, $info];
+    } # loop over annlines
 
     # 2. For all non-OUTER blocks, create an entry for the new subroutine in 'Subroutines'
     # Based on the content of %blocks
@@ -463,8 +483,8 @@ sub separate_blocks {
         next if $block eq 'OUTER';
         $stref->{'Subroutines'}{$block}={};
         my $Sblock=$stref->{'Subroutines'}{$block};
-        $Sblock->{'Lines'} = $blocks{$block}{'Lines'};
-        $Sblock->{'Info'}  = $blocks{$block}{'Info'};
+        $Sblock->{'AnnLines'} = $blocks{$block}{'AnnLines'};
+#        $Sblock->{'Info'}  = $blocks{$block}{'Info'};
         $Sblock->{'Source'} = $Sf->{'Source'};      
         $Sblock->{'RefactorGlobals'} = 1;
         if ($Sf->{'RefactorGlobals'} == 0) {
@@ -483,11 +503,11 @@ sub separate_blocks {
     # It is best to loop over all vars per line per block, because we can remove the encountered vars
     # TODO: my $occsref = determine_new_subroutine_arguments($blocksref,$varsref,$linesref);
     for my $block ( keys %blocks ) {
-        my @lines = @{ $blocks{$block}{'Lines'} };
+        my @annlines = @{ $blocks{$block}{'AnnLines'} };
         my %tvars = %vars; # Hurray for pass-by-value!
         print "\nVARS in $block:\n\n" if $V;
-        for my $line (@lines) {
-            my $tline = $line;
+        for my $annline (@annlines) {
+            my $tline = $annline->[0];
             $tline =~ s/\'.+?\'//;
             for my $var ( sort keys %tvars ) {
                 if ( $tline =~ /\W$var\W/ or $tline =~ /\W$var\s*$/ ) {
@@ -527,38 +547,42 @@ sub separate_blocks {
         $Sblock->{'Sig'}   = $sig;
         $Sblock->{'Decls'} = $decls;        
         # Add variable declarations and info to line 
-        my $siginfo = shift @{ $Sblock->{'Info'} };
+        my $sigline = shift @{ $Sblock->{'AnnLines'} };
         for my $argv ( @{ $args{$block} } ) {
             my $decl = $vars{$argv}{'Decl'};
-            unshift @{ $Sblock->{'Lines'} }, $decl;
-            unshift @{ $Sblock->{'Info'} }, { 'VarDecl' => [$argv] };
+            unshift @{ $Sblock->{'AnnLines'} }, [$decl, { 'VarDecl' => [$argv] } ];
+#            unshift @{ $Sblock->{'Info'} }, { 'VarDecl' => [$argv] };
         }
-        unshift @{ $Sblock->{'Info'} }, $siginfo;
+        unshift @{ $Sblock->{'AnnLines'} }, $sigline;
         
         # Now also add include statements and the actual sig to the line
-        my $fl = shift @{ $Sblock->{'Info'} };
+        croak Dumper($Sblock->{'Annlines'});
+#        my $fl = shift @{ $Sblock->{'Info'} }; # remove comment, keep line
+        my $fal=  $Sblock->{'Annlines'}[0][1]; # remove comment, keep line
+         $Sblock->{'Annlines'}[0][1]={}; 
         for my $inc ( keys %{ $Sf->{'Includes'} } ) {
             $Sblock->{'Includes'}{$inc} = 1;
-            unshift @{ $Sblock->{'Lines'} }, "      include '$inc'";
-            unshift @{ $Sblock->{'Info'} }, { 'Include' => { 'Name' => $inc } };
+            unshift @{ $Sblock->{'AnnLines'} }, [ "      include '$inc'" , { 'Include' => { 'Name' => $inc } } ]; # add new lines at the front
+#            unshift @{ $Sblock->{'Info'} }, { 'Include' => { 'Name' => $inc } };
             $Sblock->{'Includes'}{$inc} = 1;
         }
-        unshift @{ $Sblock->{'Lines'} }, $sig;
+        unshift @{ $Sblock->{'AnnLines'} }, [$sig, {}]; # add a line but not a comment
         # And finally, in the original source, replace the blocks by calls to the new subs
 #        print "\n-----\n".Dumper($srcref)."\n-----";
         for my $tindex ( 0 .. scalar( @{$srcref} ) - 1 ) {
-#           print $f,':',$tindex,"\n",$srcref->[$tindex],"\n";          
             if ( $tindex == $blocks{$block}{'BeginBlockIdx'} ) {
                 $sig =~ s/subroutine/call/;
-                $srcref->[$tindex] = $sig;
+                $srcref->[$tindex][0] = $sig;
             } elsif ( $tindex > $blocks{$block}{'BeginBlockIdx'}
                 and $tindex <= $blocks{$block}{'EndBlockIdx'} )
             {
-                $srcref->[$tindex] = '';
+                $srcref->[$tindex][0] = '';
             }
         }
-        unshift @{ $Sblock->{'Info'} }, $fl;
         
+#        unshift @{ $Sblock->{'Info'} }, $fl; # put the comment back at the front, no change to the lines
+         $Sblock->{'AnnLines'}[0][1]=$fal->[1];
+         
         if ($V) {
             print $sig, "\n";
             print join( "\n", @{$decls} ), "\n";
@@ -591,13 +615,14 @@ sub parse_subroutine_and_function_calls {
             $stref = add_to_C_build_sources( $f, $stref );
         }
     }
-    my $srcref = $Sf->{'Lines'};
+    my $srcref = $Sf->{'AnnLines'};
 #   croak Dumper( $srcref) if $f=~/timemanager/;
     if ( defined $srcref ) {
 
         #        my %called_subs         = ();
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-            my $line = $srcref->[$index];
+            my $line = $srcref->[$index][0];
+            my $info = $srcref->[$index][1];
             next if $line =~ /^\!\s/;
 
       # Subroutine calls. Surprisingly, these even occur in functions! *shudder*
@@ -633,7 +658,7 @@ sub parse_subroutine_and_function_calls {
                 }
 
                 #                $called_subs{$name} = $name;
-                $Sf->{'Info'}->[$index]{'SubroutineCall'}{'Args'} = $argstr;
+                $info->{'SubroutineCall'}{'Args'} = $argstr;
                 my $tvarlst = $argstr;
 
                 # replace , by ; in array indices and nested function calls
@@ -657,8 +682,8 @@ sub parse_subroutine_and_function_calls {
                     push @argvars, $var;
                 }
 
-                $Sf->{'Info'}->[$index]{'SubroutineCall'}{'Args'} = \@argvars;
-                $Sf->{'Info'}->[$index]{'SubroutineCall'}{'Name'} = $name;
+                $info->{'SubroutineCall'}{'Args'} = \@argvars;
+                $info->{'SubroutineCall'}{'Name'} = $name;
 
                 if ( defined $Sname
                     and not exists $Sf->{'CalledSubs'}{$name} )
@@ -733,7 +758,9 @@ sub parse_subroutine_and_function_calls {
                     }
                 }
             }
-        }
+                        
+            $srcref->[$index]= [$line, $info];
+        } # loop over all annlines
 
         #        $Sf->{'CalledSubs'}=\%called_subs;
     }
@@ -745,7 +772,7 @@ sub parse_subroutine_and_function_calls {
 
 sub get_commons_params_from_includes {
     ( my $f, my $stref ) = @_;
-    my $srcref = $stref->{'IncludeFiles'}{$f}{'Lines'};
+    my $srcref = $stref->{'IncludeFiles'}{$f}{'AnnLines'};
     if ( defined $srcref ) {
 
         #       warn "GETTING COMMONS/PARAMS from INCLUDE $f\n";
@@ -772,7 +799,7 @@ sub get_commons_params_from_includes {
                           $vars{$var};
                     }
                 }
-                $stref->{'IncludeFiles'}{$f}{'Info'}->[$index]{'Common'} = {};
+                $stref->{'IncludeFiles'}{$f}{'AnnLines'}->[$index][1]{'Common'} = {};
             }
 
             if ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) {
@@ -793,7 +820,7 @@ sub get_commons_params_from_includes {
                          {'Type' => 'Unknown',  'Var' => $vars{$var}, 'Val'=>$pvars{$var}  };
                     }
                 }
-                $stref->{'IncludeFiles'}{$f}{'Info'}->[$index]{'Parameter'} = $stref->{'IncludeFiles'}{$f}{'Parameters'};
+                $stref->{'IncludeFiles'}{$f}{'AnnLines'}->[$index][1]{'Parameter'} = $stref->{'IncludeFiles'}{$f}{'Parameters'};
             } elsif ( $line=~/,\s*parameter\s*.*?::\s*(\w+)\s*=\s*(.+?)\s*$/) { # F95-style parameters
             my $type=$line; $type=~s/^\s+//;$type=~s/\s*\:\:.*$//;
                 my $parliststr = $1;
@@ -810,11 +837,12 @@ sub get_commons_params_from_includes {
                           {'Type' => $type,  'Var' => $vars{$var}, 'Val'=>$pvars{$var}  };
                     }
                 }
-                $stref->{'IncludeFiles'}{$f}{'Info'}->[$index]{'Parameter'} =
+                $stref->{'IncludeFiles'}{$f}{'AnnLines'}->[$index][1]{'Parameter'} =
                   {};
             	
             }
-        }
+            $srcref->[$index]= [$line, $info];
+        } # loop over annlines
 
         if ($V) {
             print "\nCOMMONS for $f:\n\n";
@@ -849,7 +877,7 @@ sub get_commons_params_from_includes {
                     exists( $stref->{'IncludeFiles'}{$f}{'Commons'}{$var} ) )
               )
             {
-                warn Dumper( $stref->{'IncludeFiles'}{$f}{'Lines'} );
+                warn Dumper( $stref->{'IncludeFiles'}{$f}{'AnnLines'} );
                 croak
 "The include $f contains a variable $var that is neither a parameter nor a common variable, this is not supported\n";
             }
@@ -1101,14 +1129,22 @@ sub read_fortran_src {
                       ; # Means we have all consts in the file, not just the sub, but who cares?
                 }
                 if ( $ok == 1 ) {
-                    push @{ $stref->{$sub_func_incl}{$name}{'Lines'} }, $line;
+                    my $annlineref=[];
                     if ( $line =~ /^\!/ ) {
-                        $stref->{$sub_func_incl}{$name}{'Info'}
-                          ->[$index]{'Comments'} = {};
+                    	$annlineref = [$line,{ 'Comments' => 1 }];
+#                        $stref->{$sub_func_incl}{$name}{'Info'}
+#                          ->[$index]{'Comments'} = {};
+                    } else {
+                    	if (@{$phs_ref} ) {
+                    		$annlineref = [$line,{ 'PlaceHolders' => $phs_ref }];
+                    	} else {
+                    	   $annlineref = [$line,{}];
+                    	}
                     }
-                    $stref->{$sub_func_incl}{$name}{'Info'}->[$index] =
-                      { 'PlaceHolders' => $phs_ref }
-                      if @{$phs_ref};
+                    push @{ $stref->{$sub_func_incl}{$name}{'AnnLines'} }, $annlineref;
+#                    $stref->{$sub_func_incl}{$name}{'Info'}->[$index] =
+#                      { 'PlaceHolders' => $phs_ref }
+                      
                     $index++;
                 }
 

@@ -59,7 +59,7 @@ sub identify_loops_breaks {
     ( my $f, my $stref ) = @_;
     my $sub_or_func = sub_func_or_incl( $f, $stref );
     my $Sf          = $stref->{$sub_or_func}{$f};
-    my $srcref      = $Sf->{'Lines'};
+    my $srcref      = $Sf->{'AnnLines'};
     if ( defined $srcref ) {
         my %do_loops = ();
         my %gotos    = ();
@@ -67,14 +67,14 @@ sub identify_loops_breaks {
         #   my %labels=();
         my $nest = 0;
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-            my $line = $srcref->[$index];
+            my $line = $srcref->[$index][0];
+            my $info = $srcref->[$index][1];
             next if $line =~ /^\!\s+/;
 
             # BeginDo:
             $line =~ /^\s+do\s+(\d+)\s+\w/ && do {
                 my $label = $1;
-                $Sf->{'Info'}
-                  ->[$index]{'BeginDo'}{'Label'} = $label;
+                $info->{'BeginDo'}{'Label'} = $label;
                 if ( not exists $do_loops{$label} ) {
                     @{ $do_loops{$label} } = ( [$index], $nest );
                     $nest++;
@@ -89,7 +89,7 @@ sub identify_loops_breaks {
             # Goto
             $line =~ /^\s+.*?[\)\ ]\s*goto\s+(\d+)\s*$/ && do {
                 my $label = $1;
-                $Sf->{'Info'}->[$index]{'Goto'}{'Label'} =
+                $info->{'Goto'}{'Label'} =
                   $label;
                 $Sf->{'Gotos'}{$label} = 1;
                 push @{ $gotos{$label} }, [ $index, $nest ];
@@ -101,14 +101,12 @@ sub identify_loops_breaks {
                 my $label = $1;
                 my $is_cont = $2 eq 'continue' ? 1 : 0;
                 if ($is_cont) {
-                	$Sf->{'Info'}->[$index]{'Continue'}{'Label'} = $label;
+                	$info->{'Continue'}{'Label'} = $label;
                 }                
                 if ( exists $do_loops{$label} ) {
                     if ( $nest == $do_loops{$label}[1] + 1 ) {
-                        $Sf->{'Info'}
-                          ->[$index]{'EndDo'}{'Label'} = $label;
-                        $Sf->{'Info'}
-                          ->[$index]{'EndDo'}{'Count'} =
+                       $info->{'EndDo'}{'Label'} = $label;
+                        $info->{'EndDo'}{'Count'} =
                           scalar @{ $do_loops{$label}[0] };
                         delete $do_loops{$label};
                         $nest--;
@@ -127,12 +125,10 @@ sub identify_loops_breaks {
                             if ( $tnest > 0 ) {
                                 if ($is_cont) {
                                     $target = 'NoopBreakTarget';
-                                    $Sf->{'Info'}
-                                      ->[$tindex]{'Break'}{'Label'} = $label;
+                                    $srcref->[$tindex][1]{'Break'}{'Label'} = $label;
                                 } else {
                                     $target = 'BreakTarget';
-                                    $Sf->{'Info'}
-                                      ->[$tindex]{'Break'}{'Label'} = $label;
+                                    $srcref->[$tindex][1]{'Break'}{'Label'} = $label;
 
 #                       print STDERR "WARNING: $f: Found BREAK target not NOOP for label $label\n";
                                 }
@@ -149,8 +145,7 @@ sub identify_loops_breaks {
                               if $W;
                         }
                     }
-                    $Sf->{'Info'}
-                      ->[$index]{$target}{'Label'} = $label;
+                    $info->{$target}{'Label'} = $label;
                     $Sf->{'Gotos'}{$label} = $target;
                     delete $gotos{$label};
 
@@ -165,6 +160,7 @@ sub identify_loops_breaks {
                 $Sf->{'Gotos'}{$label} = 1;
                 next;
             };
+            $srcref->[$index]=[$line,$info];
         }
     } else {
         print "NO SOURCE for $f\n";

@@ -165,7 +165,7 @@ sub refactor_subroutine_call_args {
     }
     my $args_ref = ordered_union( $orig_args, \@globals );
     $tags->{'SubroutineCall'}{'RefactoredArgs'} = $args_ref;
-    $Sf->{'Info'}[$idx] = $tags;
+    $Sf->{'AnnLines'}[$idx][1] = $tags;
     return $stref;
 }    # END of refactor_subroutine_call_args
 # -----------------------------------------------------------------------------

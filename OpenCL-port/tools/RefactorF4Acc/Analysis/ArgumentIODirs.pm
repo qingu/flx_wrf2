@@ -64,8 +64,6 @@ sub determine_argument_io_direction_rec {
 sub determine_argument_io_direction_core {
     ( my $stref, my $f ) = @_;
     my $Sf      = $stref->{'Subroutines'}{$f};
-#    my $srcref  = $Sf->{'Lines'};    
-#    my $tagsref = $Sf->{'Info'};
 
     #   local $V=1 if $f=~/advance/;
     print "DETERMINE IO DIR FOR SUB $f\n" if $V;
@@ -186,7 +184,7 @@ sub get_iodirs_from_subcall {
 	my $Sname = $stref->{'Subroutines'}{$name};
 #	print "get_iodirs_from_subcall() for $name in $f\n";
 #	print Dumper( $Sname->{ 'RefactoredArgs' } );
-    if (not exists $Sf->{'Info'}->[$index]{'SubroutineCall'}{'RefactoredArgs'}) {
+    if (not exists $Sf->{'AnnLines'}[$index][1]{'SubroutineCall'}{'RefactoredArgs'}) {
 #    	warn "ASSUMING call to $name in $f has NO RefactoredArgs\n";
        $stref = refactor_subroutine_call_args( $stref, $f, $index );
     } 
@@ -196,7 +194,8 @@ sub get_iodirs_from_subcall {
 
 	# Now get the RefactoredArgs
 	my $ref_call_args =
-	  $Sf->{'Info'}->[$index]{'SubroutineCall'}{'RefactoredArgs'};
+#	  $Sf->{'Info'}->[$index]{'SubroutineCall'}{'RefactoredArgs'};
+	  $Sf->{'AnnLines'}[$index][1]{'SubroutineCall'}{'RefactoredArgs'};
     # Get the RefactoredArgs List for the signature
 	my $ref_sig_args = $Sname->{'RefactoredArgs'}{'List'};
 ##FIXME: experimental!

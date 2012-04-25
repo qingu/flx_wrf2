@@ -156,7 +156,7 @@ sub identify_globals_used_in_subroutine {
         %commons = %{ $Sf->{'Commons'} };
     }
 
-    my $srcref = $Sf->{'Lines'};
+    my $srcref = $Sf->{'AnnLines'};
     print "GLOBALS ANALYSIS in $f\n" if $V; 
     if ( defined $srcref and not exists $Sf->{'Globals'} ) {
         for my $cinc ( keys %{ $Sf->{'CommonIncludes'} } ) {
@@ -164,7 +164,8 @@ sub identify_globals_used_in_subroutine {
             my @globs = ();
             my $tvars = $commons{$cinc};
             for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-                my $line = $srcref->[$index];
+                my $line = $srcref->[$index][0];
+#                my $info = $srcref->[$index][1];
                 if ( $line =~ /^\!\s+/ )                            { next; }
                 if ( $line =~ /^\s+end/ )                          { next; }
                 if ( $line =~ /^\s+(subroutine|program)\s+(\w+)/ ) { next; }
@@ -180,6 +181,7 @@ sub identify_globals_used_in_subroutine {
                 # For all other lines, look for variables
                 @globs =
                   ( @globs, look_for_variables( $stref, $f, $line, $tvars ) );
+#                  $srcref->[$index]= [ $line, $info];
             }    # for each line
             if ($V) {
                 print "\nGLOBAL VARS from $cinc in subroutine $f:\n\n";
@@ -209,6 +211,7 @@ sub determine_subroutine_arguments {
         # First determine subroutine arguments. Factor out?
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
             my $line = $srcref->[$index][0];
+            my $info = $srcref->[$index][1];
 #           my $SfI  = $Sf->{'Info'};
             if ( $line =~ /^\!\s/ ) {
                 next;
@@ -221,17 +224,17 @@ sub determine_subroutine_arguments {
                 $argstr =~ s/^\s+//;
                 $argstr =~ s/\s+$//;
                 my @args = split( /\s*,\s*/, $argstr );
-                $Sf->{'Info'}->[$index]{'Signature'}{'Args'} = [@args];
-                $Sf->{'Info'}->[$index]{'Signature'}{'Name'} = $name;
-                $srcref->[$index][1]{'Signature'}{'Args'} = [@args];
-                $srcref->[$index][1]{'Signature'}{'Name'} = $name;
+                $info->{'Signature'}{'Args'} = [@args];
+                $info->{'Signature'}{'Name'} = $name;
+#                $srcref->[$index][1]{'Signature'}{'Args'} = [@args];
+#                $srcref->[$index][1]{'Signature'}{'Name'} = $name;
                 $Sf->{'Args'}                                = [@args];
                 last;
             } elsif ( $line =~ /^\s+subroutine\s+(\w+)[^\(]*$/ ) {
 
                 # Subroutine without arguments
                 my $name = $1;
-                $Sf->{'Info'}->[$index]{'Signature'}{'Args'} = [];
+                $info->{'Signature'}{'Args'} = [];
                 my $has_var_decls = scalar %{ $Sf->{'Vars'} };
                 if ( not $has_var_decls ) {
                     print "INFO: $f has no arguments and no local var decls\n"
@@ -239,29 +242,30 @@ sub determine_subroutine_arguments {
                     if ( exists $Sf->{'ImplicitNone'} ) {
                         print "INFO: $f has 'implicit none'\n" if $V;
                         my $idx = $Sf->{'ImplicitNone'} + 1;
-                        $Sf->{'Info'}->[$idx]{'ExGlobVarDecls'} = {};
-                        $srcref->[$idx][1]{'ExGlobVarDecls'}={};                                        
+                        $srcref->[$idx][1]{'ExGlobVarDecls'} = {};
+#                        $srcref->[$idx][1]{'ExGlobVarDecls'}={};                                        
                     } else {
-                        $Sf->{'Info'}->[$index]{'ExGlobVarDecls'} = {};
-                        $srcref->[$index][1]{'ExGlobVarDecls'}={};
+                        $info->{'ExGlobVarDecls'} = {};
+#                        $srcref->[$index][1]{'ExGlobVarDecls'}={};
                     }
                 }
-                $Sf->{'Info'}->[$index]{'Signature'}{'Name'} = $name;
-                $srcref->[$index][1]{'Signature'}{'Name'} = $name;
+                $info->{'Signature'}{'Name'} = $name;
+#                $srcref->[$index][1]{'Signature'}{'Name'} = $name;
                 $Sf->{'Args'} = [];
                 last;
             } elsif ( $line =~ /^\s+program\s+(\w+)\s*$/ ) {
                 # If it's a program, there are no arguments
                 my $name = $1;
-                $Sf->{'Info'}->[$index]{'Signature'}{'Args'} = [];
-                $Sf->{'Info'}->[$index]{'Signature'}{'Name'} = $name;
-                $srcref->[$index][1]{'Signature'}{'Args'} = [];
-                $srcref->[$index][1]{'Signature'}{'Name'} = $name;
+                $info->{'Signature'}{'Args'} = [];
+                $info->{'Signature'}{'Name'} = $name;
+#                $srcref->[$index][1]{'Signature'}{'Args'} = [];
+#                $srcref->[$index][1]{'Signature'}{'Name'} = $name;
                 last;
             }
+            $srcref->[$index]=[ $line, $info];
         }    # for each line
     }
-    $Sf->{'AnnLines'}=$srcref;
+    $Sf->{'AnnLines'}=$srcref; # WV: required?
     return $stref;
 }    # END of determine_subroutine_arguments()
 # -----------------------------------------------------------------------------
