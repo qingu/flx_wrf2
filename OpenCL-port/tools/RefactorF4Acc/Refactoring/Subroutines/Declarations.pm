@@ -95,7 +95,7 @@ sub create_refactored_vardecls {
     } else {    
         # For arrays, we split the declaration over multiple lines
         # And we use the declaration from the include
-        warn "create_refactored_vardecls(): LINE: $line\n";                   
+#        warn "create_refactored_vardecls(): LINE: $line\n";                   
         for my $tnvar (@nvars) {
 #            $rline=$Sf->{'Vars'}{ $tnvar }{'Decl'};
 #            $rline=~s/^\s+//;

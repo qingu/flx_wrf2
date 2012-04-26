@@ -72,6 +72,7 @@ sub parse_fortran_src {
 # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
         $stref = get_commons_params_from_includes( $f, $stref );
         $stref->{'IncludeFiles'}{$f}{'Status'} = $PARSED;
+        
     }
     
 #    $stref=create_annotated_lines($stref,$f);    
@@ -147,7 +148,7 @@ sub get_var_decls {
               )
             {
                 $type    = $1;
-                $varlst  = $2;
+                $varlst  = $2;                 
                 $is_vardecl=1;
             } elsif ($line=~/^\s*(.*)\s*::\s*(.*?)\s*$/) { #F95
                 $type    = $1;
@@ -196,8 +197,14 @@ sub get_var_decls {
                 if ($is_vardecl) {
                 	$is_vardecl=0;
                 my $tvarlst = $varlst;
-
+                
+                # Parenthesis handling
+                # literal open paren
+                # (
+                # (?:[^\(\),]*?,)+ # a comma-sep list without commas or parentheses   
+                # )
                 if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
+                
                     while ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
                         my $chunk  = $1;
                         my $chunkr = $chunk;
@@ -205,8 +212,9 @@ sub get_var_decls {
                         my $pos = index( $tvarlst, $chunk );
                         substr( $tvarlst, $pos, length($chunk), $chunkr );
                     }
+                    
                 }
-
+                
                 my @tvars    = split( /\s*\,\s*/, $tvarlst );
                 my $p        = '';
                 my @varnames = ();
@@ -214,33 +222,40 @@ sub get_var_decls {
                     $var =~ s/^\s+//;
                     $var =~ s/\s+$//;
                     my $tvar     = $var;
+                      
                     my $shapestr = '';
                     $tvar =~ /\((.*?)\)/ && do {
+                    	
                         $shapestr = $1;
-                        $tvar =~ s/\(.*?\)/(0)/g;    # get rid of array shape
+                        $tvar =~ s/\(.*?\)/(0)/g;    # get rid of array shape                          
                     };
                     my @shape = ();
-                    if ( $shapestr ne '' ) {
+                    if ( $shapestr ne '' ) {                    	
                         if ( $shapestr =~ /;/ ) {
                             my @elts = split( /;/, $shapestr );
                             for my $elt (@elts) {
                                 my @tup = ();
                                 if ( $elt =~ /:/ ) {
-                                    @tup = split( /:/, $shapestr );
+#                                    @tup = split( /:/, $shapestr );
+                                    @tup = split( /:/, $elt );
                                 } else {
                                     @tup = ( 1, $elt );
                                 }
-                                @shape = ( @shape, @tup );
-                            }
+                                @shape = ( @shape, @tup );                                
+                            }                            
                         } else {
                             if ( $shapestr =~ /:/ ) {
-                                @shape = split( /;/, $shapestr );
+                            	
+                                @shape = split( /:/, $shapestr );
+#                            } elsif ( $shapestr =~ /;/ ) {
+#                            	warn $shapestr;
+#                                @shape = split( /;/, $shapestr );
                             } else {
                                 @shape = ( 1, $shapestr );
                             }
                         }
                     }
-
+  
                     if ( $tvar =~ /\(.*?\)/ && $tvar !~ /\(0\)/ ) {
                         die "FATAL ERROR: $tvar shouln't look like this!";
                     }
@@ -253,7 +268,7 @@ sub get_var_decls {
                          # this notation with type(number)
                          # Also, this is not limited to arrays, we could have e.g. integer v*4
                          if ($tvar =~ /\*(\d+)/) {                          
-                            $type="$type, dimension($1)";
+#                            $type="$type, dimension($1)";
                             $tvar =~ s/\*\d+//;
                          }
                         $vars{$tvar}{'Kind'}  = 'Array';
@@ -288,7 +303,8 @@ sub get_var_decls {
                         } 
                     }
                     push @varnames, $tvar;
-                }
+                } # loop over all vars declared on a single line 
+                
                 print "\t", join( ',', @varnames ), "\n" if $V;
 #                $stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'VarDecl'} = \@varnames;
                 $info->{'VarDecl'} = \@varnames;
@@ -556,10 +572,10 @@ sub separate_blocks {
         unshift @{ $Sblock->{'AnnLines'} }, $sigline;
         
         # Now also add include statements and the actual sig to the line
-        croak Dumper($Sblock->{'Annlines'});
+#        croak Dumper($Sblock->{'AnnLines'});
 #        my $fl = shift @{ $Sblock->{'Info'} }; # remove comment, keep line
-        my $fal=  $Sblock->{'Annlines'}[0][1]; # remove comment, keep line
-         $Sblock->{'Annlines'}[0][1]={}; 
+        my $fal=  $Sblock->{'AnnLines'}[0][1]; # remove comment, keep line
+         $Sblock->{'AnnLines'}[0][1]={}; 
         for my $inc ( keys %{ $Sf->{'Includes'} } ) {
             $Sblock->{'Includes'}{$inc} = 1;
             unshift @{ $Sblock->{'AnnLines'} }, [ "      include '$inc'" , { 'Include' => { 'Name' => $inc } } ]; # add new lines at the front
@@ -581,7 +597,7 @@ sub separate_blocks {
         }
         
 #        unshift @{ $Sblock->{'Info'} }, $fl; # put the comment back at the front, no change to the lines
-         $Sblock->{'AnnLines'}[0][1]=$fal->[1];
+         $Sblock->{'AnnLines'}[0][1]=$fal;
          
         if ($V) {
             print $sig, "\n";
@@ -781,10 +797,12 @@ sub get_commons_params_from_includes {
         my $has_commons = 0;
 
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
-            my $line = $srcref->[$index];
+            my $line = $srcref->[$index][0];
+            my $info = $srcref->[$index][1];
             if ( $line =~ /^\!\s/ ) {
                 next;
             }
+            
             if ( $line =~ /^\s*common\s+\/\s*[\w\d]+\s*\/\s+(.+)$/ ) {
                 my $commonlst = $1;
                 $has_commons = 1;
@@ -841,6 +859,7 @@ sub get_commons_params_from_includes {
                   {};
             	
             }
+            
             $srcref->[$index]= [$line, $info];
         } # loop over annlines
 
@@ -1096,9 +1115,10 @@ sub read_fortran_src {
             }
             my $index = 0;
             for my $line ( @{$lines} ) {
+            	my $info = {};
                 my $phs_ref = shift @placeholders_per_line;
                 if ( not defined $line ) {
-                    $line = 'C UNDEF';
+                    $line = '! UNDEF';
                 }
 
 # If it's a subroutine source, skip all lines before the matching subroutine signature
@@ -1114,8 +1134,10 @@ sub read_fortran_src {
                     
                     if ( $keyword =~ /function/ ) {
                         $sub_func_incl = 'Functions';
+                        $info={'FunctionSig' => 1};
                     } else {
                         $sub_func_incl = 'Subroutines';
+                        $info={'SubroutineSig' => 1};
                     }
 
                     #                   warn "\t$name\n";
@@ -1131,14 +1153,16 @@ sub read_fortran_src {
                 if ( $ok == 1 ) {
                     my $annlineref=[];
                     if ( $line =~ /^\!/ ) {
-                    	$annlineref = [$line,{ 'Comments' => 1 }];
+                    	$info->{'Comments'} = 1;
+                    	$annlineref = [$line,$info];
 #                        $stref->{$sub_func_incl}{$name}{'Info'}
 #                          ->[$index]{'Comments'} = {};
                     } else {
                     	if (@{$phs_ref} ) {
-                    		$annlineref = [$line,{ 'PlaceHolders' => $phs_ref }];
+                    		$info->{'PlaceHolders'} = $phs_ref ;
+                    		$annlineref = [$line,$info];
                     	} else {
-                    	   $annlineref = [$line,{}];
+                    	   $annlineref = [$line,$info];
                     	}
                     }
                     push @{ $stref->{$sub_func_incl}{$name}{'AnnLines'} }, $annlineref;
@@ -1148,7 +1172,7 @@ sub read_fortran_src {
                     $index++;
                 }
 
-            }
+            } # loop over all lines
             
         }    # if OK
     }    # if Status==0

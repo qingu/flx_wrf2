@@ -65,6 +65,8 @@ sub refactor_include {
 	for my $annline ( @{$annlines} ) {
 		my $line      = $annline->[0] || '';
 		my $tags_lref = $annline->[1];
+		croak "WRONG REF" if ($tags_lref eq '');
+		
 		my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
 		print '*** ' . join( ',', keys(%tags) ) . "\n" if $V;
 		print '*** ' . $line . "\n" if $V;
@@ -95,17 +97,9 @@ sub refactor_include {
 		}
 		if ( $skip == 0 ) {
 
-#			if ( not exists $tags{'Comments'} ) {
-#				print $line, "\n" if $V;
-#				my @split_lines = split_long_line($line);
-#				for my $sline (@split_lines) {
-#					push @{ $stref->{'IncludeFiles'}{$f}{'RefactoredCode'} },
-#					  [ $sline, $tags_lref ];
-#				}
-#			} else {
 				push @{ $stref->{'IncludeFiles'}{$f}{'RefactoredCode'} },
 				  [ $line, $tags_lref ];
-#			}
+
 		}
 	}
 
@@ -114,27 +108,4 @@ sub refactor_include {
 } # END of refactor_include()
 
 # -----------------------------------------------------------------------------
-#sub create_refactored_include_source {
-#	( my $f, my $stref ) = @_;
-#
-#	my $annlines = get_annotated_sourcelines( $stref, $f );
-#	$stref->{'IncludeFiles'}{$f}{'RefactoredCode'} = [];
-#	for my $annline ( @{$annlines} ) {
-#		my $line = $annline->[0] || '';
-#		my $tags_lref = $annline->[1];
-#		if ( not exists $tags_lref->{'Comments'} ) {
-#			print $line, "\n" if $V;
-#			my @split_lines = split_long_line($line);
-#			for my $sline (@split_lines) {
-#				push @{ $stref->{'IncludeFiles'}{$f}{'RefactoredCode'} },
-#				  [ $sline, $tags_lref ];
-#			}
-#		} else {
-#			push @{ $stref->{'IncludeFiles'}{$f}{'RefactoredCode'} },
-#			  [ $line, $tags_lref ];
-#		}
-#	}
-#
-#	return $stref;
-#
-#} # END of create_refactored_include_source() 
+

@@ -15,6 +15,7 @@ use warnings FATAL => qw(uninitialized);
 use strict;
 use Carp;
 use Data::Dumper;
+$Data::Dumper::Indent=0;
 
 use Exporter;
 
@@ -46,11 +47,16 @@ sub context_free_refactorings {
     	croak caller;
     }    
     my $annlines=get_annotated_sourcelines($stref,$f);
-croak "The previous refactoring removed the Loops/Breaks info!!!";
-if ($f eq 'advance') {
-#print Dumper($stref->{'Subroutines'}{'advance'}{'RefactoredSources'}) ; die;
-print Dumper($annlines) ; die;
-}
+#croak "The previous refactoring removed the Loops/Breaks info!!!";
+#if ($f eq 'advance') {
+##print Dumper($stref->{'Subroutines'}{'advance'}{'RefactoredSources'}) ; die;
+#for my $annline (@{$annlines}) {
+#	next if $annline->[0] =~ /^\s*\!/;
+#	next if (not keys %{ $annline->[1] } );
+#    print $annline->[0],"\t::",Dumper($annline->[1]),"\n" ;
+#}
+# die;
+#}
 
     $Sf->{'RefactoredCode'} =[];
     for my $annline ( @{$annlines} ) {
@@ -68,7 +74,7 @@ print Dumper($annlines) ; die;
         # EndDo: replace label CONTINUE by END DO; 
         # if no continue, remove label & add end do on next line
         if ( exists $tags{'EndDo'} ) {
-warn "$f: END DO $line\n";
+#warn "$f: END DO $line\n";
             my $is_goto_target = 0;
             if (
                 $Sf->{'Gotos'}{ $tags{'EndDo'}{'Label'} } )
@@ -112,7 +118,7 @@ warn "$f: END DO $line\n";
             }
         }
 #        croak "FIXME: this VarDecl refactoring breaks the comparison in ArgumentIODirs.pm line 214!!!";
-        if (exists $tags{'VarDecl'} ) {
+        if (exists $tags{'VarDecl'} and not exists $tags{'FunctionSig'} ) {
         	my @vars=@{$tags{'VarDecl'}};
         	if (scalar @vars==1) { 
         		my $is_par=0;
@@ -121,6 +127,8 @@ warn "$f: END DO $line\n";
 #        			warn "$vars[0] is a PARAMETER with value $Sf->{'Parameters'}{$vars[0]}{'Val'}\n";
         			$is_par=1;
         			$val=$Sf->{'Parameters'}{$vars[0]}{'Val'};
+        			$val=resolve_params($Sf,$val);
+        			die $val if $vars[0] eq 'epsi';
         		}
         		$line = format_f95_decl($Sf->{'Vars'},[$vars[0], $is_par,$val]);
         	} else {
@@ -193,9 +201,19 @@ sub create_refactored_source {
         my $tags_lref = $annline->[1] || {};
         if ( not exists $tags_lref->{'Comments'} ) {
             print $line, "\n" if $V;
-            my @split_lines = split_long_line($line);
-            for my $sline (@split_lines) {
-                push @{ $Sf->{'RefactoredCode'} }, [$sline,$tags_lref];
+            if ($line=~/;/ && $line!~/[\'\"]/) {            	
+            	my $spaces=$line;
+            	$spaces=~s/\S.*$//;
+            	$line=~s/^\s+//;
+                my @split_lines = split(/\s*;\s*/,$line);
+                for my $sline (@split_lines) {
+                    push @{ $Sf->{'RefactoredCode'} }, [$spaces.$sline,$tags_lref];
+                }	
+            } else {
+	            my @split_lines = split_long_line($line);
+	            for my $sline (@split_lines) {
+	                push @{ $Sf->{'RefactoredCode'} }, [$sline,$tags_lref];
+	            }
             }
         } else {
             push @{ $Sf->{'RefactoredCode'} }, [$line, $tags_lref];
@@ -214,10 +232,10 @@ sub split_long_line {
     
     my @chunks = @_;
 
-    my $nchars = 64;
+    my $nchars = 64+28;
     if ( scalar(@chunks) == 0 ) {
         print "\nLINE: \n$line\n" if $V;
-        $nchars = 72;
+        $nchars = 72+28;
     }
     my $split_on  = ',';
     my $split_on2 = ' ';
@@ -333,8 +351,6 @@ sub split_long_line {
         if ($fin_lines[-1]=~/\&\s*$/) {
         	$fin_lines[-1]=~s/\s*\&\s*$//;
         }
-#        return @split_lines;
-$V=0;
         return @fin_lines;
     }
 } # END of split_long_line()
@@ -373,9 +389,22 @@ sub format_f95_decl {
 	}
     my $spaces = $Sv->{'Decl'};
     $spaces=~s/\S.*$//;
-    
-    my $decl_line = $spaces.$Sv->{'Type'}.($is_par ? ', parameter ' : '').' :: '.$var.($is_par ? ' = '.$val : '');
-	return $decl_line
+    # FIXME: for multiple vars, we need to split this in multiple statements. 
+    # So I guess as soon as the Shape is not empty, need to split.
+    my $shape = $Sv->{'Shape'};
+    die Dumper($shape) if join('',@{$shape})=~/;/;
+    my $dim='';
+    if (@{$shape}) {
+    	my @dims=();    	    	
+    	for my $i (0..(@{$shape}/2-1) ){
+    		my $range = ($shape->[2*$i] eq '1') ? $shape->[2*$i+1] : $shape->[2*$i].':'.$shape->[2*$i+1];
+    		push @dims,$range;
+    	}
+    	$dim=', dimension('.join(',',@dims).') ';
+    }
+    my $decl_line = $spaces.$Sv->{'Type'}.$dim.($is_par ? ', parameter ' : '').' :: '.$var.($is_par ? ' = '.$val : '');
+#    die $decl_line  if $dim;
+	return $decl_line	
 } # format_f95_decl() 
 
 # -----------------------------------------------------------------------------
@@ -392,27 +421,108 @@ sub format_f95_multiple_decl {
     my $spaces = $Sv->{'Decl'};
     $spaces=~s/\S.*$//;
     my $type=$Sv->{'Type'};
-    if (exists $test{0} and exists $test{1}) {
+    
+    # FIXME: for multiple vars, we need to split this in multiple statements. 
+    # So I guess as soon as the Shape is not empty, need to split.
+    my $split=(exists $test{0} and exists $test{1});
+    if (!$split) {
+    for my $var (@vars) {    	
+        my $shape = $Sfv->{$var}{'Shape'};
+        if (@{$shape}>0 && @vars>1) {
+        	$split=1;
+        	last;
+        }
+    }    
+    }
+    
+    
+    if ($split) {
         
         my $decl_line = $spaces;#.$Sv->{'Type'}.' :: '.join(', ',@vars);
     	# What we need to do is split these into separate statements with semicolons
     	for my $tup (@{$var_is_par_tups}) {
-    		(my $var, my $is_par, my $val)=@{$tup};
+    		(my $var, my $is_par, my $val)=@{$tup};    		
+            my $dim='';
+            my $shape=$Sfv->{$var}{'Shape'};            
+	        if (@{$shape}>1) {
+	        	
+	            my @dims=();                
+	            for my $i (0..(@{$shape}/2-1) ){
+                    my $range = ("$shape->[2*$i]" eq '1') ? $shape->[2*$i+1] : $shape->[2*$i].':'.$shape->[2*$i+1];
+                    push @dims,$range;	            		            
+	            }
+	            $dim=', dimension('.join(',',@dims).') ';
+	        }
+    		
     		my $decl='';
     		if ($is_par) {
-    			$decl = "$type, parameter :: $var = $val; ";
+    			$decl = "$type $dim ,parameter :: $var = $val; "; # FIXME: it is possible that $val is a function of another parameter
     		} else {
-    			$decl = "$type :: $var; ";
+    			$decl = "$type $dim :: $var; ";
     		}
     		$decl_line.=$decl;    	
     	}
     	return $decl_line;
-    } elsif (exists $test{1}) {
-        my $decl_line = $spaces.$type.' parameter :: '.join(', ',@var_vals);
-        return $decl_line;
-
     } else {
-        my $decl_line = $spaces.$type.' :: '.join(', ',@vars);
+    	# for Shape, it means they are all empty OR there is just one!
+            my $dim='';
+            if (@vars==1) {
+            my $shape=$Sfv->{$vars[0]}{'Shape'};
+            if (@{$shape}) {
+                my @dims=();                
+                for my $i (0..(@{$shape}/2-1) ){
+                    my $range = ($shape->[2*$i] eq '1') ? $shape->[2*$i+1] : $shape->[2*$i].':'.$shape->[2*$i+1];
+                    push @dims,$range;                                  
+                }
+                $dim=', dimension('.join(',',@dims).') ';
+            }
+            }    	
+    	my $decl_line = $spaces.$type.$dim;
+    	if (exists $test{1}) {    	
+            $decl_line .= ' ,parameter :: '.join(', ',@var_vals);
+            
+        } else {
+            $decl_line .= ' :: '.join(', ',@vars);        
+        }
         return $decl_line;
     }
 } # format_f95_multiple_decl() 
+
+sub resolve_params {
+	(my $Sf, my $val)=@_;
+	
+	           $val=~s/\s*$//;
+	           $val=~s/^\s+//;
+	           
+                if ($val=~/(^|\W)[a-df-z_]\w*(\W|$)/) {
+               print "CALL: $val\n"; 	
+                my @chunks=split(/\s*[\/\+\-\*]\s*/,$val);
+                    my @maybe_pars;
+                    for my $chunk (@chunks) {
+                    	print "[$chunk]\n";
+                        if ($chunk=~/^[a-z_]\w*/) {                        	                        	
+                            if (exists $Sf->{'Parameters'}{$chunk}) {
+                                push @maybe_pars, $chunk;                                
+                            } else {
+                            	croak "Can't find PARAM $chunk"; 
+                            }
+                        }
+                    }
+                print "VAL:<$val>\n";
+                if (@maybe_pars) {
+                    for my $par (	@maybe_pars ) {
+                    	print "TEST PAR:{$par}\n";
+                	   my $tval=$Sf->{'Parameters'}{$par}{'Val'};
+                	   print 'PAR:',$par,' VAL:',$tval,"\n";
+                	   $val=~s/(^|\W)$par(\W|$)/$1$tval$2/;
+                	   print "AFTER SUB:<$val>\n";
+                    }                    
+#                    die;
+                    resolve_params($Sf,$val);
+                } else {
+                	return $val;
+                }
+                } else {
+                	return $val;
+                }                
+}
