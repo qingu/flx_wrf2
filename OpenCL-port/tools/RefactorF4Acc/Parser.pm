@@ -159,19 +159,24 @@ sub get_var_decls {
 	                my @partups = split( /\s*,\s*/, $parliststr );
 	                my %pvars =
 	                  map { split(/\s*=\s*/,$_) } @partups;    # Perl::Critic, EYHO
-	                  $Sf->{'Parameters'}={};
+	                  if (not exists $Sf->{'Parameters'}) { $Sf->{'Parameters'}={};}
 	                  my $pars=[];
-	                for my $var (keys %pvars) {
+	                   my @pvarl=map { s/\s*=.+//; $_ } @partups;                
+	                for my $var (@pvarl) {
 	                    if ( not defined $vars{$var} ) {
 	                        print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
 	                          if $W;
 	                    } else {
-	                        $Sf->{'Parameters'}{$var} = {'Type' => $type,  'Var' => $vars{$var}, 'Val'=>$pvars{$var}};
+	                        $Sf->{'Parameters'}{$var} = {'Type' => $type,  'Var' => $vars{$var}, 'Val'=>$pvars{$var}};	                        
 	                        push @{$pars},$var;
 	                    }
 	                }
 #	                $Sf->{'Info'}[$index]{'Parameter'} =  $pars;            
-	                $info->{'Parameter'} =  $pars;                      
+	                $info->{'Parameter'} =  $pars;   
+	                if (not exists $Sf->{'Parameters'}{'OrderedList'}) {
+	                	$Sf->{'Parameters'}{'OrderedList'}=[];
+	                }    
+                    @{ $Sf->{'Parameters'}{'OrderedList'} } = (@{ $Sf->{'Parameters'}{'OrderedList'} },@{$pars});
                 }
                 $is_vardecl=1;            	
             } elsif ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) { # F77-style parameters
@@ -181,18 +186,24 @@ sub get_var_decls {
                 my @partups = split( /\s*,\s*/, $parliststr );
                 my %pvars =
                   map { split(/\s*=\s*/,$_) } @partups;    # Perl::Critic, EYHO
+                  my @pvarl=map { s/\s*=.+//; $_ } @partups;    
                 my $pars=[];
-                for my $var (keys %pvars) {
+                for my $var (@pvarl) {
                     if ( not defined $vars{$var} ) {
                         print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
                           if $W;
                     } else {
                         $Sf->{'Parameters'}{$var} = {'Type' => 'Unknown',  'Var' => $vars{$var}, 'Val'=>$pvars{$var}};
                         push @{$pars},$var;
+                        
                     }
                 }
 #                $Sf->{'Info'}[$index]{'Parameter'} =  $pars;
-                $info->{'Parameter'} =  $pars;  
+                $info->{'Parameter'} =  $pars;
+                    if (not exists $Sf->{'Parameters'}{'OrderedList'}) {
+                        $Sf->{'Parameters'}{'OrderedList'}=[];
+                    }    
+                @{ $Sf->{'Parameters'}{'OrderedList'} } = (@{ $Sf->{'Parameters'}{'OrderedList'} },@{$pars});  
             }
                 if ($is_vardecl) {
                 	$is_vardecl=0;
@@ -316,7 +327,7 @@ sub get_var_decls {
             }
             $srcref->[$index]= [$line, $info];
         } # Loop over lines
-        $stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;
+        $stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;        
     }
 
     #           die "FIXME: shapes not correct!";
@@ -788,9 +799,13 @@ sub parse_subroutine_and_function_calls {
 
 sub get_commons_params_from_includes {
     ( my $f, my $stref ) = @_;
-    my $srcref = $stref->{'IncludeFiles'}{$f}{'AnnLines'};
+    my $Sf=$stref->{'IncludeFiles'}{$f};
+    my $srcref = $Sf->{'AnnLines'};
+    
     if ( defined $srcref ) {
 
+        $Sf->{'Parameters'}={};
+        $Sf->{'Parameters'}{'OrderedList'}=[];
         #       warn "GETTING COMMONS/PARAMS from INCLUDE $f\n";
         my %vars        = %{ $stref->{'IncludeFiles'}{$f}{'Vars'} };
         my $has_pars    = 0;
@@ -817,7 +832,7 @@ sub get_commons_params_from_includes {
                           $vars{$var};
                     }
                 }
-                $stref->{'IncludeFiles'}{$f}{'AnnLines'}->[$index][1]{'Common'} = {};
+                $srcref->[$index][1]{'Common'} = {};
             }
 
             if ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) {
@@ -829,16 +844,22 @@ sub get_commons_params_from_includes {
                 my %pvars =
                   map { split(/\s*=\s*/,$_) } @partups;    # Perl::Critic, EYHO # s/\s*=.+//; $_
 #                warn Dumper(%pvars);
-                for my $var (keys %pvars) {
+                my @pvarl=map { s/\s*=.+//; $_ } @partups;
+                my @pars=();
+                for my $var (@pvarl) {
                     if ( not defined $vars{$var} ) {
                         print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
                           if $W;
                     } else {
-                        $stref->{'IncludeFiles'}{$f}{'Parameters'}{$var} =
+                        $Sf->{'Parameters'}{$var} =
                          {'Type' => 'Unknown',  'Var' => $vars{$var}, 'Val'=>$pvars{$var}  };
+                         push @pars, $var;
+#                         print "PAR: $var\n" ;
                     }
                 }
-                $stref->{'IncludeFiles'}{$f}{'AnnLines'}->[$index][1]{'Parameter'} = $stref->{'IncludeFiles'}{$f}{'Parameters'};
+                @{ $Sf->{'Parameters'}{'OrderedList'} } = (@{ $Sf->{'Parameters'}{'OrderedList'} },@pars);
+#                print "PARLIST: ",join(',',@{ $Sf->{'Parameters'}{'OrderedList'} }),"\n";
+                $srcref->[$index][1]{'Parameter'} = $Sf->{'Parameters'};
             } elsif ( $line=~/,\s*parameter\s*.*?::\s*(\w+)\s*=\s*(.+?)\s*$/) { # F95-style parameters
             my $type=$line; $type=~s/^\s+//;$type=~s/\s*\:\:.*$//;
                 my $parliststr = $1;
@@ -846,16 +867,20 @@ sub get_commons_params_from_includes {
                 my @partups = split( /\s*,\s*/, $parliststr );
                 my %pvars =
                   map { split(/\s*=\s*/,$_) } @partups;    # Perl::Critic, EYHO
-                for my $var (keys %pvars) {
+                  my @pvarl=map { s/\s*=.+//; $_ } @partups;
+                  my @pars=();
+                for my $var (@pvarl) {
                     if ( not defined $vars{$var} ) {
                         print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
                           if $W;
                     } else {
-                        $stref->{'IncludeFiles'}{$f}{'Parameters'}{$var} =
+                        $Sf->{'Parameters'}{$var} =
                           {'Type' => $type,  'Var' => $vars{$var}, 'Val'=>$pvars{$var}  };
+                          push @pars, $var;
                     }
                 }
-                $stref->{'IncludeFiles'}{$f}{'AnnLines'}->[$index][1]{'Parameter'} =
+                @{ $Sf->{'Parameters'}{'OrderedList'} } = (@{ $Sf->{'Parameters'}{'OrderedList'} },@pars);
+                $srcref->[$index][1]{'Parameter'} =
                   {};
             	
             }
@@ -865,7 +890,7 @@ sub get_commons_params_from_includes {
 
         if ($V) {
             print "\nCOMMONS for $f:\n\n";
-            for my $v ( sort keys %{ $stref->{'IncludeFiles'}{$f}{'Commons'} } )
+            for my $v ( sort keys %{ $Sf->{'Commons'} } )
             {
                 print $v, "\n";
             }
@@ -878,30 +903,31 @@ sub get_commons_params_from_includes {
             die
 "The include file $f contains both parameters and commons, this is not yet supported.\n";
         } elsif ($has_commons) {
-            $stref->{'IncludeFiles'}{$f}{'InclType'} = 'Common';
+            $Sf->{'InclType'} = 'Common';
         } elsif ($has_pars) {
-            $stref->{'IncludeFiles'}{$f}{'InclType'} = 'Parameter';
+            $Sf->{'InclType'} = 'Parameter';
         } else {
-            $stref->{'IncludeFiles'}{$f}{'InclType'} = 'None';
+            $Sf->{'InclType'} = 'None';
         }
         for my $var ( keys %vars ) {
             if (
                 (
                     $has_pars
                     and not
-                    exists( $stref->{'IncludeFiles'}{$f}{'Parameters'}{$var} )
+                    exists( $Sf->{'Parameters'}{$var} )
                 )
                 or ( $has_commons
                     and not
-                    exists( $stref->{'IncludeFiles'}{$f}{'Commons'}{$var} ) )
+                    exists( $Sf->{'Commons'}{$var} ) )
               )
             {
-                warn Dumper( $stref->{'IncludeFiles'}{$f}{'AnnLines'} );
+                warn Dumper( $Sf->{'AnnLines'} );
                 croak
 "The include $f contains a variable $var that is neither a parameter nor a common variable, this is not supported\n";
             }
         }
     }
+#    die if $f eq 'includepar';
 #    croak Dumper($stref->{'IncludeFiles'}{$f}{'Commons'}{'memind'}) if $f eq 'includecom'; #OK here
     return $stref;
 }    # END of get_commons_params_from_includes()

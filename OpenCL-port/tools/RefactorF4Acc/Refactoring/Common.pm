@@ -127,7 +127,7 @@ sub context_free_refactorings {
 #        			warn "$vars[0] is a PARAMETER with value $Sf->{'Parameters'}{$vars[0]}{'Val'}\n";
         			$is_par=1;
         			$val=$Sf->{'Parameters'}{$vars[0]}{'Val'};
-        			$val=resolve_params($Sf,$val);
+#        			$val=resolve_params($Sf,$val);
         			die $val if $vars[0] eq 'epsi';
         		}
         		$line = format_f95_decl($Sf->{'Vars'},[$vars[0], $is_par,$val]);
@@ -488,6 +488,7 @@ sub format_f95_multiple_decl {
     }
 } # format_f95_multiple_decl() 
 
+# This could work but it means the code has to be regenerated every time a parameter changes ... 
 sub resolve_params {
 	(my $Sf, my $val)=@_;
 	

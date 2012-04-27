@@ -289,13 +289,13 @@ Because the aim of the tool is to refactor the source code, and not to translate
         Indents -- used during traversal for counting the indentation level
         Subroutines -- A map with for subroutine name, following entries:
             Source -- Source file name for the subroutine
-            Lines -- The source per line, split lines have been merged
-            Info -- Information about each line            
+            AnnLines -- The source per line, split lines have been merged, with information about each line            
             Blocks -- Blocks marked for refactoring into subroutines
             HasBlocks -- Boolean: does this sub contain blocks?
     *       Args -- subroutine arguments
             Includes -- This is a map { name => index }, used as a set 
-    *       Vars -- all declared variables. FIXME: do this for functions too!
+    *       Vars -- all declared variables. 
+            Parameters
             CalledSubs -- Another map-used-as-set of all subs called in the sub  
             Status -- UNREAD,READ,PARSED,FROM_BLOCK,C_SOURCE
     *       Globals -- For every include, a list of its /common/ vars used in the sub             
@@ -313,8 +313,9 @@ Because the aim of the tool is to refactor the source code, and not to translate
             RefactoredCode -- refactored source, line by line, long lines are split
         Functions -- Same as Subroutines, but for Functions #TODO: maybe we could simply have a flag "IsFunction" in Subroutines?
             Source            
-            Lines
-            Info
+            AnnLines  
+            Vars          
+            Parameters
             [Blocks]
             HasBlocks            
             Includes            
@@ -326,9 +327,9 @@ Because the aim of the tool is to refactor the source code, and not to translate
             RefactoredCode      
         IncludeFiles -- Similar as Subroutines/Functions but for Includes
             Source
-            Lines
-            Info
+            AnnLines            
             Vars            
+            Parameters
             Status            
     *       Type -- Common or Parameter
     *       Root -- highest subroutine in the call tree for every include
