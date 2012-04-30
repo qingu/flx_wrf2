@@ -101,8 +101,6 @@ sub refactor_subroutine_main {
     $stref = context_free_refactorings( $stref, $f );    
     my $Sf = $stref->{'Subroutines'}{$f};
     my $annlines = get_annotated_sourcelines($stref,$f);
-#    print Dumper($annlines) if $f eq 'interpol_vdep_nests';
-#    die if $f eq 'interpol_vdep_nests'; 
     my $rlines = $annlines;
     if ( $Sf->{'HasCommons'} ) {
         if ( $Sf->{'RefactorGlobals'} == 1 ) {
@@ -112,13 +110,7 @@ sub refactor_subroutine_main {
         }
     }
     $Sf->{'RefactoredCode'}=$rlines;
-#    if (   not exists $Sf->{'RefactoredCode'}
-#        or $Sf->{'RefactoredCode'} == []
-#        or exists $stref->{'BuildSources'}{'C'}{ $Sf->{'Source'} } )
-#    {
-#        $stref = create_refactored_source( $stref, $f, $rlines );
-#    }
-#die Dumper($Sf->{'RefactoredCode'}) if $f eq 'interpol_all';
+    die Dumper($rlines) if $f eq 'advance';
     return $stref;
 }    # END of refactor_subroutine_main()
 
@@ -178,7 +170,7 @@ sub refactor_globals {
             $skip = skip_common_include_statement( $stref, $f, $annline );
         }
 
-        if ( exists $tags{'ExGlobVarDecls'} ) {            
+        if ( exists $tags{'ExGlobVarDecls'} and not exists $tags{'Deleted'} and not exists $tags{'Comments'}) {            
 
             # First, abuse ExGlobVarDecls as a hook for the addional includes, if any
             $rlines =
@@ -220,7 +212,7 @@ sub refactor_globals {
             $skip = 1;
         }
 
-        if ( not exists $tags{'Comments'} and $skip == 0 ) {
+        if ( not exists $tags{'Comments'} and not exists $tags{'Deleted'} and $skip == 0 ) {
             $rlines =
               rename_conflicting_locals( $stref, $f, $annline, $rlines );
             $skip = 1;

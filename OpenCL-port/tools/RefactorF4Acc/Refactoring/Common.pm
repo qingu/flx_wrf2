@@ -40,8 +40,8 @@ sub context_free_refactorings {
     ( my $stref, my $f ) = @_;
     print "CREATING FINAL $f CODE\n" if $V;
     my @extra_lines = ();
-    my $sub_or_func =
-      ( exists $stref->{'Subroutines'}{$f} ) ? 'Subroutines' : 'Functions';
+    my $sub_or_func = sub_func_or_incl($f, $stref);
+#      ( exists $stref->{'Subroutines'}{$f} ) ? 'Subroutines' : 'Functions';
     my $Sf = $stref->{$sub_or_func}{$f};
     if ($Sf->{'Status'}!=$PARSED ) {
     	croak caller;
@@ -57,13 +57,14 @@ sub context_free_refactorings {
 #}
 # die;
 #}
-
+    my $firstdecl=1;
     $Sf->{'RefactoredCode'} =[];
     for my $annline ( @{$annlines} ) {
         if (not defined $annline or not defined $annline->[0]) {
             croak "Undefined source code line for $f in create_refactored_source()";
         }
         my $line = $annline->[0];
+#        print "LINE: <$line>\n";
         my $tags_lref = $annline->[1] || {};
         my %tags = %{$tags_lref};
 
@@ -96,7 +97,7 @@ sub context_free_refactorings {
                 }
             }
             while ( $count > 0 ) {
-                push @extra_lines, '      end do';
+                push @extra_lines, ['      end do', {'EndDo'=>1}];
                 $count--;
             }
         }
@@ -120,34 +121,42 @@ sub context_free_refactorings {
 #        croak "FIXME: this VarDecl refactoring breaks the comparison in ArgumentIODirs.pm line 214!!!";
         if (exists $tags{'VarDecl'} and not exists $tags{'FunctionSig'} ) {
         	my @vars=@{$tags{'VarDecl'}};
-        	if (scalar @vars==1) { 
-        		my $is_par=0;
-        		my $val=0;
-        		if (exists ($Sf->{'Parameters'}{$vars[0]} ) ){
-#        			warn "$vars[0] is a PARAMETER with value $Sf->{'Parameters'}{$vars[0]}{'Val'}\n";
-        			$is_par=1;
-        			$val=$Sf->{'Parameters'}{$vars[0]}{'Val'};
-#        			$val=resolve_params($Sf,$val);
-        			die $val if $vars[0] eq 'epsi';
+        	# first create all parameter declarations
+        	if ($firstdecl==1) {
+        		$tags_lref->{'ExGlobVarDecls'} = {};
+        		$firstdecl=0;
+        		for my $par ( @{ $Sf->{'Parameters'}{'OrderedList'} } ) {        			
+        			# What we need is a new formatter
+        			my $new_line=format_f95_par_decl($Sf,$par);
+        			push @extra_lines, [$new_line, {'Extra'=>1, 'Parameter'=>1}]; 
         		}
-        		$line = format_f95_decl($Sf->{'Vars'},[$vars[0], $is_par,$val]);
+        		my @vars_not_pars =grep {not exists  $Sf->{'Parameters'}{$_} } @vars;
+        		my $filtered_line = '';
+        		if (@vars_not_pars) {
+        		  $filtered_line = format_f95_multiple_var_decls($Sf->{'Vars'},@vars_not_pars);
+        		  $tags_lref->{'Extra'}=1;
+        		  push @extra_lines, [$filtered_line,$tags_lref];
+        		}
+        		$line = '!! Original line for info !! '.$line;$tags_lref->{'Deleted'} =1;
         	} else {
-        		my $var_is_par_tups=[];
-        		for my $var (@vars) {
-        			
-        			my $is_par=0;
-        			my $val=0;
-                if (exists ($Sf->{'Parameters'}{$var} ) ){
-#                    warn "$var is a PARAMETER with value $Sf->{'Parameters'}{$var}{'Val'}\n";
-                    $is_par=1;
-                    $val=$Sf->{'Parameters'}{$var}{'Val'}
-                }
-                push @{$var_is_par_tups},[$var,$is_par,$val];
+        	
+        	if (scalar @vars==1) { 
+        		if (exists ($Sf->{'Parameters'}{$vars[0]} ) ){
+        			# Remove this line
+        			$line = '!! Original line for info !! '.$line;$tags_lref->{'Deleted'} =1;
+        		} else {
+        		  $line = format_f95_var_decl($Sf->{'Vars'},$vars[0]);
         		}
-        		
-        		$line = format_f95_multiple_decl($Sf->{'Vars'},$var_is_par_tups);
+        	} else {
+        		# filter out parameters
+        		my @vars_not_pars =grep {not exists  $Sf->{'Parameters'}{$_} } @vars;
+        		if (@vars_not_pars ) {
+        		  $line = format_f95_multiple_var_decls($Sf->{'Vars'},@vars_not_pars);
+        		} else {
+        			$line = '!! Original line for info !! '.$line;$tags_lref->{'Deleted'} =1;
+        		}
         	}
-
+        	}
 #        	warn "$sub_or_func $f: $line\n";
         	
 #        	for my $var (@vars) {
@@ -159,28 +168,28 @@ sub context_free_refactorings {
 #                push @{ $Sf->{'RefactoredCode'} },[$extra_line,{'Extra'=>1,'VarDecl'=>[$var] }];        		
 #        	}
         }# else {
-    if (exists $tags{'Parameter'}) { 
-#        warn "Found PARAMETER in $f: $line\n";
-        for my $par (@{ $tags{'Parameter'}} ) {
-#                warn "$par:\n";
-#                warn Dumper($Sf->{'Parameters'}{$par}),"\n";
-            if ($Sf->{'Parameters'}{$par}{'Type'} eq 'Unknown') {
-            	                $line = '!'.$line;
-        	}
-        }
+    if (exists $tags{'Parameter'}) {
+    	$line = '!! Original line for info !! '.$line;$tags_lref->{'Deleted'} =1;
+#    	$line='';$tags_lref ={};
+
     }
-        push @{ $Sf->{'RefactoredCode'} }, [$line, $tags_lref];
+        push @{ $Sf->{'RefactoredCode'} }, [$line, $tags_lref] if $line ne '';
         #}
             if (@extra_lines) {
 #            	warn "Extra lines in context free refactoring:\n";
                 for my $extra_line (@extra_lines) {
-#                	warn $extra_line ,"\n";
-                    push @{ $Sf->{'RefactoredCode'} },
-                      [$extra_line,{'Extra'=>1}];
+                    push @{ $Sf->{'RefactoredCode'} }, $extra_line;
                 }
                 @extra_lines = ();
             }        
     }
+    print "REFACTORED LINES ($f):\n";
+    
+    for my $tmpline (@{ $Sf->{'RefactoredCode'} }) {
+    	print $tmpline->[0],"\t",join(';',keys %{$tmpline->[1]} ),"\n";
+    } 
+    print "=================\n";
+#    die if $f eq 'advance';
     return $stref;
 }    # END of context_free_refactorings()
 
@@ -199,7 +208,7 @@ sub create_refactored_source {
         }
         my $line = $annline->[0] || '';
         my $tags_lref = $annline->[1] || {};
-        if ( not exists $tags_lref->{'Comments'} ) {
+        if ( not exists $tags_lref->{'Comments'} and not exists $tags_lref->{'Deleted'}) {
             print $line, "\n" if $V;
             if ($line=~/;/ && $line!~/[\'\"]/) {            	
             	my $spaces=$line;
@@ -406,7 +415,33 @@ sub format_f95_decl {
 #    die $decl_line  if $dim;
 	return $decl_line	
 } # format_f95_decl() 
+# -----------------------------------------------------------------------------
 
+sub format_f95_var_decl {
+    (my $Sfv,my $var ) = @_;    
+    my $Sv=$Sfv->{$var};
+    if (not exists $Sv->{'Decl'}) {
+        print "WARNING: VAR $var does not exist in format_f95_decl()!\n" if $W;croak $var;
+    }
+    my $spaces = $Sv->{'Decl'};
+    $spaces=~s/\S.*$//;
+    # FIXME: for multiple vars, we need to split this in multiple statements. 
+    # So I guess as soon as the Shape is not empty, need to split.
+    my $shape = $Sv->{'Shape'};
+    die Dumper($shape) if join('',@{$shape})=~/;/;
+    my $dim='';
+    if (@{$shape}) {
+        my @dims=();                
+        for my $i (0..(@{$shape}/2-1) ){
+            my $range = ($shape->[2*$i] eq '1') ? $shape->[2*$i+1] : $shape->[2*$i].':'.$shape->[2*$i+1];
+            push @dims,$range;
+        }
+        $dim=', dimension('.join(',',@dims).') ';
+    }
+    my $decl_line = $spaces.$Sv->{'Type'}.$dim.' :: '.$var. ' !! Context-free !! ';
+#    die $decl_line  if $dim;
+    return $decl_line   
+} # format_f95_var_decl() 
 # -----------------------------------------------------------------------------
 sub format_f95_multiple_decl {
     (my $Sfv,my $var_is_par_tups) = @_;
@@ -488,6 +523,73 @@ sub format_f95_multiple_decl {
     }
 } # format_f95_multiple_decl() 
 
+# -----------------------------------------------------------------------------
+sub format_f95_multiple_var_decls {
+    (my $Sfv,my @vars) = @_;
+    
+    my $Sv=$Sfv->{$vars[0]};
+    if (not exists $Sv->{'Decl'}) {
+        print "WARNING: VAR $vars[0] does not exist in format_f95_decl()!\n" if $W;croak $vars[0];
+    } 
+    my $spaces = $Sv->{'Decl'};
+    $spaces=~s/\S.*$//;
+    my $type=$Sv->{'Type'};
+    
+    # FIXME: for multiple vars, we need to split this in multiple statements. 
+    # So I guess as soon as the Shape is not empty, need to split.
+    my $split=0;
+    if (!$split) {
+    for my $var (@vars) {       
+        my $shape = $Sfv->{$var}{'Shape'};
+        if (@{$shape}>0 && @vars>1) {
+            $split=1;
+            last;
+        }
+    }    
+    }
+        
+    if ($split) {
+        
+        my $decl_line = $spaces;#.$Sv->{'Type'}.' :: '.join(', ',@vars);
+        # What we need to do is split these into separate statements with semicolons
+        for my $var (@vars) {
+                     
+            my $dim='';
+            my $shape=$Sfv->{$var}{'Shape'};            
+            if (@{$shape}>1) {
+                
+                my @dims=();                
+                for my $i (0..(@{$shape}/2-1) ){
+                    my $range = ("$shape->[2*$i]" eq '1') ? $shape->[2*$i+1] : $shape->[2*$i].':'.$shape->[2*$i+1];
+                    push @dims,$range;                                  
+                }
+                $dim=', dimension('.join(',',@dims).') ';
+            }
+                        
+            my $decl = "$type $dim :: $var; ";
+            $decl_line.=$decl;      
+        }
+        return $decl_line;
+    } else {
+        # for Shape, it means they are all empty OR there is just one!
+            my $dim='';
+            if (@vars==1) {
+            my $shape=$Sfv->{$vars[0]}{'Shape'};
+            if (@{$shape}) {
+                my @dims=();                
+                for my $i (0..(@{$shape}/2-1) ){
+                    my $range = ($shape->[2*$i] eq '1') ? $shape->[2*$i+1] : $shape->[2*$i].':'.$shape->[2*$i+1];
+                    push @dims,$range;                                  
+                }
+                $dim=', dimension('.join(',',@dims).') ';
+            }
+            }       
+        my $decl_line = $spaces.$type.$dim.' :: '.join(', ',@vars). ' !! Context-free, multi !! ';            
+        return $decl_line;
+    }
+} # format_f95_multiple_var_decls() 
+# ----------------------------------------------------------------------------------------------------
+
 # This could work but it means the code has to be regenerated every time a parameter changes ... 
 sub resolve_params {
 	(my $Sf, my $val)=@_;
@@ -527,3 +629,32 @@ sub resolve_params {
                 	return $val;
                 }                
 }
+
+# -----------------------------------------------------------------------------
+
+sub format_f95_par_decl {
+    (my $Sf,my $var ) = @_;
+    my $val=$Sf->{'Parameters'}{$var}{'Val'};
+    my $Sv=$Sf->{'Vars'}{$var};
+    if (not exists $Sv->{'Decl'}) {
+        print "WARNING: VAR $var does not exist in format_f95_decl()!\n" if $W;croak $var;
+    }
+    my $spaces = $Sv->{'Decl'};
+    $spaces=~s/\S.*$//;
+    # FIXME: for multiple vars, we need to split this in multiple statements. 
+    # So I guess as soon as the Shape is not empty, need to split.
+    my $shape = $Sv->{'Shape'};
+    die Dumper($shape) if join('',@{$shape})=~/;/;
+    my $dim='';
+    if (@{$shape}) {
+        my @dims=();                
+        for my $i (0..(@{$shape}/2-1) ){
+            my $range = ($shape->[2*$i] eq '1') ? $shape->[2*$i+1] : $shape->[2*$i].':'.$shape->[2*$i+1];
+            push @dims,$range;
+        }
+        $dim=', dimension('.join(',',@dims).') ';
+    }
+    my $decl_line = $spaces.$Sv->{'Type'}.$dim.', parameter ' .' :: '.$var. ' = '.$val;
+#    die $decl_line  if $dim;
+    return $decl_line   
+} # format_f95_decl() 

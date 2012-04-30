@@ -242,11 +242,9 @@ sub determine_subroutine_arguments {
                     if ( exists $Sf->{'ImplicitNone'} ) {
                         print "INFO: $f has 'implicit none'\n" if $V;
                         my $idx = $Sf->{'ImplicitNone'} + 1;
-                        $srcref->[$idx][1]{'ExGlobVarDecls'} = {};
-#                        $srcref->[$idx][1]{'ExGlobVarDecls'}={};                                        
+                        $srcref->[$idx][1]{'ExGlobVarDecls'} = {};                                        
                     } else {
                         $info->{'ExGlobVarDecls'} = {};
-#                        $srcref->[$index][1]{'ExGlobVarDecls'}={};
                     }
                 }
                 $info->{'Signature'}{'Name'} = $name;

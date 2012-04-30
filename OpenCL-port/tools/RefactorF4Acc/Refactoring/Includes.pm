@@ -2,7 +2,7 @@ package RefactorF4Acc::Refactoring::Includes;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
-use RefactorF4Acc::Refactoring::Common qw( get_annotated_sourcelines create_refactored_source );
+use RefactorF4Acc::Refactoring::Common qw( get_annotated_sourcelines create_refactored_source context_free_refactorings );
 
 #
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
@@ -59,9 +59,17 @@ sub refactor_include {
 	( my $f, my $stref ) = @_;
 
 	print "\n\n", '#' x 80, "\nRefactoring INC $f\n", '#' x 80, "\n" if $V;
+	my $If = $stref->{'IncludeFiles'}{$f};
+    if (   not exists $If->{'RefactoredCode'}
+        or $If->{'RefactoredCode'} == []
+        or exists $stref->{'BuildSources'}{'C'}{ $If->{'Source'} } ) # FIXME: needed?
+    {
+        $stref = context_free_refactorings( $stref, $f );
+    }
 
 	my $annlines = get_annotated_sourcelines( $stref, $f );
-
+#	croak Dumper($annlines);
+    my $refactored_lines=[];
 	for my $annline ( @{$annlines} ) {
 		my $line      = $annline->[0] || '';
 		my $tags_lref = $annline->[1];
@@ -97,12 +105,13 @@ sub refactor_include {
 		}
 		if ( $skip == 0 ) {
 
-				push @{ $stref->{'IncludeFiles'}{$f}{'RefactoredCode'} },
+				push @{ $refactored_lines },
 				  [ $line, $tags_lref ];
 
 		}
 	}
-
+ $stref->{'IncludeFiles'}{$f}{'RefactoredCode'}  = $refactored_lines;
+                  
 	return $stref;
 
 } # END of refactor_include()

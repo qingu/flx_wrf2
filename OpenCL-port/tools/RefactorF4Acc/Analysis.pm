@@ -2,7 +2,7 @@ package RefactorF4Acc::Analysis;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
-use RefactorF4Acc::Analysis::Includes qw( find_root_for_includes adapt_ordering_for_dependent_params );
+use RefactorF4Acc::Analysis::Includes qw( find_root_for_includes );
 use RefactorF4Acc::Analysis::Globals qw( resolve_globals );
 use RefactorF4Acc::Analysis::ArgumentIODirs qw( determine_argument_io_direction_rec );
 use RefactorF4Acc::Analysis::LoopsBreaks qw( analyse_sources );
@@ -32,7 +32,7 @@ sub analyse_all {
 	(my $stref, my $subname)=@_;
 	   # Find the root for each include in a proper way
     $stref = find_root_for_includes( $stref, $subname );
-    $stref = adapt_ordering_for_dependent_params($stref);
+    
     # Now we can do proper globals handling
     # We need to walk the tree again, find the globals in rec descent.
     $stref = resolve_globals( $subname, $stref );
