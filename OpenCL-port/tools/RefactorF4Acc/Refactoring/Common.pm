@@ -134,8 +134,9 @@ sub context_free_refactorings {
         		my $filtered_line = '';
         		if (@vars_not_pars) {
         		  $filtered_line = format_f95_multiple_var_decls($Sf->{'Vars'},@vars_not_pars);
-        		  $tags_lref->{'Extra'}=1;
-        		  push @extra_lines, [$filtered_line,$tags_lref];
+        		  my %tr = %{ $tags_lref };
+                  $tr{'Extra'}=1;
+        		  push @extra_lines, [$filtered_line,\%tr];
         		}
         		$line = '!! Original line for info !! '.$line;$tags_lref->{'Deleted'} =1;
         	} else {
@@ -183,12 +184,14 @@ sub context_free_refactorings {
                 @extra_lines = ();
             }        
     }
+if ($f eq 'advance') {
     print "REFACTORED LINES ($f):\n";
     
     for my $tmpline (@{ $Sf->{'RefactoredCode'} }) {
     	print $tmpline->[0],"\t",join(';',keys %{$tmpline->[1]} ),"\n";
     } 
     print "=================\n";
+}
 #    die if $f eq 'advance';
     return $stref;
 }    # END of context_free_refactorings()

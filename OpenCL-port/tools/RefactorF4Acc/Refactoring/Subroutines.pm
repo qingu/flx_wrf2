@@ -110,7 +110,12 @@ sub refactor_subroutine_main {
         }
     }
     $Sf->{'RefactoredCode'}=$rlines;
-    die Dumper($rlines) if $f eq 'advance';
+    if ($f eq 'advance') {
+        for my $rl (@{ $rlines }) {
+            print $rl->[0],"\n";
+        }
+    die;
+    }
     return $stref;
 }    # END of refactor_subroutine_main()
 
@@ -197,7 +202,7 @@ sub refactor_globals {
             }
 
         }
-        if ( exists $tags{'VarDecl'} ) {
+        if ( exists $tags{'VarDecl'} and not exists $tags{'Deleted'}) {
 #        	warn join(';',keys %tags)."\n";
             $rlines = create_refactored_vardecls( $stref, $f, $annline, $rlines,
                 $is_C_target );
