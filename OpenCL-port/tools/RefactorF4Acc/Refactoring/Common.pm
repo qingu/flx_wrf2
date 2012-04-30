@@ -47,16 +47,6 @@ sub context_free_refactorings {
     	croak caller;
     }    
     my $annlines=get_annotated_sourcelines($stref,$f);
-#croak "The previous refactoring removed the Loops/Breaks info!!!";
-#if ($f eq 'advance') {
-##print Dumper($stref->{'Subroutines'}{'advance'}{'RefactoredSources'}) ; die;
-#for my $annline (@{$annlines}) {
-#	next if $annline->[0] =~ /^\s*\!/;
-#	next if (not keys %{ $annline->[1] } );
-#    print $annline->[0],"\t::",Dumper($annline->[1]),"\n" ;
-#}
-# die;
-#}
     my $firstdecl=1;
     $Sf->{'RefactoredCode'} =[];
     for my $annline ( @{$annlines} ) {
@@ -168,7 +158,16 @@ sub context_free_refactorings {
 ##        		warn $extra_line."\n";
 #                push @{ $Sf->{'RefactoredCode'} },[$extra_line,{'Extra'=>1,'VarDecl'=>[$var] }];        		
 #        	}
-        }# else {
+        } 
+        if (not keys %tags) {
+            while ($line=~/\.\s+(?:eq|ne|gt|lt)\./){
+            $line=~s/\.\s+(eq|ne|gt|lt)\./ .$1. /;
+            }
+            while ($line=~/\.(?:eq|ne|gt|lt)\s+\./){
+            $line=~s/\.(eq|ne|gt|lt)\s+\./ .$1. /;
+            }
+            
+        }
     if (exists $tags{'Parameter'}) {
     	$line = '!! Original line for info !! '.$line;$tags_lref->{'Deleted'} =1;
 #    	$line='';$tags_lref ={};
@@ -184,7 +183,7 @@ sub context_free_refactorings {
                 @extra_lines = ();
             }        
     }
-if ($f eq 'advance') {
+if ($f eq 'NONE') {
     print "REFACTORED LINES ($f):\n";
     
     for my $tmpline (@{ $Sf->{'RefactoredCode'} }) {
@@ -222,6 +221,7 @@ sub create_refactored_source {
                     push @{ $Sf->{'RefactoredCode'} }, [$spaces.$sline,$tags_lref];
                 }	
             } else {
+                $line=~s/\s+\!\!.*$//;# FIXME: ad-hoc to remove comments from context-free refactoring
 	            my @split_lines = split_long_line($line);
 	            for my $sline (@split_lines) {
 	                push @{ $Sf->{'RefactoredCode'} }, [$sline,$tags_lref];

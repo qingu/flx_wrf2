@@ -110,7 +110,7 @@ sub refactor_subroutine_main {
         }
     }
     $Sf->{'RefactoredCode'}=$rlines;
-    if ($f eq 'advance') {
+    if ($f eq 'NONE') {
         for my $rl (@{ $rlines }) {
             print $rl->[0],"\n";
         }

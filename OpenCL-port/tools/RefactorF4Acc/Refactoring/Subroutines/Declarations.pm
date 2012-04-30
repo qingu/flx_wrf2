@@ -112,7 +112,6 @@ sub create_refactored_vardecls {
         }
         $skip=1;
     }
-print "create_refactored_vardecls( $f ): $rline\n";
     push @{$rlines}, [ $rline, $tags_lref ] unless $skip==1;
     return $rlines;
 }    # END of create_refactored_vardecls()

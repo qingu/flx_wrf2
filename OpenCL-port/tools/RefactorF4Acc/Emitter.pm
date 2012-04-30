@@ -125,7 +125,7 @@ sub emit_refactored_function {
         }
         open my $SRC, $mode, "$dir/$s" or die $!;
         if ( $mode eq '>>' ) {
-            print $SRC "\nC *** FUNCTION $f ***\n";
+            print $SRC "\n! *** FUNCTION $f ***\n";
         }
         my $prevline='C ';
         for my $annline ( @{$srcref} ) {
@@ -179,9 +179,9 @@ sub emit_refactored_subroutine {
         }
         open my $SRC, $mode, "$dir/$s" or die $!;
         if ( $mode eq '>>' ) {
-            print $SRC "\nC *** SUBROUTINE $f ***\n";
+            print $SRC "\n! *** SUBROUTINE $f ***\n";
         }
-        my $prevline='C ';
+        my $prevline='! ';
         for my $annline ( @{$srcref} ) {
         	my $line = $annline->[0]; 
             if (not ($prevline =~/^\s*$/ and $line =~/^\s*$/)) {
