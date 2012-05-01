@@ -58,7 +58,6 @@ sub context_free_refactorings {
 	print "CREATING FINAL $f CODE\n" if $V;
 	my @extra_lines = ();
 	my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
-
 	my $Sf = $stref->{$sub_or_func_or_inc}{$f};
 	if ( $Sf->{'Status'} != $PARSED ) {
 		croak caller;
@@ -139,9 +138,10 @@ sub context_free_refactorings {
 				for my $par ( @{ $Sf->{'Parameters'}{'OrderedList'} } ) {
 
 					# What we need is a new formatter
-					my $new_line = format_f95_par_decl( $Sf, $par );
+					my $new_line = format_f95_par_decl( $stref, $f, $par );					
 					push @extra_lines,
-					  [ $new_line, { 'Extra' => 1, 'Parameter' => 1 } ];
+					  [ $new_line, { 'Extra' => 1, 'Parameter' => [$par] } ];
+#					  die Dumper($Sf->{'Parameters'}{$par});
 				}
 				my @vars_not_pars =
 				  grep { not exists $Sf->{'Parameters'}{$_} } @vars;
@@ -183,7 +183,7 @@ sub context_free_refactorings {
 				}
 			}
 		}
-
+# FIXME: It might be better to have IfThen and Assignment tags!!
 		if ( not keys %tags) {
 			if ($line =~ /if/ ) {
 				while ( $line =~ /\.\s+(?:and|not|or|neqv|eqv)\./ ) {
@@ -201,19 +201,21 @@ sub context_free_refactorings {
     			$kv=~s/^\s+//;    			
     			$kv=~s/\s+$//;
     			(my $k, my $rhs_expr) = split(/\s*=\s*/,$kv);
-    			print "KV: <$k> => <$rhs_expr>\n";
+#    			print "KV: <$k> => <$rhs_expr>\n";
     			my @rhs_vals= grep {/[a-z]\w*/} split( /\W+/, $rhs_expr );    			
     			my @n_rhs_vals=@rhs_vals;
     			if (@rhs_vals) {
     				my $i=0;
     				for my $rhs_val (@rhs_vals) {
-    					print" RHS: $rhs_val\n"; 
+#    					print" RHS: $rhs_val\n"; 
     					$n_rhs_vals[$i]=$rhs_val;
                         if (exists $Sf->{'ConflictingGlobals'}{$rhs_val}) {
+                        	print "CONFLICT: $rhs_val in $line ($f)\n";
                             $n_rhs_vals[$i]=$Sf->{'ConflictingGlobals'}{$rhs_val};
                         } else {
                             for my $inc (keys %{ $Sf->{'Includes'} }) {                                        
                                 if (exists $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$rhs_val}) {
+                                	print "CONFLICT: $rhs_val in $line ($f), from $inc\n";
                                     $n_rhs_vals[$i] = $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$rhs_val};
                                     last; 
                                 }                    
@@ -225,7 +227,7 @@ sub context_free_refactorings {
     			for my $v (@rhs_vals) {
     				my $nv=shift @n_rhs_vals;
     				if ($nv ne $v) {
-    				    $rhs_expr=~s/(^|\W)$v(\W|$)/$1$nv$2/;
+    				    $rhs_expr=~s/\b$v\b/$nv/;
     				}
     			}	
     			my $nk=$k;
@@ -233,7 +235,7 @@ sub context_free_refactorings {
     				$nk = $Sf->{'ConflictingGlobals'}{$k};
     			} else {
     			for my $inc (keys %{ $Sf->{'Includes'} }) {
-    				print "INC: $inc\n";    				
+#    				print "INC: $inc\n";    				
                     if (exists $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$k}) {
                          $nk=$stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$k};
                         last;
@@ -260,15 +262,15 @@ sub context_free_refactorings {
 			@extra_lines = ();
 		}
 	}
-	if ( $f eq 'map_init' ) {
-		print "REFACTORED LINES ($f):\n";
-
-		for my $tmpline ( @{ $Sf->{'RefactoredCode'} } ) {
-			print $tmpline->[0], "\t", join( ';', keys %{ $tmpline->[1] } ),"\n";
-		}
-		print "=================\n";
-		die;
-	}
+#	if ( $f eq 'calcpv' ) {
+#		print "REFACTORED LINES ($f):\n";
+#
+#		for my $tmpline ( @{ $Sf->{'RefactoredCode'} } ) {
+#			print $tmpline->[0], "\t", join( ';', keys %{ $tmpline->[1] } ),"\n";
+#		}
+#		print "=================\n";
+#		die;
+#	}
 
 	return $stref;
 }    # END of context_free_refactorings()
@@ -730,7 +732,7 @@ sub resolve_params {
 	$val =~ s/\s*$//;
 	$val =~ s/^\s+//;
 
-	if ( $val =~ /(^|\W)[a-df-z_]\w*(\W|$)/ ) {
+	if ( $val =~ /\b[a-df-z_]\w*\b/ ) {
 		print "CALL: $val\n";
 		my @chunks = split( /\s*[\/\+\-\*]\s*/, $val );
 		my @maybe_pars;
@@ -750,8 +752,8 @@ sub resolve_params {
 				print "TEST PAR:{$par}\n";
 				my $tval = $Sf->{'Parameters'}{$par}{'Val'};
 				print 'PAR:', $par, ' VAL:', $tval, "\n";
-				$val =~ s/(^|\W)$par(\W|$)/$1$tval$2/;
-				print "AFTER SUB:<$val>\n";
+				$val =~ s/\b$par\b/$tval/;
+				print "AFTER SUB:<$val>\n"; 
 			}
 
 			#                    die;
@@ -767,13 +769,18 @@ sub resolve_params {
 # -----------------------------------------------------------------------------
 
 sub format_f95_par_decl {
-	( my $Sf, my $var ) = @_;
+	( my $stref,my $f, my $var ) = @_;
+    my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
+    my $Sf = $stref->{$sub_or_func_or_inc}{$f};	
 	my $val = $Sf->{'Parameters'}{$var}{'Val'};
 	my $Sv  = $Sf->{'Vars'}{$var};
 	if ( not exists $Sv->{'Decl'} ) {
 		print "WARNING: VAR $var does not exist in format_f95_decl()!\n" if $W;
 		croak $var;
 	}
+	
+	# Here we should rename for globals!
+	($var, $val) = rename_conflicting_global_pars($stref, $f, $var, $val);
 	my $spaces = $Sv->{'Decl'};
 	$spaces =~ s/\S.*$//;
 
@@ -803,3 +810,50 @@ sub format_f95_par_decl {
 	#    die $decl_line  if $dim;
 	return $decl_line;
 }    # format_f95_decl()
+
+sub rename_conflicting_global_pars {
+	(my $stref, my $f, my $k, my $rhs_expr)=@_;
+    my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
+    my $Sf = $stref->{$sub_or_func_or_inc}{$f};
+
+                my @rhs_vals= grep {/[a-z]\w*/} split( /\W+/, $rhs_expr );              
+                my @n_rhs_vals=@rhs_vals;
+                if (@rhs_vals) {
+                    my $i=0;
+                    for my $rhs_val (@rhs_vals) {
+#                       print" RHS: $rhs_val\n"; 
+                        $n_rhs_vals[$i]=$rhs_val;
+                        if (exists $Sf->{'ConflictingGlobals'}{$rhs_val}) {                            
+                            $n_rhs_vals[$i]=$Sf->{'ConflictingGlobals'}{$rhs_val};
+                        } else {
+                            for my $inc (keys %{ $Sf->{'Includes'} }) {                                        
+                                if (exists $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$rhs_val}) {                                    
+                                    $n_rhs_vals[$i] = $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$rhs_val};
+                                    last; 
+                                }                    
+                            }       
+                        }               
+                        $i++;
+                    }
+                }
+                for my $v (@rhs_vals) {
+                    my $nv=shift @n_rhs_vals;
+                    if ($nv ne $v) {
+                        $rhs_expr=~s/\b$v\b/$nv/;
+                    }
+                }   
+                my $nk=$k;
+                if (exists $Sf->{'ConflictingGlobals'}{$k}) {
+                    $nk = $Sf->{'ConflictingGlobals'}{$k};
+                } else {
+                for my $inc (keys %{ $Sf->{'Includes'} }) {
+#                   print "INC: $inc\n";                    
+                    if (exists $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$k}) {
+                         $nk=$stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$k};
+                        last;
+                    }                   
+                }               
+              }	
+              return ($nk, $rhs_expr);
+	
+}

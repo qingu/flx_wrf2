@@ -219,7 +219,7 @@ sub merge_includes {
 #	       # Then we take the params with deps from the original list, order them, and prepend or append them to the list.
 #	       for my $par ( @{$parlist} ) {	       	
 #	       	my $val = $Sf->{'Parameters'}{$par}{'Val'};
-#	       	if ($val=~/(?:^|\W)(\p{IsL}\w*)/ ) {
+#	       	if ($val=~/\b(\p{IsL}\w*)/ ) {
 #	       		# We are reasonalbly sure that this val contains pars
 #	       		$val=~s/[\.\s]+//g;
 #	       		my @mpars=grep {!/\d+/} split(/[\+\-\*\/]/,$val);

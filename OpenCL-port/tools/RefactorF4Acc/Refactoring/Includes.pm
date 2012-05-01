@@ -68,14 +68,15 @@ sub refactor_include {
     }
 
 	my $annlines = get_annotated_sourcelines( $stref, $f );
+	
 #	croak Dumper($annlines);
     my $refactored_lines=[];
 	for my $annline ( @{$annlines} ) {
-		my $line      = $annline->[0] || '';
-		my $tags_lref = $annline->[1];
-		croak "WRONG REF" if ($tags_lref eq '');
+		my $line      = $annline->[0];
+		my $info = $annline->[1];
+		croak "WRONG REF" if ($info eq '');
 		
-		my %tags      = ( defined $tags_lref ) ? %{$tags_lref} : ();
+		my %tags      = ( defined $info ) ? %{$info} : ();
 		print '*** ' . join( ',', keys(%tags) ) . "\n" if $V;
 		print '*** ' . $line . "\n" if $V;
 		my $skip = 0;
@@ -84,7 +85,7 @@ sub refactor_include {
 		}
 		if ( exists $tags{'VarDecl'} ) {
 			my @nvars = ();
-			for my $var ( @{ $annline->[1]{'VarDecl'} } ) {
+			for my $var ( @{ $info->{'VarDecl'} } ) {
 				if ( $stref->{'IncludeFiles'}{$f}{'InclType'} ne 'Parameter'
 					and
 					exists $stref->{'IncludeFiles'}{$f}{'ConflictingGlobals'}
@@ -102,11 +103,25 @@ sub refactor_include {
 				}
 			}
 			$annline->[1]{'VarDecl'} = [@nvars];
+		} 
+		if ( exists $tags{'Parameter'} ) {
+#			print Dumper(%tags);
+			for my $var (@{ $tags{'Parameter'} } ) {
+#				print "PAR: $var\n";
+                if ( exists $stref->{'IncludeFiles'}{$f}{'ConflictingGlobals'}
+                    {$var} )
+                {
+                	my $gvar=$stref->{'IncludeFiles'}{$f}{'ConflictingGlobals'}{$var};
+                	$line=~s/\b$var\b/$gvar/;
+                    $info->{'Parameter'}=[$gvar];                    
+                }
+			}
+			
 		}
 		if ( $skip == 0 ) {
 
 				push @{ $refactored_lines },
-				  [ $line, $tags_lref ];
+				  [ $line, $info ];
 
 		}
 	}

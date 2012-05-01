@@ -99,11 +99,12 @@ sub resolve_conflicts_with_params {
                         print
 "WARNING: $mpar from $inc conflicts with $mpar from $commoninc\n"
                           if $V;
-                        $Sf->{'ConflictingGlobals'}{$mpar} = $mpar . '_GLOB';
+                        $Sf->{'ConflictingGlobals'}{$mpar} = $mpar . '_GLOB';                         
                         $stref->{'IncludeFiles'}{$commoninc}
                           {'ConflictingGlobals'}{$mpar} = $mpar . '_GLOB';
                         $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}
                           {$mpar} = $mpar . '_GLOB';
+                          print "CONFLICTING GLOBAL PARAMETER: $mpar in $f and $inc\n";
                     }
                 }
             }

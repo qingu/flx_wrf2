@@ -228,8 +228,8 @@ sub get_iodirs_from_subcall {
 			# dfloat|dble is a FORTRAN primitive converting int to float
 			# sngl is a FORTRAN primitive converting double to float
 			$call_arg =~
-			  s/(^|\W)(?:int|int2|int8|short|long|sngl|dfloat|dble|float)\(//
-			  && $call_arg =~ s/\)$//;
+			  s/\b(?:int|int2|int8|short|long|sngl|dfloat|dble|float)\(// 
+			  && $call_arg =~ s/\)$//; # FIXME: was (^|\W), OK? 
 
 			# Clean up call args for comparison
 			$call_arg =~ s/(\w+)\(.*?\)/$1/g;

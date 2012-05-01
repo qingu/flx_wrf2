@@ -119,6 +119,7 @@ sub get_var_decls {
         my $is_vardecl=0;
 #        my $has_pars = 0;
         my $type    = 'NONE';
+        my $attr = '';
         my $varlst  = '';        
         
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
@@ -142,13 +143,16 @@ sub get_var_decls {
                 $Sf->{'ImplicitNone'} = $index;
             }
             # Actual variable declaration line
-            
-            if ( $line =~
-/(logical|integer|real|double\s*precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/
-              )
-            {
+# FIXME: in principle every type can be followed by '*<number>' or *(*)
+# So we have 
+ if(  $line =~/((?:logical|integer|real|double\s*precision|character)(?:\*(?:\d+|\(\*\))?))\s+(.+)\s*$/            ) {
+#if ( $line =~ /(logical|integer|real|double\s*precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/ ) {
                 $type    = $1;
                 $varlst  = $2;                 
+                $type=~/\*/ && do {
+                    ($type,$attr)=split(/\*/,$type);
+                    if ($attr eq '(') {$attr='*'}
+                };
                 $is_vardecl=1;
             } elsif ($line=~/^\s*(.*)\s*::\s*(.*?)\s*$/) { #F95
                 $type    = $1;
@@ -171,7 +175,6 @@ sub get_var_decls {
 	                        push @{$pars},$var;
 	                    }
 	                }
-#	                $Sf->{'Info'}[$index]{'Parameter'} =  $pars;            
 	                $info->{'Parameter'} =  $pars;   
 	                if (not exists $Sf->{'Parameters'}{'OrderedList'}) {
 	                	$Sf->{'Parameters'}{'OrderedList'}=[];
@@ -198,7 +201,7 @@ sub get_var_decls {
                         
                     }
                 }
-#                $Sf->{'Info'}[$index]{'Parameter'} =  $pars;
+                                
                 $info->{'Parameter'} =  $pars;
                     if (not exists $Sf->{'Parameters'}{'OrderedList'}) {
                         $Sf->{'Parameters'}{'OrderedList'}=[];
@@ -278,7 +281,8 @@ sub get_var_decls {
                          # remove *number from the type, this is wrong. The right thing is to replace
                          # this notation with type(number)
                          # Also, this is not limited to arrays, we could have e.g. integer v*4
-                         if ($tvar =~ /\*(\d+)/) {                          
+                         # integer and reals => KIND, character => LEN
+                         if ($tvar =~ /\*(\d+)/) {   
 #                            $type="$type, dimension($1)";
                             $tvar =~ s/\*\d+//;
                          }
@@ -286,12 +290,22 @@ sub get_var_decls {
                         $vars{$tvar}{'Shape'} = [@shape];
                         $p                    = '()';
                     } else {
+# FIXME: can we have '*<number>' here too?
                         $vars{$tvar}{'Kind'}  = 'Scalar';
                         $vars{$tvar}{'Shape'} = [];
                     }
                     $vars{$tvar}{'Type'} = $type;
+                    if ($attr) {
+                    if ($type =~/character/) {
+                        $vars{$tvar}{'Attr'}='(len='.$attr.')';
+                    } else {
+                        $vars{$tvar}{'Attr'}='(kind='.$attr.')';
+                    }
+                    } else {
+                        $vars{$tvar}{'Attr'}='';
+                    }
                     # Take IODir from INTENT
-                    if ($type=~/\Wintent\s*\(\s*(\w+)\s*\)/) {
+                    if ($type=~/\bintent\s*\(\s*(\w+)\s*\)/) {
                     	my $iodir=$1;
                     	$iodir=ucfirst($iodir);
                     	if ($iodir eq 'Inout') {
@@ -537,7 +551,7 @@ sub separate_blocks {
             my $tline = $annline->[0];
             $tline =~ s/\'.+?\'//;
             for my $var ( sort keys %tvars ) {
-                if ( $tline =~ /\W$var\W/ or $tline =~ /\W$var\s*$/ ) {
+                if ( $tline =~ /\b$var\b/){# or $tline =~ /\W$var\s*$/ ) {
                     print "FOUND $var\n" if $V;
                     $occs{$block}{$var} = $var;
                     delete $tvars{$var};
@@ -859,7 +873,7 @@ sub get_commons_params_from_includes {
                 }
                 @{ $Sf->{'Parameters'}{'OrderedList'} } = (@{ $Sf->{'Parameters'}{'OrderedList'} },@pars);
 #                print "PARLIST: ",join(',',@{ $Sf->{'Parameters'}{'OrderedList'} }),"\n";
-                $srcref->[$index][1]{'Parameter'} = $Sf->{'Parameters'};
+                $srcref->[$index][1]{'Parameter'} = [@pars];
             } elsif ( $line=~/,\s*parameter\s*.*?::\s*(\w+)\s*=\s*(.+?)\s*$/) { # F95-style parameters
             my $type=$line; $type=~s/^\s+//;$type=~s/\s*\:\:.*$//;
                 my $parliststr = $1;
