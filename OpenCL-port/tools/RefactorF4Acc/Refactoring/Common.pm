@@ -29,6 +29,22 @@ use Exporter;
     &format_f95_decl
 );
 
+    our %f95ops=(
+  'not' => '.not.', #       complement, negation
+  'and' => '.and.', #       logical and
+  'or'  => '.or.', #       logical or
+  'eqv' => '.eq.', #       logical equivalence
+  'neqv' => '.neqv.', #      logical not equivalence, exclusive or
+
+  'eq'  => '==', #    equality, old
+  'ne'  => '/=', #    not equal. old
+  'lt'  => '<', #     less than, old
+  'gt'  => '>', #     greater than, old
+  'le'  => '<=', #    less than or equal, old
+  'ge'  => '>=', #    greater than or equal, old
+
+  );
+
 #* BeginDo: just remove the label
 #* EndDo: replace label CONTINUE by END DO
 #* Break: keep as is; add a comment to identify it as a break
@@ -159,13 +175,35 @@ sub context_free_refactorings {
 #                push @{ $Sf->{'RefactoredCode'} },[$extra_line,{'Extra'=>1,'VarDecl'=>[$var] }];        		
 #        	}
         } 
-        if (not keys %tags) {
-            while ($line=~/\.\s+(?:eq|ne|gt|lt)\./){
-            $line=~s/\.\s+(eq|ne|gt|lt)\./ .$1. /;
+=pod
+  .not.       complement, negation
+  .and.       logical and
+  .or.        logical or
+  .eqv.       logical equivalence
+  .neqv.      logical not equivalence, exclusive or
+
+  .eq.  ==    equality, old
+  .ne.  /=    not equal. old
+  .lt.  <     less than, old
+  .gt.  >     greater than, old
+  .le.  <=    less than or equal, old
+  .ge.  >=    greater than or equal, old
+=cut        
+        if (not keys %tags and $line=~/if/) {        	
+#        	warn "$line\n";
+            while ($line=~/\.\s+(?:and|not|or|neqv|eqv)\./){
+                $line=~s/\.\s+(and|not|or|neqv|eqv)\./ .$1. /;
             }
-            while ($line=~/\.(?:eq|ne|gt|lt)\s+\./){
-            $line=~s/\.(eq|ne|gt|lt)\s+\./ .$1. /;
+            while ($line=~/\.\s+(?:and|not|or|neqv|eqv)\./){
+                $line=~s/\.(and|not|or|neqv|eqv)\s+\./ .$1. /;
             }
+            while ($line=~/\.\s*(?:eq|ne|gt|lt|le|ge)\s*\./){
+                $line=~s/\.\s*(eq|ne|gt|lt|le|ge)\s*\./ $f95ops{$1} /;
+            }            
+#            warn "$line\n";
+#            while ($line=~/\.(?:eq|ne|gt|lt)\s+\./){
+#            $line=~s/\.(eq|ne|gt|lt)\s+\./ $f95ops{$1} /;
+#            }
             
         }
     if (exists $tags{'Parameter'}) {
