@@ -375,7 +375,7 @@ sub analyse_src_for_iodirs {
                         } else {
                             print
 "WARNING: IO direction for $var in call to $name in $f is Unknown\n"
-                              if $W;
+                              if $V;
                         }
                     } else {
 

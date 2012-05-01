@@ -164,7 +164,7 @@ sub get_var_decls {
 	                   my @pvarl=map { s/\s*=.+//; $_ } @partups;                
 	                for my $var (@pvarl) {
 	                    if ( not defined $vars{$var} ) {
-	                        print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
+	                        print "WARNING: PARAMETER $var not declared in $f (F95-style)\n"
 	                          if $W;
 	                    } else {
 	                        $Sf->{'Parameters'}{$var} = {'Type' => $type,  'Var' => $vars{$var}, 'Val'=>$pvars{$var}};	                        
@@ -190,7 +190,7 @@ sub get_var_decls {
                 my $pars=[];
                 for my $var (@pvarl) {
                     if ( not defined $vars{$var} ) {
-                        print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
+                        print "WARNING: PARAMETER $var not declared in $f\n"
                           if $W;
                     } else {
                         $Sf->{'Parameters'}{$var} = {'Type' => 'Unknown',  'Var' => $vars{$var}, 'Val'=>$pvars{$var}};
@@ -848,7 +848,7 @@ sub get_commons_params_from_includes {
                 my @pars=();
                 for my $var (@pvarl) {
                     if ( not defined $vars{$var} ) {
-                        print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
+                        print "WARNING: PARAMETER $var not declared in $f\n"
                           if $W;
                     } else {
                         $Sf->{'Parameters'}{$var} =
@@ -871,7 +871,7 @@ sub get_commons_params_from_includes {
                   my @pars=();
                 for my $var (@pvarl) {
                     if ( not defined $vars{$var} ) {
-                        print "WARNINGS: NOT A PARAMETER: <", $var, ">\n"
+                        print "WARNING: PARAMETER $var not declared in $f (F95-style)\n"
                           if $W;
                     } else {
                         $Sf->{'Parameters'}{$var} =
