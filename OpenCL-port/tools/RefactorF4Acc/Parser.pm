@@ -105,10 +105,6 @@ sub parse_fortran_src {
 
 sub get_var_decls {
     ( my $f, my $stref ) = @_;
-
-#   my $is_incl = exists $stref->{'IncludeFiles'}{$f} ? 1 : 0;
-
-    #           my $sub_or_incl = $is_incl ? 'Includes' : 'Subroutines';
     my $sub_func_incl = sub_func_or_incl( $f, $stref );
     my $Sf=$stref->{$sub_func_incl}{$f};
     my $srcref = $Sf->{'AnnLines'};
@@ -117,10 +113,10 @@ sub get_var_decls {
         my %vars  = ();
         my $first = 1;
         my $is_vardecl=0;
-#        my $has_pars = 0;
         my $type    = 'NONE';
         
         my $varlst  = '';        
+my %dims=();
         
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
         	my $attr = '';
@@ -136,11 +132,7 @@ sub get_var_decls {
 #                next;
 #            }
             if ( $line =~ /implicit\s+none/ ) {
-
-                #               print "INFO: $f has 'implicit none'\n";
                 $info->{'ImplicitNone'}=1;
-#                $Sf->{'Info'}->[$index]{'ImplicitNone'} =
-#                  {};
                 $Sf->{'ImplicitNone'} = $index;
             }
             # Actual variable declaration line
@@ -232,37 +224,64 @@ sub get_var_decls {
 # What we need to do is remove the dimensions but keep track of where they belong, then split on commas,
 # process the dimensions, and put it all together
 # if paren, count parens until found matching paren
-my $in_dim=0; my $read_dim=0; my $in_var=0;my $dim='';my $mvar='';
+my $in_dim=0; my $read_dim=0; my $in_var=0;my $dim='';my $mvar='';my $tmvar='';
+
 print "LINE $line\n";
 for my $c (split('', $tvarlst) ) {
-    if (!$in_var && !$in_dim &&$c=~/\w/) {
-	   $in_var=1;
-    } 	
-    if ($in_var) {
-	   if($c=~/\W/) {
-	       $in_var=0;
-	       print "MVAR:",$mvar,"\n";$mvar='';
-        } else {
-	   $mvar.=$c;
-        }
-    }
-if ($c eq '(' && $in_dim==0) {$in_dim=1;$read_dim=1;}
-elsif ($c eq '(' && $in_dim!=0) {$in_dim++}
-elsif ($c eq ')' && $in_dim!=0) {$in_dim--}
-#if ($c eq ')' && $in_dim==0) {$dim.=$c;}
-if ($in_dim!=0 ) {
-	if ($read_dim==2) {
-	$dim.=$c;
-	} else {
-		$read_dim++;
+# Find variable names
+	if (!$in_var && !$in_dim &&$c=~/\w/) {
+		$in_var=1;
 	}
-} elsif ($read_dim==2) {
-#	$dim.=$c;
-	print "DIM:",$dim,"\n";$dim='';
-	$read_dim=0;
+	if ($in_var) {
+		if($c=~/\W/) {
+			$in_var=0;
+					print "VAR: $mvar\n";
+
+#			$dims{$mvar}=1;
+			$dims{$mvar}{'Kind'}='Scalar';
+			$dims{$tmvar}{'Shape'}=[];			
+			$tmvar=$mvar;
+			$mvar='';
+		} else {
+			$mvar.=$c;
+		}
+	}
+# Find shapes
+	if ($c eq '(' && $in_dim==0) {$in_dim=1;$read_dim=1;}
+	elsif ($c eq '(' && $in_dim!=0) {$in_dim++}
+	elsif ($c eq ')' && $in_dim!=0) {$in_dim--}
+	if ($in_dim!=0 ) {
+		if ($read_dim==2) {
+			$dim.=$c;
+		} else {
+			$read_dim++;
+		}
+	} elsif ($read_dim==2) {
+# a shape is a list of ranges
+# if the range starts with 1, 1: can be omitted
+					print "TMVAR: $tmvar\n";
+		print "DIM: $dim\n";
+		my @ranges=split(/\s*,\s*/,$dim) or ($dim);
+		print '<',join(',',@ranges),">\n";
+		my @shape=();
+		for my $range (@ranges) {
+					print '<',$range,">\n";
+			if ($range=~/:/) {
+				push @shape,split(/:/,$range);
+			} else {
+				push @shape,(1,$range);
+			}
+		}
+		print '[',join(',',@shape),"]\n";
+		$dims{$tmvar}{'Shape'}=[@shape];
+		$dims{$tmvar}{'Kind'}='Array';	
+		$tmvar='';
+		$dim='';
+		$read_dim=0;
+	}
 }
-}
-die if $varlst=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
+
+die Dumper(%dims) if $varlst=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
                 
                 # Parenthesis handling
                 # literal open paren
