@@ -250,9 +250,14 @@ if ($c eq '(' && $in_dim==0) {$in_dim=1;$read_dim=1;}
 elsif ($c eq '(' && $in_dim!=0) {$in_dim++}
 elsif ($c eq ')' && $in_dim!=0) {$in_dim--}
 #if ($c eq ')' && $in_dim==0) {$dim.=$c;}
-if ($in_dim!=0) {$dim.=$c;
-} elsif ($read_dim) {
+if ($in_dim!=0 ) {
+	if ($read_dim==2) {
 	$dim.=$c;
+	} else {
+		$read_dim++;
+	}
+} elsif ($read_dim==2) {
+#	$dim.=$c;
 	print "DIM:",$dim,"\n";$dim='';
 	$read_dim=0;
 }
