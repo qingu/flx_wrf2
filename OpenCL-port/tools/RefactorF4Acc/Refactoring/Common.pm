@@ -71,6 +71,7 @@ sub context_free_refactorings {
 			  "Undefined source code line for $f in create_refactored_source()";
 		}
 		my $line = $annline->[0];
+		
 		my $info = $annline->[1];
 		my %tags      = %{$info};
 
@@ -130,6 +131,8 @@ sub context_free_refactorings {
 #        croak "FIXME: this VarDecl refactoring breaks the comparison in ArgumentIODirs.pm line 214!!!";
 		if ( exists $tags{'VarDecl'} and not exists $tags{'FunctionSig'} ) {
 			my @vars = @{ $tags{'VarDecl'} };
+                $Data::Dumper::Indent=2;
+                die Dumper($Sf->{'Vars'}) if $f eq 'read_ncwrfout_1realfield';
 
 			# first create all parameter declarations
 			if ( $firstdecl == 1 ) {
@@ -195,7 +198,8 @@ sub context_free_refactorings {
 				while ( $line =~ /\.\s*(?:eq|ne|gt|lt|le|ge)\s*\./ ) {
 					$line =~ s/\.\s*(eq|ne|gt|lt|le|ge)\s*\./ $f95ops{$1} /;
 				}
-    		} elsif ($line=~/=/) {
+    		} elsif ($line!~/^\s*write/ && $line=~/=/) { # FIXME!!!
+#    			die $line if $line=~/write.unitshortpart...i4dump/;
     			my $kv=$line;
     			my $spaces=$line; $spaces=~s/\S.*$//;
     			$kv=~s/^\s+//;    			
@@ -262,7 +266,7 @@ sub context_free_refactorings {
 			@extra_lines = ();
 		}
 	}
-#	if ( $f eq 'calcpv' ) {
+#	if ( $f eq 'partoutput_short' ) {
 #		print "REFACTORED LINES ($f):\n";
 #
 #		for my $tmpline ( @{ $Sf->{'RefactoredCode'} } ) {
@@ -509,7 +513,8 @@ sub format_f95_decl {
 		$dim = ', dimension(' . join( ',', @dims ) . ') ';
 	}
 	my $decl_line = $spaces
-	  . $Sv->{'Type'}
+      . $Sv->{'Type'}
+      . $Sv->{'Attr'}
 	  . $dim
 	  . ( $is_par ? ', parameter ' : '' ) . ' :: '
 	  . $var
@@ -548,7 +553,7 @@ sub format_f95_var_decl {
 		$dim = ', dimension(' . join( ',', @dims ) . ') ';
 	}
 	my $decl_line =
-	  $spaces . $Sv->{'Type'} . $dim . ' :: ' . $var . ' !! Context-free !! ';
+	  $spaces . $Sv->{'Type'} .$Sv->{'Attr'}. $dim . ' :: ' . $var . ' !! Context-free !! ';
 
 	#    die $decl_line  if $dim;
 	return $decl_line;
@@ -570,7 +575,7 @@ sub format_f95_multiple_decl {
 	my $spaces = $Sv->{'Decl'};
 	$spaces =~ s/\S.*$//;
 	my $type = $Sv->{'Type'};
-
+    my $attr = $Sv->{'Attr'};
 	# FIXME: for multiple vars, we need to split this in multiple statements.
 	# So I guess as soon as the Shape is not empty, need to split.
 	my $split = ( exists $test{0} and exists $test{1} );
@@ -608,10 +613,10 @@ sub format_f95_multiple_decl {
 			my $decl = '';
 			if ($is_par) {
 				$decl =
-				  "$type $dim ,parameter :: $var = $val; "
+				  "$type$attr $dim ,parameter :: $var = $val; "
 				  ; # FIXME: it is possible that $val is a function of another parameter
 			} else {
-				$decl = "$type $dim :: $var; ";
+				$decl = "$type$attr $dim :: $var; ";
 			}
 			$decl_line .= $decl;
 		}
@@ -634,7 +639,7 @@ sub format_f95_multiple_decl {
 				$dim = ', dimension(' . join( ',', @dims ) . ') ';
 			}
 		}
-		my $decl_line = $spaces . $type . $dim;
+		my $decl_line = $spaces . $type . $attr . $dim;
 		if ( exists $test{1} ) {
 			$decl_line .= ' ,parameter :: ' . join( ', ', @var_vals );
 
@@ -658,7 +663,7 @@ sub format_f95_multiple_var_decls {
 	my $spaces = $Sv->{'Decl'};
 	$spaces =~ s/\S.*$//;
 	my $type = $Sv->{'Type'};
-
+    my $attr = $Sv->{'Attr'};
 	# FIXME: for multiple vars, we need to split this in multiple statements.
 	# So I guess as soon as the Shape is not empty, need to split.
 	my $split = 0;
@@ -693,7 +698,7 @@ sub format_f95_multiple_var_decls {
 				$dim = ', dimension(' . join( ',', @dims ) . ') ';
 			}
 
-			my $decl = "$type $dim :: $var; ";
+			my $decl = "$type$attr $dim :: $var; ";
 			$decl_line .= $decl;
 		}
 		return $decl_line;
@@ -716,7 +721,7 @@ sub format_f95_multiple_var_decls {
 			}
 		}
 		my $decl_line =
-		    $spaces . $type . $dim . ' :: '
+		    $spaces . $type . $attr. $dim . ' :: '
 		  . join( ', ', @vars )
 		  . ' !! Context-free, multi !! ';
 		return $decl_line;
@@ -802,6 +807,7 @@ sub format_f95_par_decl {
 	}
 	my $decl_line = $spaces
 	  . $Sv->{'Type'}
+	  . $Sv->{'Attr'}
 	  . $dim
 	  . ', parameter ' . ' :: '
 	  . $var . ' = '

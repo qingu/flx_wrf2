@@ -119,10 +119,11 @@ sub get_var_decls {
         my $is_vardecl=0;
 #        my $has_pars = 0;
         my $type    = 'NONE';
-        my $attr = '';
+        
         my $varlst  = '';        
         
         for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
+        	my $attr = '';
             my $line = $srcref->[$index][0];
             my $info= $srcref->[$index][1];
             if ( $line =~ /^\!\s+/ ) {
@@ -145,8 +146,18 @@ sub get_var_decls {
             # Actual variable declaration line
 # FIXME: in principle every type can be followed by '*<number>' or *(*)
 # So we have 
- if(  $line =~/((?:logical|integer|real|double\s*precision|character)(?:\*(?:\d+|\(\*\))?))\s+(.+)\s*$/            ) {
-#if ( $line =~ /(logical|integer|real|double\s*precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/ ) {
+#my $newmatch =0;
+ if(  $line =~/(logical|integer|real|double\s*precision|character)\s+(.+)\s*$/ or
+ 	  $line =~/((?:logical|integer|real|double\s*precision|character)\*(?:\d+|\(\*\)))\s+(.+)\s*$/ ) {
+ 	
+# 	$newmatch=1;
+# }
+# my $oldmatch=0;
+# if ( $line =~ /(logical|integer|real|double\s*precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/ ) {
+# 	$oldmatch=1;
+# 	if (!$newmatch) {
+# 	  print "MATCH <$line> in $f for OLD but not NEW!\n";
+# 	}
                 $type    = $1;
                 $varlst  = $2;                 
                 $type=~/\*/ && do {
@@ -154,7 +165,7 @@ sub get_var_decls {
                     if ($attr eq '(') {$attr='*'}
                 };
                 $is_vardecl=1;
-            } elsif ($line=~/^\s*(.*)\s*::\s*(.*?)\s*$/) { #F95
+            } elsif ($line=~/^\s*(.*)\s*::\s*(.*?)\s*$/) { #F95 declaration
                 $type    = $1;
                 $varlst  = $2;
                 # But this could be a parameter declaration, with an assignment ...
@@ -207,18 +218,55 @@ sub get_var_decls {
                         $Sf->{'Parameters'}{'OrderedList'}=[];
                     }    
                 @{ $Sf->{'Parameters'}{'OrderedList'} } = (@{ $Sf->{'Parameters'}{'OrderedList'} },@{$pars});  
-            }
+            } # match var decls, parameter statements F77/F95
+            
+#if ($newmatch && !$oldmatch) {
+#      print "\tMATCH <$line> in $f for NEW but not OLD!\n";
+#    }            
                 if ($is_vardecl) {
                 	$is_vardecl=0;
                 my $tvarlst = $varlst;
+
+#   integer ierr, idiagaa, itime, ndims, ndims_exp, ndims_max,lendim(ndims_max), lendim_exp(ndims_max), lendim_max(ndims_max)
+#   real vardata( lendim_max(1), lendim_max(2), lendim_max(3) )
+# What we need to do is remove the dimensions but keep track of where they belong, then split on commas,
+# process the dimensions, and put it all together
+# if paren, count parens until found matching paren
+my $in_dim=0; my $read_dim=0; my $in_var=0;my $dim='';my $mvar='';
+print "LINE $line\n";
+for my $c (split('', $tvarlst) ) {
+    if (!$in_var && !$in_dim &&$c=~/\w/) {
+	   $in_var=1;
+    } 	
+    if ($in_var) {
+	   if($c=~/\W/) {
+	       $in_var=0;
+	       print "MVAR:",$mvar,"\n";$mvar='';
+        } else {
+	   $mvar.=$c;
+        }
+    }
+if ($c eq '(' && $in_dim==0) {$in_dim=1;$read_dim=1;}
+elsif ($c eq '(' && $in_dim!=0) {$in_dim++}
+elsif ($c eq ')' && $in_dim!=0) {$in_dim--}
+#if ($c eq ')' && $in_dim==0) {$dim.=$c;}
+if ($in_dim!=0) {$dim.=$c;
+} elsif ($read_dim) {
+	$dim.=$c;
+	print "DIM:",$dim,"\n";$dim='';
+	$read_dim=0;
+}
+}
+die if $varlst=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
                 
                 # Parenthesis handling
                 # literal open paren
                 # (
                 # (?:[^\(\),]*?,)+ # a comma-sep list without commas or parentheses   
                 # )
+                # so something like: whatever ( no_commas_or_pars , no_commas_or_pars , no_commas_or_pars )
                 if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
-                
+                warn "HIT: <$tvarlst>" if $varlst=~/lendim_/ && $f eq 'read_ncwrfout_1realfield';
                     while ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
                         my $chunk  = $1;
                         my $chunkr = $chunk;
@@ -230,6 +278,8 @@ sub get_var_decls {
                 }
                 
                 my @tvars    = split( /\s*\,\s*/, $tvarlst );
+                warn join(' ; ',@tvars),"\n" if $varlst=~/lendim_/ && $f eq 'read_ncwrfout_1realfield';
+                die if $varlst=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
                 my $p        = '';
                 my @varnames = ();
                 for my $var (@tvars) {
@@ -282,7 +332,10 @@ sub get_var_decls {
                          # this notation with type(number)
                          # Also, this is not limited to arrays, we could have e.g. integer v*4
                          # integer and reals => KIND, character => LEN
-                         if ($tvar =~ /\*(\d+)/) {   
+                         if ($tvar =~ /\*(\d+)/) {                         	
+                         	if (!$attr) {
+                         		$attr=$1;                         		
+                         	}   
 #                            $type="$type, dimension($1)";
                             $tvar =~ s/\*\d+//;
                          }
@@ -329,7 +382,8 @@ sub get_var_decls {
                     }
                     push @varnames, $tvar;
                 } # loop over all vars declared on a single line 
-                
+                $Data::Dumper::Indent=2;
+                die Dumper(%vars) if $varlst=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
                 print "\t", join( ',', @varnames ), "\n" if $V;
 #                $stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'VarDecl'} = \@varnames;
                 $info->{'VarDecl'} = \@varnames;
@@ -341,7 +395,10 @@ sub get_var_decls {
             }
             $srcref->[$index]= [$line, $info];
         } # Loop over lines
-        $stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;        
+        $stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;
+                $Data::Dumper::Indent=2;
+                die Dumper( $stref->{$sub_func_incl}{$f}{'Vars'}) if $f eq 'read_ncwrfout_1realfield';
+                
     }
 
     #           die "FIXME: shapes not correct!";
