@@ -81,24 +81,6 @@ sub parse_fortran_src {
 
 # -----------------------------------------------------------------------------
 
-#sub create_annotated_lines {
-#	(my $stref,my $f)=@_;	
-#	my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
-#	my $Sf = $stref->{$sub_or_func_or_inc}{$f};
-#    # Merge source lines and tags into annotated lines @{$annlines}
-#    my @lines = @{ $Sf->{'Lines'} };
-#    my @info = defined $Sf->{'Info'} ? @{ $Sf->{'Info'} } : ();
-#    my $annlines = [];
-#    for my $line (@lines) {
-#        my $tags = shift @info;
-#        if (not defined $tags) {
-#        	$tags={};
-#        }
-#        push @{$annlines}, [ $line, $tags ];
-#    }
-#	$Sf->{'AnnLines'}=$annlines;
-#	return $stref;
-#}
 # Create a table of all variables declared in the target, and a list of all the var names occuring on each line.
 # We record the type of the var and whether it's a scalar or array, because we need that information for translation to C.
 # Also check if the variable happens to be a function. If that is the case, mark that function as 'Called'; if we have not yet parsed its source, do it now.
@@ -138,18 +120,9 @@ my %dims=();
             # Actual variable declaration line
 # FIXME: in principle every type can be followed by '*<number>' or *(*)
 # So we have 
-#my $newmatch =0;
+
  if(  $line =~/(logical|integer|real|double\s*precision|character)\s+(.+)\s*$/ or
  	  $line =~/((?:logical|integer|real|double\s*precision|character)\*(?:\d+|\(\*\)))\s+(.+)\s*$/ ) {
- 	
-# 	$newmatch=1;
-# }
-# my $oldmatch=0;
-# if ( $line =~ /(logical|integer|real|double\s*precision|character|character\*?(?:\d+|\(\*\)))\s+(.+)\s*$/ ) {
-# 	$oldmatch=1;
-# 	if (!$newmatch) {
-# 	  print "MATCH <$line> in $f for OLD but not NEW!\n";
-# 	}
                 $type    = $1;
                 $varlst  = $2;                 
                 $type=~/\*/ && do {
@@ -157,7 +130,7 @@ my %dims=();
                     if ($attr eq '(') {$attr='*'}
                 };
                 $is_vardecl=1;
-            } elsif ($line=~/^\s*(.*)\s*::\s*(.*?)\s*$/) { #F95 declaration
+            } elsif ($line=~/^\s*(.*)\s*::\s*(.*?)\s*$/) { #F95 declaration, no need for refactoring
                 $type    = $1;
                 $varlst  = $2;
                 # But this could be a parameter declaration, with an assignment ...
@@ -187,8 +160,7 @@ my %dims=();
                 $is_vardecl=1;            	
             } elsif ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ ) { # F77-style parameters
 
-                my $parliststr = $1;
-                
+                my $parliststr = $1;                
                 my @partups = split( /\s*,\s*/, $parliststr );
                 my %pvars =
                   map { split(/\s*=\s*/,$_) } @partups;    # Perl::Critic, EYHO
@@ -203,8 +175,7 @@ my %dims=();
                         push @{$pars},$var;
                         
                     }
-                }
-                                
+                }                                
                 $info->{'Parameter'} =  $pars;
                     if (not exists $Sf->{'Parameters'}{'OrderedList'}) {
                         $Sf->{'Parameters'}{'OrderedList'}=[];
@@ -212,175 +183,37 @@ my %dims=();
                 @{ $Sf->{'Parameters'}{'OrderedList'} } = (@{ $Sf->{'Parameters'}{'OrderedList'} },@{$pars});  
             } # match var decls, parameter statements F77/F95
             
-#if ($newmatch && !$oldmatch) {
-#      print "\tMATCH <$line> in $f for NEW but not OLD!\n";
-#    }            
                 if ($is_vardecl) {
                 	$is_vardecl=0;
                 my $tvarlst = $varlst;
-
-#   integer ierr, idiagaa, itime, ndims, ndims_exp, ndims_max,lendim(ndims_max), lendim_exp(ndims_max), lendim_max(ndims_max)
-#   real vardata( lendim_max(1), lendim_max(2), lendim_max(3) )
-# What we need to do is remove the dimensions but keep track of where they belong, then split on commas,
-# process the dimensions, and put it all together
-# if paren, count parens until found matching paren
-my $in_dim=0; my $read_dim=0; my $in_var=0;my $dim='';my $mvar='';my $tmvar='';
-
-print "LINE $line\n";
-for my $c (split('', $tvarlst) ) {
-# Find variable names
-	if (!$in_var && !$in_dim &&$c=~/\w/) {
-		$in_var=1;
-	}
-	if ($in_var) {
-		if($c=~/\W/) {
-			$in_var=0;
-					print "VAR: $mvar\n";
-
-#			$dims{$mvar}=1;
-			$dims{$mvar}{'Kind'}='Scalar';
-			$dims{$tmvar}{'Shape'}=[];			
-			$tmvar=$mvar;
-			$mvar='';
-		} else {
-			$mvar.=$c;
-		}
-	}
-# Find shapes
-	if ($c eq '(' && $in_dim==0) {$in_dim=1;$read_dim=1;}
-	elsif ($c eq '(' && $in_dim!=0) {$in_dim++}
-	elsif ($c eq ')' && $in_dim!=0) {$in_dim--}
-	if ($in_dim!=0 ) {
-		if ($read_dim==2) {
-			$dim.=$c;
-		} else {
-			$read_dim++;
-		}
-	} elsif ($read_dim==2) {
-# a shape is a list of ranges
-# if the range starts with 1, 1: can be omitted
-					print "TMVAR: $tmvar\n";
-		print "DIM: $dim\n";
-		my @ranges=split(/\s*,\s*/,$dim) or ($dim);
-		print '<',join(',',@ranges),">\n";
-		my @shape=();
-		for my $range (@ranges) {
-					print '<',$range,">\n";
-			if ($range=~/:/) {
-				push @shape,split(/:/,$range);
-			} else {
-				push @shape,(1,$range);
-			}
-		}
-		print '[',join(',',@shape),"]\n";
-		$dims{$tmvar}{'Shape'}=[@shape];
-		$dims{$tmvar}{'Kind'}='Array';	
-		$tmvar='';
-		$dim='';
-		$read_dim=0;
-	}
-}
-
-die Dumper(%dims) if $varlst=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
-                
-                # Parenthesis handling
-                # literal open paren
-                # (
-                # (?:[^\(\),]*?,)+ # a comma-sep list without commas or parentheses   
-                # )
-                # so something like: whatever ( no_commas_or_pars , no_commas_or_pars , no_commas_or_pars )
-                if ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
-                warn "HIT: <$tvarlst>" if $varlst=~/lendim_/ && $f eq 'read_ncwrfout_1realfield';
-                    while ( $tvarlst =~ /\(((?:[^\(\),]*?,)+[^\(]*?)\)/ ) {
-                        my $chunk  = $1;
-                        my $chunkr = $chunk;
-                        $chunkr =~ s/,/;/g;
-                        my $pos = index( $tvarlst, $chunk );
-                        substr( $tvarlst, $pos, length($chunk), $chunkr );
+                my $pvars=parse_vardecl($varlst);
+                if ($f eq 'read_ncwrfout_1realfield') {
+	               print Dumper($pvars);
+                }
+                my @varnames = ();
+                for my $var (keys %{ $pvars } ) {
+                	my $tvar=$var;
+                    $vars{$tvar}{'Type'} = $type;
+                    $vars{$tvar}{'Shape'}=$pvars->{$var}{'Shape'};
+                    $vars{$tvar}{'Kind'}=$pvars->{$var}{'Kind'};
+                    if (not exists $pvars->{$var}{'Attr'} ) {
+                        if ($attr) {
+		                    if ($type =~/character/) {
+		                        $vars{$tvar}{'Attr'}='(len='.$attr.')';
+		                    } else {
+		                        $vars{$tvar}{'Attr'}='(kind='.$attr.')';
+		                    }
+	                    } else {	                    	
+	                        $vars{$tvar}{'Attr'}='';
+	                    }
+                    } else {
+                            if ($type =~/character/) {
+                                $vars{$tvar}{'Attr'}='(len='.$pvars->{$var}{'Attr'}.')';
+                            } else {
+                                $vars{$tvar}{'Attr'}='(kind='.$pvars->{$var}{'Attr'}.')';
+                            }
                     }
                     
-                }
-                
-                my @tvars    = split( /\s*\,\s*/, $tvarlst );
-                warn join(' ; ',@tvars),"\n" if $varlst=~/lendim_/ && $f eq 'read_ncwrfout_1realfield';
-                die if $varlst=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
-                my $p        = '';
-                my @varnames = ();
-                for my $var (@tvars) {
-                    $var =~ s/^\s+//;
-                    $var =~ s/\s+$//;
-                    my $tvar     = $var;
-                      
-                    my $shapestr = '';
-                    $tvar =~ /\((.*?)\)/ && do {
-                    	
-                        $shapestr = $1;
-                        $tvar =~ s/\(.*?\)/(0)/g;    # get rid of array shape                          
-                    };
-                    my @shape = ();
-                    if ( $shapestr ne '' ) {                    	
-                        if ( $shapestr =~ /;/ ) {
-                            my @elts = split( /;/, $shapestr );
-                            for my $elt (@elts) {
-                                my @tup = ();
-                                if ( $elt =~ /:/ ) {
-#                                    @tup = split( /:/, $shapestr );
-                                    @tup = split( /:/, $elt );
-                                } else {
-                                    @tup = ( 1, $elt );
-                                }
-                                @shape = ( @shape, @tup );                                
-                            }                            
-                        } else {
-                            if ( $shapestr =~ /:/ ) {
-                            	
-                                @shape = split( /:/, $shapestr );
-#                            } elsif ( $shapestr =~ /;/ ) {
-#                            	warn $shapestr;
-#                                @shape = split( /;/, $shapestr );
-                            } else {
-                                @shape = ( 1, $shapestr );
-                            }
-                        }
-                    }
-  
-                    if ( $tvar =~ /\(.*?\)/ && $tvar !~ /\(0\)/ ) {
-                        die "FATAL ERROR: $tvar shouln't look like this!";
-                    }
-
-                    if ( $tvar =~ s/\(0\)// ) {    # remove (0) placeholder
-
-#                       $tvar =~ s/\*\d+//;
-                         # FIXME: char string handling is not correct!
-                         # remove *number from the type, this is wrong. The right thing is to replace
-                         # this notation with type(number)
-                         # Also, this is not limited to arrays, we could have e.g. integer v*4
-                         # integer and reals => KIND, character => LEN
-                         if ($tvar =~ /\*(\d+)/) {                         	
-                         	if (!$attr) {
-                         		$attr=$1;                         		
-                         	}   
-#                            $type="$type, dimension($1)";
-                            $tvar =~ s/\*\d+//;
-                         }
-                        $vars{$tvar}{'Kind'}  = 'Array';
-                        $vars{$tvar}{'Shape'} = [@shape];
-                        $p                    = '()';
-                    } else {
-# FIXME: can we have '*<number>' here too?
-                        $vars{$tvar}{'Kind'}  = 'Scalar';
-                        $vars{$tvar}{'Shape'} = [];
-                    }
-                    $vars{$tvar}{'Type'} = $type;
-                    if ($attr) {
-                    if ($type =~/character/) {
-                        $vars{$tvar}{'Attr'}='(len='.$attr.')';
-                    } else {
-                        $vars{$tvar}{'Attr'}='(kind='.$attr.')';
-                    }
-                    } else {
-                        $vars{$tvar}{'Attr'}='';
-                    }
                     # Take IODir from INTENT
                     if ($type=~/\bintent\s*\(\s*(\w+)\s*\)/) {
                     	my $iodir=$1;
@@ -390,7 +223,7 @@ die Dumper(%dims) if $varlst=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1rea
                     	}
                     	$vars{$tvar}{'IODir'}=$iodir;
                     }
-                    $var =~ s/;/,/g;
+#                    $var =~ s/;/,/g;
                     $vars{$tvar}{'Decl'} = "        $type $var"
                       ; # TODO: this should maybe not be a textual representation
                         # make it [$type,$var] ?
@@ -407,7 +240,7 @@ die Dumper(%dims) if $varlst=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1rea
                     push @varnames, $tvar;
                 } # loop over all vars declared on a single line 
                 $Data::Dumper::Indent=2;
-                die Dumper(%vars) if $varlst=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
+                die Dumper(%vars) if $line=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
                 print "\t", join( ',', @varnames ), "\n" if $V;
 #                $stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'VarDecl'} = \@varnames;
                 $info->{'VarDecl'} = \@varnames;
@@ -1016,7 +849,15 @@ sub get_commons_params_from_includes {
                     exists( $Sf->{'Commons'}{$var} ) )
               )
             {
-                warn Dumper( $Sf->{'AnnLines'} );
+            	for my $annline (@{ $Sf->{'AnnLines'} } ) {
+            		next if $annline->[0] eq '' or exists $annline->[1]{'Comments'};
+            		if ($annline->[0]=~/$var/) {
+            		warn "PROBLEM WITH $var on next line\n";
+            		}	
+            		warn $annline->[0],"\n";
+            		
+            	} 
+#                warn Dumper( $Sf->{'AnnLines'} );
                 croak
 "The include $f contains a variable $var that is neither a parameter nor a common variable, this is not supported\n";
             }
@@ -1303,3 +1144,115 @@ sub read_fortran_src {
 
 # -----------------------------------------------------------------------------
 
+sub parse_vardecl {
+(my $varlst)=@_;
+# parse varlst into this hash
+my $vars={};
+
+#  We need following states:
+my (
+$do_nothing, # 0
+$read_var, # 1
+$store_var, # 2
+$found_len,# 3
+$read_len,# 4
+$store_len,# 5
+$found_shape,# 6
+$read_shape,# 7
+$store_shape # 8
+) = 0 .. 8; 
+
+# initial state
+my $st=$do_nothing;
+
+# inside read_shape, we need a parenthesis counter:
+my $nest_count=0;
+
+my $var='';
+my $pvar='';
+my $shape='';
+my $len='';
+my $pc='';
+
+for my $c (split('', $varlst) ) {
+#   print "C:$c; ST: $st; NC: $nest_count\n";
+
+# The transitions are:
+
+    if ($st==$do_nothing) { 
+        if ($c=~/[a-z]/) {$st=$read_var} 
+        elsif ($c eq '*') {$st=$read_len; next;}
+        elsif ($c eq '(') {$st=$found_shape; $nest_count=0}     
+    } 
+    elsif ($st==$read_var && $c=~/\W/) {$st=$store_var}
+    elsif ($st==$store_var) {
+        if ($pc eq '*') {
+            $st=$read_len;
+        } elsif ($pc eq '(') {
+            $st=$found_shape; $nest_count=0;
+        } elsif ($pc eq ',' && $c =~/[a-z]/) {
+        	$st=$read_var;
+        } else {
+            $st=$do_nothing;
+        }
+    }
+    elsif ($st==$read_len && $c=~/[\s,]/) {$st=$store_len}
+    elsif ($st==$store_len) {
+        $st=$do_nothing;
+    }
+    elsif ($st==$found_len) {$st=$read_len}
+    elsif ($st==$found_shape) {$st=$read_shape}
+    elsif ($st==$read_shape && $nest_count<=0 && $c eq ')') { $st=$store_shape; }
+    elsif ($st==$store_shape) {
+        if ($c eq '*') {
+            $st=$found_len;
+        } else {
+            $st=$do_nothing;
+        }
+    }
+#   print "C:$c; NST: $st; NC: $nest_count\n";  
+#   print "PC: $c; PST: $st\n";
+
+    # The actions are:
+    if ($st==$read_var) {$var.=$c}
+    elsif ($st==$read_len) {$len.=$c}
+    elsif ($st==$found_shape) { $shape.=$c; }
+    elsif ($st==$read_shape) { $shape.=$c;
+        if($c eq '(') {$nest_count++;}
+        elsif($c eq ')') {$nest_count--;}
+    }
+    elsif ($st==$store_var) {
+#        print "[$var]\n";
+        $vars->{$var}{'Kind'}='Scalar';            
+        $vars->{$var}{'Shape'}=[];                  
+        $pvar=$var;
+        $var='';
+    }
+    elsif ($st==$store_len) {
+#        print "LEN: {$len}\n";
+        $vars->{$pvar}{'Attr'}=$len;                
+        $len='';
+    }
+    elsif ($st==$store_shape) {
+#        print "<$shape>\n";
+        $shape=~s/^\s+//;
+        $shape=~s/\s+$//;
+        my @ranges=split(/\s*,\s*/,$shape);# or ($shape);        
+        my @shape=();
+        for my $range (@ranges) {
+            if ($range=~/:/) {
+                push @shape,split(/:/,$range);
+            } else {
+                push @shape,(1,$range);
+            }
+        }
+        $vars->{$pvar}{'Shape'}=[@shape];
+        $vars->{$pvar}{'Kind'}='Array';  
+        $shape='';
+    }
+    $pc=$c;
+
+}
+
+return $vars;	
+}
