@@ -46,6 +46,10 @@ sub analyse_all {
     # Now we do the reformatting, block detection etc.
 
     $stref = analyse_sources($stref);
-    
+#    for my $annline (@{ $stref->{'Subroutines'}{'timemanager'}{'AnnLines'} } ) {
+##    	next if $annline->[0] eq '';
+#    	print $annline->[0]."\t".join(',',keys %{ $annline->[1] })."\n" if exists $annline->[1]{'Assignment'}; 
+#    }
+#    die;
 	return $stref;	
 }

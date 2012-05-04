@@ -53,6 +53,7 @@ sub skip_common_include_statement {
 # --------------------------------------------------------------------------------
 sub create_additional_include_statements {
     ( my $stref, my $f, my $annline, my $rlines ) = @_;
+#    local $V=1;
     my $Sf        = $stref->{'Subroutines'}{$f};    
         # Which child has RefactorGlobals==1?
     my @additional_includes=();
@@ -71,7 +72,7 @@ sub create_additional_include_statements {
             print "INFO: instantiating merged INC $inc in $f\n" if $V;
             my $rline = "      include '$inc'";
             $tags_lref->{'Include'}{'Name'} = $inc;
-            push @{$rlines}, [ $rline, $tags_lref ];        
+            push @{$rlines}, [ $rline, $tags_lref ];                    
     }
 
     return $rlines;

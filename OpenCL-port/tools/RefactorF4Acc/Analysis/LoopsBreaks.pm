@@ -72,7 +72,7 @@ sub identify_loops_breaks {
             next if $line =~ /^\!\s+/;
 
             # BeginDo:
-            $line =~ /^\s+do\s+(\d+)\s+\w/ && do {
+            $line =~ /^\d*\s+do\s+(\d+)\s+\w/ && do {
                 my $label = $1;
                 $info->{'BeginDo'}{'Label'} = $label;
                 if ( not exists $do_loops{$label} ) {
@@ -87,7 +87,7 @@ sub identify_loops_breaks {
             };
 
             # Goto
-            $line =~ /^\s+.*?[\)\ ]\s*goto\s+(\d+)\s*$/ && do {
+            $line =~ /^\d*\s+.*?[\)\ ]\s*goto\s+(\d+)\s*$/ && do {
                 my $label = $1;
                 $info->{'Goto'}{'Label'} =
                   $label;

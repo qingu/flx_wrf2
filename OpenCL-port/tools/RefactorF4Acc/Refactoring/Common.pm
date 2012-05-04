@@ -63,6 +63,7 @@ sub context_free_refactorings {
 		croak caller;
 	}
 	my $annlines = get_annotated_sourcelines( $stref, $f );
+	
 	my $firstdecl = 1;
 	$Sf->{'RefactoredCode'} = [];
 	for my $annline ( @{$annlines} ) {
@@ -74,7 +75,16 @@ sub context_free_refactorings {
 		
 		my $info = $annline->[1];
 		my %tags      = %{$info};
-
+		if( exists $info->{'Deleted'} and $line eq '') {			
+            next;
+		}
+		if ( exists $tags{'ImplicitNone'} ) {
+#			print "SKIPPING $line in $f\n";
+			next;
+		}
+        if ( exists $tags{'Signature'} ) {
+	       push @extra_lines, ['        implicit none',{'ImplicitNone'=>1}];
+        }
 		# BeginDo: just remove the label
 		if ( exists $tags{'BeginDo'} ) {
 			$line =~ s/do\s+\d+\s+/do /;
@@ -127,12 +137,13 @@ sub context_free_refactorings {
 				$line =~ s/$ph/$str/;
 			}
 		}
-
-#        croak "FIXME: this VarDecl refactoring breaks the comparison in ArgumentIODirs.pm line 214!!!";
+if ($line=~/drydeposit/ && $f eq 'particles_main_loop' and not exists $info->{'Signature'}) {
+	die Dumper($Sf->{'Vars'}{'drydeposit'});
+}
 		if ( exists $tags{'VarDecl'} and not exists $tags{'FunctionSig'} ) {
 			my @vars = @{ $tags{'VarDecl'} };
-                $Data::Dumper::Indent=2;
-                die Dumper($Sf->{'Vars'}) if $f eq 'read_ncwrfout_1realfield';
+#                $Data::Dumper::Indent=2;
+#                die Dumper($Sf->{'Vars'}) if $f eq 'read_ncwrfout_1realfield';
 
 			# first create all parameter declarations
 			if ( $firstdecl == 1 ) {
@@ -148,8 +159,9 @@ sub context_free_refactorings {
 				}
 				my @vars_not_pars =
 				  grep { not exists $Sf->{'Parameters'}{$_} } @vars;
-				my $filtered_line = '';
+				my $filtered_line = '';				
 				if (@vars_not_pars) {
+					print "LINE:",$line,"\n" if $f eq 'particles_main_loop';
 					$filtered_line =
 					  format_f95_multiple_var_decls( $Sf->{'Vars'},
 						@vars_not_pars );
@@ -186,9 +198,8 @@ sub context_free_refactorings {
 				}
 			}
 		}
-# FIXME: It might be better to have IfThen and Assignment tags!!
-		if ( not keys %tags) {
-			if ($line =~ /if/ ) {
+		
+			if (exists $tags{'If'} or exists $tags{'ElseIf'} ) {
 				while ( $line =~ /\.\s+(?:and|not|or|neqv|eqv)\./ ) {
 					$line =~ s/\.\s+(and|not|or|neqv|eqv)\./ .$1. /;
 				}
@@ -198,20 +209,19 @@ sub context_free_refactorings {
 				while ( $line =~ /\.\s*(?:eq|ne|gt|lt|le|ge)\s*\./ ) {
 					$line =~ s/\.\s*(eq|ne|gt|lt|le|ge)\s*\./ $f95ops{$1} /;
 				}
-    		} elsif ($line!~/^\s*write/ && $line=~/=/) { # FIXME!!!
-#    			die $line if $line=~/write.unitshortpart...i4dump/;
+    		} elsif (exists $tags{'Assignment'}) {
+#    			print "ASSIGNMENT: <$line> in $f\n" if $f eq 'xyindex_to_ll_wrf' ; 
     			my $kv=$line;
     			my $spaces=$line; $spaces=~s/\S.*$//;
     			$kv=~s/^\s+//;    			
     			$kv=~s/\s+$//;
     			(my $k, my $rhs_expr) = split(/\s*=\s*/,$kv);
-#    			print "KV: <$k> => <$rhs_expr>\n";
     			my @rhs_vals= grep {/[a-z]\w*/} split( /\W+/, $rhs_expr );    			
     			my @n_rhs_vals=@rhs_vals;
+    			my $conflict=0;
     			if (@rhs_vals) {
     				my $i=0;
     				for my $rhs_val (@rhs_vals) {
-#    					print" RHS: $rhs_val\n"; 
     					$n_rhs_vals[$i]=$rhs_val;
                         if (exists $Sf->{'ConflictingGlobals'}{$rhs_val}) {
                         	print "CONFLICT: $rhs_val in $line ($f)\n";
@@ -219,7 +229,8 @@ sub context_free_refactorings {
                         } else {
                             for my $inc (keys %{ $Sf->{'Includes'} }) {                                        
                                 if (exists $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$rhs_val}) {
-                                	print "CONFLICT: $rhs_val in $line ($f), from $inc\n";
+                                	print "CONFLICT: $rhs_val in <$line> ($f), from $inc\n";
+                                	$conflict=1;
                                     $n_rhs_vals[$i] = $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$rhs_val};
                                     last; 
                                 }                    
@@ -234,6 +245,7 @@ sub context_free_refactorings {
     				    $rhs_expr=~s/\b$v\b/$nv/;
     				}
     			}	
+    			print "RHS: $rhs_expr\n" if $conflict;
     			my $nk=$k;
     			if (exists $Sf->{'ConflictingGlobals'}{$k}) {
     				$nk = $Sf->{'ConflictingGlobals'}{$k};
@@ -248,8 +260,8 @@ sub context_free_refactorings {
 		      }
 		      $line = $spaces.$nk. ' = '.$rhs_expr;
 		} # assignment
-		}
-		if ( exists $tags{'Parameter'} ) {
+		
+		elsif ( exists $tags{'Parameter'} ) {
 			$line = '!! Original line for info !! ' . $line;
 			$info->{'Deleted'} = 1;
 
@@ -266,15 +278,16 @@ sub context_free_refactorings {
 			@extra_lines = ();
 		}
 	}
-#	if ( $f eq 'partoutput_short' ) {
-#		print "REFACTORED LINES ($f):\n";
-#
-#		for my $tmpline ( @{ $Sf->{'RefactoredCode'} } ) {
-#			print $tmpline->[0], "\t", join( ';', keys %{ $tmpline->[1] } ),"\n";
-#		}
-#		print "=================\n";
-#		die;
-#	}
+	
+	if ( $f eq 'particles_main_loop' ) {
+		print "REFACTORED LINES ($f):\n";
+
+		for my $tmpline ( @{ $Sf->{'RefactoredCode'} } ) {
+			print $tmpline->[0], "\t", join( ';', keys %{ $tmpline->[1] } ),"\n";
+		}
+		print "=================\n";
+		die;
+	}
 
 	return $stref;
 }    # END of context_free_refactorings()
@@ -296,8 +309,9 @@ sub create_refactored_source {
 		}
 		my $line = $annline->[0];
 		my $info = $annline->[1];
+		
 		if (    not exists $info->{'Comments'}
-			and not exists $info->{'Deleted'} )
+			and (exists $info->{'InBlock'} or not exists $info->{'Deleted'} ))
 		{
 			print $line, "\n" if $V;
 			if ( $line =~ /;/ && $line !~ /[\'\"]/ ) {
@@ -312,6 +326,7 @@ sub create_refactored_source {
 			} else {
 				$line =~ s/\s+\!\!.*$//
 				  ; # FIXME: ad-hoc to remove comments from context-free refactoring
+				   
 				my @split_lines = split_long_line($line);
 				for my $sline (@split_lines) {
 					push @{ $Sf->{'RefactoredCode'} }, [ $sline, $info ];
@@ -390,7 +405,7 @@ sub split_long_line {
 		push @chunks, substr( $line, 0, $ll - $idx, '' );
 		print "CHUNKS:\n", join( "\n", @chunks ), "\n" if $V;
 		print "REST:\n", $line, "\n" if $V;
-		&split_long_line( $line, @chunks );
+		split_long_line( $line, @chunks );
 	} else {
 		push @chunks, $line;
 
@@ -575,6 +590,7 @@ sub format_f95_multiple_decl {
 	my $spaces = $Sv->{'Decl'};
 	$spaces =~ s/\S.*$//;
 	my $type = $Sv->{'Type'};
+ 	
     my $attr = $Sv->{'Attr'};
 	# FIXME: for multiple vars, we need to split this in multiple statements.
 	# So I guess as soon as the Shape is not empty, need to split.
@@ -663,6 +679,7 @@ sub format_f95_multiple_var_decls {
 	my $spaces = $Sv->{'Decl'};
 	$spaces =~ s/\S.*$//;
 	my $type = $Sv->{'Type'};
+	
     my $attr = $Sv->{'Attr'};
 	# FIXME: for multiple vars, we need to split this in multiple statements.
 	# So I guess as soon as the Shape is not empty, need to split.

@@ -33,6 +33,8 @@ C  Taken from Press et al., Numerical Recipes
       FUNCTION GASDEV(IDUM)
       INTEGER IDUM,ISET
       REAL GASDEV
+      REAL RAN3
+      REAL V1,V2,R
       DATA ISET/0/
       SAVE ISET,GSET
       IF (ISET.EQ.0) THEN
@@ -53,6 +55,9 @@ C  Taken from Press et al., Numerical Recipes
 
       SUBROUTINE GASDEV1(IDUM,RANDOM1,RANDOM2)
       INTEGER IDUM
+      REAL RANDOM1,RANDOM2
+      REAL RAN3
+      REAL FAC,V1,V2,R
 1     V1=2.*RAN3(IDUM)-1.
       V2=2.*RAN3(IDUM)-1.
       R=V1**2+V2**2

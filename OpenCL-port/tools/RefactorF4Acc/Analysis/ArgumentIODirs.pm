@@ -175,16 +175,18 @@ sub find_vars {
 # So we need to establish the mapping. This is what get_iodirs_from_subcall() should do -- and nothing else.
 
 sub get_iodirs_from_subcall {
-	( my $stref, my $f, my $index ) = @_;
+	( my $stref, my $f, my $index, my $annlines ) = @_;
 	
 	my $Sf    = $stref->{'Subroutines'}{$f};
-	my $tags = ${get_annotated_sourcelines($stref,$f)}[$index][1];
+#	my $tags = ${get_annotated_sourcelines($stref,$f)}[$index][1];
+	my $line = $annlines->[$index][0];
+	my $tags = $annlines->[$index][1];
 #	print Dumper($tags);
-	my $name  = $tags->{'SubroutineCall'}{'Name'};		
+	my $name  = $tags->{'SubroutineCall'}{'Name'};			 	
 	my $Sname = $stref->{'Subroutines'}{$name};
 #	print "get_iodirs_from_subcall() for $name in $f\n";
 #	print Dumper( $Sname->{ 'RefactoredArgs' } );
-    if (not exists $Sf->{'AnnLines'}[$index][1]{'SubroutineCall'}{'RefactoredArgs'}) {
+    if (not exists $tags->{'SubroutineCall'} or not exists $tags->{'SubroutineCall'}{'RefactoredArgs'}) {
 #    	warn "ASSUMING call to $name in $f has NO RefactoredArgs\n";
        $stref = refactor_subroutine_call_args( $stref, $f, $index );
     } 
@@ -195,7 +197,7 @@ sub get_iodirs_from_subcall {
 	# Now get the RefactoredArgs
 	my $ref_call_args =
 #	  $Sf->{'Info'}->[$index]{'SubroutineCall'}{'RefactoredArgs'};
-	  $Sf->{'AnnLines'}[$index][1]{'SubroutineCall'}{'RefactoredArgs'};
+	  $tags->{'SubroutineCall'}{'RefactoredArgs'};
     # Get the RefactoredArgs List for the signature
 	my $ref_sig_args = $Sname->{'RefactoredArgs'}{'List'};
 ##FIXME: experimental!
@@ -214,7 +216,7 @@ sub get_iodirs_from_subcall {
 #	}
 	if ( $ca != $sa ) {
         print "WARNING ($f): NOT SAME LENGTH! ($ca<>$sa)\n" if $W;
-		print $f.'->'.$name.': CALL:'.Dumper( $ref_call_args )."\nSIG:". Dumper( $ref_sig_args );
+		print "\n$f".'->'.$name.":\nCALL:".Dumper( $ref_call_args )."\nSIG:". Dumper( $ref_sig_args )."\n";
         croak;
 	} else {
 		my $i = 0;
@@ -347,7 +349,7 @@ sub analyse_src_for_iodirs {
                 my $name  = $tags->{'SubroutineCall'}{'Name'};
 #                my $Sname = $stref->{'Subroutines'}{$name};
                 ( my $iodirs, $stref ) =
-                  get_iodirs_from_subcall( $stref, $f, $index );
+                  get_iodirs_from_subcall( $stref, $f, $index, $annlines );
 #                   die "FIXME: surely we should use the recursion for this!?";
                 for my $var ( keys %{$iodirs} ) {
                 	# Damn Perl! exists $args->{$var}{'IODir'} creates the entry for $var if it did not exist!

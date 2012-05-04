@@ -104,7 +104,7 @@ sub resolve_conflicts_with_params {
                           {'ConflictingGlobals'}{$mpar} = $mpar . '_GLOB';
                         $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}
                           {$mpar} = $mpar . '_GLOB';
-                          print "CONFLICTING GLOBAL PARAMETER: $mpar in $f and $inc\n";
+#                          print "CONFLICTING GLOBAL PARAMETER: $mpar in $f and $inc\n";
                     }
                 }
             }

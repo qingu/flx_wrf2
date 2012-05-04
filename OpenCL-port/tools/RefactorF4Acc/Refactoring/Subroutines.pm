@@ -237,8 +237,9 @@ sub refactor_calls_globals {
 #    my $annlines = get_annotated_sourcelines($stref,$f);
     print "REFACTORING CALLS WITH GLOBALS in $f\n" if $V;
     my $rlines      = [];
-    
+#    local $V=1;
     my $idx         = 0;
+    my $firstinc=1;
     for my $annline ( @{$annlines} ) {
         my $line      = $annline->[0] || '';
         my $tags_lref = $annline->[1];
@@ -248,12 +249,12 @@ sub refactor_calls_globals {
         my $skip = 0;
 
 
-        if ( exists $tags{'Include'} ) {
-
+        if ( exists $tags{'Include'} && $firstinc ) {
+        	$firstinc =0;
             # First, add addional includes if required
             $rlines =
               create_additional_include_statements( $stref, $f, $annline, $rlines );
-
+            
 ## While we're here, might as well generate the declarations for remapping and reshaping.
 ## If the subroutine contains a call to a function that requires this, of course.
 ## Executive decision: do this only for the routines to be translated to C/OpenCL
@@ -269,7 +270,7 @@ sub refactor_calls_globals {
 #
 #                }
 #            }
-            $skip = 1;
+#            $skip = 1;
         }
         if ( exists $tags{'SubroutineCall'} ) {
 
