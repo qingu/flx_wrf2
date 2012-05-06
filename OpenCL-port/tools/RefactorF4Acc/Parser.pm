@@ -68,6 +68,8 @@ sub parse_fortran_src {
 		if ( $stref->{$sub_or_func}{$f}{'HasBlocks'} == 1 ) {
 			$stref = separate_blocks( $f, $stref );
 		}
+		warn "parse_fortran_src( $f )\n";
+		warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'} );
 		# Recursive descent via subroutine calls
 		$stref = parse_subroutine_and_function_calls( $f, $stref );
 		$stref->{$sub_or_func}{$f}{'Status'} = $PARSED;
@@ -77,11 +79,13 @@ sub parse_fortran_src {
 		$stref = get_commons_params_from_includes( $f, $stref );
 		$stref->{'IncludeFiles'}{$f}{'Status'} = $PARSED;
 	}
+	
 if ($f eq 'particles_main_loop') {
-
-        $Data::Dumper::Indent=1;
-warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'} );
-croak "PROBLEM: VAR DECLS FOR particles_main_loop ARE NOT CORRECT HERE!"; 
+    $Data::Dumper::Indent=1;
+    warn "END of parse_fortran_src( $f )\n-------\n";
+    warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'} );
+    warn "-------\n";
+    croak "PROBLEM: VAR DECLS FOR particles_main_loop ARE NOT CORRECT HERE!"; 
 }
 	#    $stref=create_annotated_lines($stref,$f);
 	return $stref;
@@ -305,7 +309,7 @@ sub analyse_lines {
 		$stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;
 
 #                $Data::Dumper::Indent=2;
-#                die Dumper( $stref->{$sub_func_incl}{$f}{'Vars'}) if $f eq 'read_ncwrfout_1realfield';
+#                croak Dumper( $stref->{$sub_func_incl}{$f}{'Vars'}{'drydeposit'}) if $f eq 'timemanager';
 
 	}
 
@@ -409,7 +413,9 @@ sub separate_blocks {
 
 	# All local variables in the parent subroutine
 	my %vars = %{ $Sf->{'Vars'} };
-
+	$Data::Dumper::Indent=2;
+warn "USING VARS FROM PARENT $f HERE!\n";
+warn Dumper($Sf->{'Vars'}{'drydeposit'});
 	# Occurence
 	my %occs = ();
 
@@ -532,7 +538,9 @@ sub separate_blocks {
 # Find all vars used in each block, starting with the outer block
 # It is best to loop over all vars per line per block, because we can remove the encountered vars
 # TODO: my $occsref = determine_new_subroutine_arguments($blocksref,$varsref,$linesref);
+
 	for my $block ( keys %blocks ) {
+		
 		my @annlines = @{ $blocks{$block}{'AnnLines'} };
 		my %tvars = %vars;    # Hurray for pass-by-value!
 		print "\nVARS in $block:\n\n" if $V;
@@ -564,6 +572,7 @@ sub separate_blocks {
 				print "$var\n" if $V;
 				push @{ $args{$block} }, $var;
 			}
+			$Sblock->{'Vars'}{$var} =$vars{$var}; # XXX 
 		}
 		$Sblock->{'Args'} = $args{$block};
 
@@ -629,7 +638,14 @@ sub separate_blocks {
 			print join( "\n", @{$decls} ), "\n";
 		}
 		$Sblock->{'Status'} = $READ;
+		
 	}
+	
+	warn "Vars are CORRECT AT END OF separate_blocks( $f ):\n-----\n";	 
+	warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'});
+	warn "-----\n";
+#	die if $f eq 'timemanager';
+	
 	return $stref;
 }    # END of separate_blocks()
 
