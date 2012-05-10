@@ -3,7 +3,7 @@ package RefactorF4Acc::Parser;
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
 use RefactorF4Acc::CallGraph qw ( add_to_call_tree );
-
+use RefactorF4Acc::Refactoring::Common qw( format_f95_var_decl format_f77_var_decl );
 #
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
 #
@@ -68,8 +68,8 @@ sub parse_fortran_src {
 		if ( $stref->{$sub_or_func}{$f}{'HasBlocks'} == 1 ) {
 			$stref = separate_blocks( $f, $stref );
 		}
-		warn "parse_fortran_src( $f )\n";
-		warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'} );
+#		warn "parse_fortran_src( $f )\n";
+#		warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'} );
 		# Recursive descent via subroutine calls
 		$stref = parse_subroutine_and_function_calls( $f, $stref );
 		$stref->{$sub_or_func}{$f}{'Status'} = $PARSED;
@@ -80,13 +80,13 @@ sub parse_fortran_src {
 		$stref->{'IncludeFiles'}{$f}{'Status'} = $PARSED;
 	}
 	
-if ($f eq 'particles_main_loop') {
-    $Data::Dumper::Indent=1;
-    warn "END of parse_fortran_src( $f )\n-------\n";
-    warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'} );
-    warn "-------\n";
-    croak "PROBLEM: VAR DECLS FOR particles_main_loop ARE NOT CORRECT HERE!"; 
-}
+#if ($f eq 'particles_main_loop') {
+#    $Data::Dumper::Indent=1;
+#    warn "END of parse_fortran_src( $f )\n-------\n";
+#    warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'} );
+#    warn "-------\n";
+#    croak "PROBLEM: VAR DECLS FOR particles_main_loop ARE NOT CORRECT HERE!"; 
+#}
 	#    $stref=create_annotated_lines($stref,$f);
 	return $stref;
 }    # END of parse_fortran_src()
@@ -108,7 +108,7 @@ sub analyse_lines {
 		my $is_vardecl = 0;
 		my $type       = 'NONE';
 		my $varlst     = '';
-
+        my $indent = '';
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $attr = '';
 			my $line = $srcref->[$index][0];
@@ -153,15 +153,18 @@ sub analyse_lines {
 					( $type, $attr ) = split( /\*/, $type );
 					if ( $attr eq '(' ) { $attr = '*' }
 				};
+				$indent= $line; $indent=~s/\S.*$//;
 				$is_vardecl = 1;
 			} elsif ( $line =~ /^\s*(.*)\s*::\s*(.*?)\s*$/ )
 			{    #F95 declaration, no need for refactoring
+			     $Sf->{'FStyle'}='F95';
 				$type   = $1;
 				$varlst = $2;
-
+                $indent= $line; $indent=~s/\S.*$//;
 			 # But this could be a parameter declaration, with an assignment ...
 				if ( $line =~ /,\s*parameter\s*.*?::\s*(\w+)\s*=\s*(.+?)\s*$/ )
 				{    # F95-style parameters
+				    $Sf->{'FStyle'}='F95';
 					my $parliststr = $1;
 					my @partups    = split( /\s*,\s*/, $parliststr );
 					my %pvars      =
@@ -196,8 +199,8 @@ sub analyse_lines {
 				$is_vardecl = 1;
 			} elsif ( $line =~ /parameter\s*\(\s*(.*)\s*\)/ )
 			{    # F77-style parameters
-
 				my $parliststr = $1;
+                $indent= $line; $indent=~s/\S.*$//;
 				my @partups    = split( /\s*,\s*/, $parliststr );
 				my %pvars      =
 				  map { split( /\s*=\s*/, $_ ) } @partups;  # Perl::Critic, EYHO
@@ -271,10 +274,11 @@ sub analyse_lines {
 					}
 
 					#                    $var =~ s/;/,/g;
-					$vars{$tvar}{'Decl'} =
-					  "        $type $var"
-					  ; # TODO: this should maybe not be a textual representation
-					    # make it [$type,$var] ?
+					$vars{$tvar}{'Decl'} = "        $type $var";
+                    # TODO: this should maybe not be a textual representation
+                    # make it [$type,$var] ?
+					$vars{$tvar}{'Indent'} =  $indent;
+					  
 					if ( exists $stref->{'Functions'}{$tvar} ) {
 
 						$stref->{'Functions'}{$tvar}{'Called'} = 1;
@@ -414,8 +418,8 @@ sub separate_blocks {
 	# All local variables in the parent subroutine
 	my %vars = %{ $Sf->{'Vars'} };
 	$Data::Dumper::Indent=2;
-warn "USING VARS FROM PARENT $f HERE!\n";
-warn Dumper($Sf->{'Vars'}{'drydeposit'});
+#warn "USING VARS FROM PARENT $f HERE!\n";
+#warn Dumper($Sf->{'Vars'}{'drydeposit'});
 	# Occurence
 	my %occs = ();
 
@@ -560,7 +564,7 @@ warn Dumper($Sf->{'Vars'}{'drydeposit'});
 	# 4. Construct the subroutine signatures
 	# TODO: $stref = construct_new_subroutine_signatures();
 	# TODO: see if this can be separated into shorter subs
-	local $V=1;
+#	local $V=1;
 	my %args = ();
 	for my $block ( keys %blocks ) {
 		next if $block eq 'OUTER';
@@ -578,12 +582,15 @@ warn Dumper($Sf->{'Vars'}{'drydeposit'});
 		$Sblock->{'Args'} = $args{$block};
 
 		# Create Signature and corresponding Decls
-		my $sig   = "      subroutine $block(";
+		my $sixspaces = ' ' x 6;
+		my $sig   = $sixspaces . 'subroutine '.$block.'(';
 		my $decls = [];
 		for my $argv ( @{ $args{$block} } ) {
 			$sig .= "$argv,";
-			my $decl = $vars{$argv}{'Decl'};
-			push @{$decls}, $decl;
+#			my $decl = $vars{$argv}{'Decl'};
+#print $f,$Sf->{'FStyle'},"\n";            
+			my $decl = ( $Sf->{'FStyle'} eq 'F77' ) ? format_f77_var_decl($Sf->{'Vars'},$argv) : format_f95_var_decl($Sf->{'Vars'},$argv);
+			push @{$decls}, $sixspaces.$decl;
 		}
 		$sig =~ s/\,$/)/s;
 		$Sblock->{'Sig'}   = $sig;
@@ -633,7 +640,7 @@ warn Dumper($Sf->{'Vars'}{'drydeposit'});
 
 #        unshift @{ $Sblock->{'Info'} }, $fl; # put the comment back at the front, no change to the lines
 		$Sblock->{'AnnLines'}[0][1] = $fal;
-print "YES! GENERATED DECLS ARE WRONG!!!\n";
+#print "YES! GENERATED DECLS ARE WRONG!!!\n";
 		if ($V) {
 			print $sig, "\n";
 			print join( "\n", @{$decls} ), "\n";
@@ -645,7 +652,7 @@ print "YES! GENERATED DECLS ARE WRONG!!!\n";
 #	warn "Vars are CORRECT AT END OF separate_blocks( $f ):\n-----\n";	 
 #	warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'});
 #	warn "-----\n";
-	croak "BOOM!" if $f eq 'timemanager';
+#	croak "BOOM!" if $f eq 'timemanager';
 	
 	return $stref;
 }    # END of separate_blocks()
@@ -1017,7 +1024,7 @@ sub read_fortran_src {
 		};
 		if ($ok) {
 			print "READING SOURCE for $f ($sub_func_incl)\n" if $V;
-
+            $stref->{$sub_func_incl}{$s}{'FStyle'}='F77';
 			my $lines    = [];
 			my $prevline = '';
 
@@ -1122,15 +1129,15 @@ sub read_fortran_src {
 					$prevline =~ /^(\d+)\t/ && do {
 						my $label  = $1;
 						my $ndig   = length($label);
-						my $spaces = ' ' x ( 6 - $ndig );
-						my $str    = $label . $spaces;
+						my $indent = ' ' x ( 6 - $ndig );
+						my $str    = $label . $indent;
 						$prevline =~ s/^(\d+)\t/$str/;
 					};
 					$prevline =~ /^(\d+)\s+/ && do {
 						my $label  = $1;
 						my $ndig   = length($label);
-						my $spaces = ' ' x ( 6 - $ndig );
-						my $str    = $label . $spaces;
+						my $indent = ' ' x ( 6 - $ndig );
+						my $str    = $label . $indent;
 						$prevline =~ s/^(\d+)\s+/$str/;
 					};
 

@@ -27,7 +27,9 @@ use Exporter;
   &create_refactored_source
   &get_annotated_sourcelines
   &split_long_line
-  &format_f95_decl
+  &format_f95_par_decl
+  &format_f95_var_decl 
+  &format_f77_var_decl
 );
 
 our %f95ops = (
@@ -137,9 +139,9 @@ sub context_free_refactorings {
 				$line =~ s/$ph/$str/;
 			}
 		}
-if ($line=~/drydeposit/ && $f eq 'particles_main_loop' and not exists $info->{'Signature'}) {
-	die Dumper($Sf->{'Vars'}{'drydeposit'});
-}
+#if ($line=~/drydeposit/ && $f eq 'particles_main_loop' and not exists $info->{'Signature'}) {
+#	die Dumper($Sf->{'Vars'}{'drydeposit'});
+#}
 		if ( exists $tags{'VarDecl'} and not exists $tags{'FunctionSig'} ) {
 			my @vars = @{ $tags{'VarDecl'} };
 #                $Data::Dumper::Indent=2;
@@ -161,7 +163,7 @@ if ($line=~/drydeposit/ && $f eq 'particles_main_loop' and not exists $info->{'S
 				  grep { not exists $Sf->{'Parameters'}{$_} } @vars;
 				my $filtered_line = '';				
 				if (@vars_not_pars) {
-					print "LINE:",$line,"\n" if $f eq 'particles_main_loop';
+#					print "LINE:",$line,"\n" if $f eq 'particles_main_loop';
 					$filtered_line =
 					  format_f95_multiple_var_decls( $Sf->{'Vars'},
 						@vars_not_pars );
@@ -279,15 +281,15 @@ if ($line=~/drydeposit/ && $f eq 'particles_main_loop' and not exists $info->{'S
 		}
 	}
 	
-	if ( $f eq 'particles_main_loop' ) {
-		print "REFACTORED LINES ($f):\n";
-
-		for my $tmpline ( @{ $Sf->{'RefactoredCode'} } ) {
-			print $tmpline->[0], "\t", join( ';', keys %{ $tmpline->[1] } ),"\n";
-		}
-		print "=================\n";
-		die;
-	}
+#	if ( $f eq 'particles_main_loop' ) {
+#		print "REFACTORED LINES ($f):\n";
+#
+#		for my $tmpline ( @{ $Sf->{'RefactoredCode'} } ) {
+#			print $tmpline->[0], "\t", join( ';', keys %{ $tmpline->[1] } ),"\n";
+#		}
+#		print "=================\n";
+#		die;
+#	}
 
 	return $stref;
 }    # END of context_free_refactorings()
@@ -540,7 +542,8 @@ sub format_f95_decl {
 }    # format_f95_decl()
 
 # -----------------------------------------------------------------------------
-
+# format_f95_decl( $stref->{'IncludeFiles'}{$inc}{'Commons'},[$var,0,0]
+# format_f95_var_decl ($stref->{'IncludeFiles'}{$inc}{'Commons'},$var)
 sub format_f95_var_decl {
 	( my $Sfv, my $var ) = @_;
 	my $Sv = $Sfv->{$var};
@@ -575,6 +578,43 @@ sub format_f95_var_decl {
 }    # format_f95_var_decl()
 
 # -----------------------------------------------------------------------------
+sub format_f77_var_decl {
+    ( my $Sfv, my $var ) = @_;
+    my $Sv = $Sfv->{$var};
+    if ( not exists $Sv->{'Decl'} ) {
+        print "WARNING: VAR $var does not exist in format_f77_var_decl()!\n" if $W;
+        croak $var;
+    }
+    my $spaces = $Sv->{'Indent'};    
+
+    # FIXME: for multiple vars, we need to split this in multiple statements.
+    # So I guess as soon as the Shape is not empty, need to split.
+    my $shape = $Sv->{'Shape'};
+    
+    my $dim = '';
+    if ( @{$shape} ) {
+        my @dims = ();
+        for my $i ( 0 .. ( @{$shape} / 2 - 1 ) ) {
+            my $range =
+              ( $shape->[ 2 * $i ] eq '1' )
+              ? $shape->[ 2 * $i + 1 ]
+              : $shape->[ 2 * $i ] . ':' . $shape->[ 2 * $i + 1 ];
+            push @dims, $range;
+        }
+        $dim = '(' . join( ',', @dims ) . ') ';
+    }
+    my $attr='';
+    if (exists $Sv->{'Attr'} && $Sv->{'Attr'} ne '') {
+    	$attr= '*'.$Sv->{'Attr'};
+    }
+    my $decl_line =
+      $spaces . $Sv->{'Type'} .$attr. ' ' . $var . $dim ;
+
+    #    die $decl_line  if $dim;
+    return $decl_line;
+}    # format_f77_var_decl()
+
+# -----------------------------------------------------------------------------
 sub format_f95_multiple_decl {
 	( my $Sfv, my $var_is_par_tups ) = @_;
 	my @vars = map { $_->[0] } @{$var_is_par_tups};
@@ -587,8 +627,8 @@ sub format_f95_multiple_decl {
 		  if $W;
 		croak $vars[0];
 	}
-	my $spaces = $Sv->{'Decl'};
-	$spaces =~ s/\S.*$//;
+	my $spaces = $Sv->{'Indent'};
+	
 	my $type = $Sv->{'Type'};
  	
     my $attr = $Sv->{'Attr'};
@@ -676,8 +716,8 @@ sub format_f95_multiple_var_decls {
 		  if $W;
 		croak $vars[0];
 	}
-	my $spaces = $Sv->{'Decl'};
-	$spaces =~ s/\S.*$//;
+	my $spaces = $Sv->{'Indent'};
+	
 	my $type = $Sv->{'Type'};
 	
     my $attr = $Sv->{'Attr'};
@@ -803,8 +843,8 @@ sub format_f95_par_decl {
 	
 	# Here we should rename for globals!
 	($var, $val) = rename_conflicting_global_pars($stref, $f, $var, $val);
-	my $spaces = $Sv->{'Decl'};
-	$spaces =~ s/\S.*$//;
+	my $spaces = $Sv->{'Indent'};
+	
 
 	# FIXME: for multiple vars, we need to split this in multiple statements.
 	# So I guess as soon as the Shape is not empty, need to split.
