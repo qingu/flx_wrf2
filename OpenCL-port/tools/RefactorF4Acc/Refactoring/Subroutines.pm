@@ -248,8 +248,12 @@ sub refactor_calls_globals {
         print '*** ' . $line . "\n" if $V;
         my $skip = 0;
 
-
-        if ( exists $tags{'Include'} && $firstinc ) {
+# FIXME: rather we should find the line _after_ the last include!
+# so we need $prevline in the reader or parser
+# Basically I can keep an index counter and increment it every time I find an include
+# then the next line, whatever it is, becomes "ExtraIncludesHook"        
+        if ( exists $tags{'ExtraIncludesHook'} && $firstinc) {
+#        if ( exists $tags{'Include'} && $firstinc ) {
         	$firstinc =0;
             # First, add addional includes if required
             $rlines =

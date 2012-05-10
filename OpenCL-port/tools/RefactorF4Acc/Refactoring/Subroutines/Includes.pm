@@ -53,7 +53,7 @@ sub skip_common_include_statement {
 # --------------------------------------------------------------------------------
 sub create_additional_include_statements {
     ( my $stref, my $f, my $annline, my $rlines ) = @_;
-#    local $V=1;
+#   local $V=1;
     my $Sf        = $stref->{'Subroutines'}{$f};    
         # Which child has RefactorGlobals==1?
     my @additional_includes=();
@@ -74,7 +74,7 @@ sub create_additional_include_statements {
             $tags_lref->{'Include'}{'Name'} = $inc;
             push @{$rlines}, [ $rline, $tags_lref ];                    
     }
-
+#croak "FIXME: INCLUDE _AFTER_ OTHER INCLUDES!!!";
     return $rlines;
 }    # END of create_additional_include_statements()
 

@@ -332,6 +332,7 @@ sub parse_includes {
 	my $Sf                 = $stref->{$sub_or_func_or_inc}{$f};
 
 	my $srcref = $Sf->{'AnnLines'};
+    my $last_inc_idx=0;
 	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 		my $line = $srcref->[$index][0];
 		my $info = $srcref->[$index][1];
@@ -343,7 +344,7 @@ sub parse_includes {
 			my $name = $1;
 			print "FOUND include $name in $f\n" if $V;
 			$Sf->{'Includes'}{$name} = $index;
-
+            $last_inc_idx=$index;
 			#            $Sf->{'Info'}->[$index]{'Include'}{'Name'} = $name;
 			$info->{'Include'} = {};
 			$info->{'Include'}{'Name'} = $name;
@@ -360,7 +361,9 @@ sub parse_includes {
 		}
 		$srcref->[$index] = [ $line, $info ];
 	}
-
+    # tag the next line after the last include
+    $last_inc_idx++;
+    $srcref->[$last_inc_idx][1]{'ExtraIncludesHook'}=1;
 	return $stref;
 }    # END of parse_includes()
 
