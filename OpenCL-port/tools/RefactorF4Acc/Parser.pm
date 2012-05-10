@@ -560,6 +560,7 @@ warn Dumper($Sf->{'Vars'}{'drydeposit'});
 	# 4. Construct the subroutine signatures
 	# TODO: $stref = construct_new_subroutine_signatures();
 	# TODO: see if this can be separated into shorter subs
+	local $V=1;
 	my %args = ();
 	for my $block ( keys %blocks ) {
 		next if $block eq 'OUTER';
@@ -572,7 +573,7 @@ warn Dumper($Sf->{'Vars'}{'drydeposit'});
 				print "$var\n" if $V;
 				push @{ $args{$block} }, $var;
 			}
-			$Sblock->{'Vars'}{$var} =$vars{$var}; # XXX 
+			$Sblock->{'Vars'}{$var} =$vars{$var}; # FIXME: this is "inheritance, but in principle a re-parse is better?" 
 		}
 		$Sblock->{'Args'} = $args{$block};
 
@@ -632,7 +633,7 @@ warn Dumper($Sf->{'Vars'}{'drydeposit'});
 
 #        unshift @{ $Sblock->{'Info'} }, $fl; # put the comment back at the front, no change to the lines
 		$Sblock->{'AnnLines'}[0][1] = $fal;
-
+print "YES! GENERATED DECLS ARE WRONG!!!\n";
 		if ($V) {
 			print $sig, "\n";
 			print join( "\n", @{$decls} ), "\n";
@@ -641,10 +642,10 @@ warn Dumper($Sf->{'Vars'}{'drydeposit'});
 		
 	}
 	
-	warn "Vars are CORRECT AT END OF separate_blocks( $f ):\n-----\n";	 
-	warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'});
-	warn "-----\n";
-#	die if $f eq 'timemanager';
+#	warn "Vars are CORRECT AT END OF separate_blocks( $f ):\n-----\n";	 
+#	warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'});
+#	warn "-----\n";
+	croak "BOOM!" if $f eq 'timemanager';
 	
 	return $stref;
 }    # END of separate_blocks()
