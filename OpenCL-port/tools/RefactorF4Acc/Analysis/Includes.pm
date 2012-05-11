@@ -40,7 +40,7 @@ sub find_root_for_includes {
             $stref = find_root_for_include( $stref, $inc, $f );
             print "ROOT for $inc is "
               . $stref->{'IncludeFiles'}{$inc}{'Root'} . "\n"
-              if $V;
+              if $V or $inc eq 'include_wrf_map_utils';
         }
     }
     return $stref;

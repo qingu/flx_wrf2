@@ -47,18 +47,16 @@ use Exporter;
 
 sub resolve_globals {
     ( my $f, my $stref ) = @_;
+#    warn '=' x 80, "\nENTER resolve_globals( $f )\n" ;
     my $Sf = $stref->{'Subroutines'}{$f};
     if ( exists $Sf->{'CalledSubs'}
         and scalar keys %{ $Sf->{'CalledSubs'} } )
     {
-
-        # Not a leaf node, descend
-#       my %globs = ();
-
         # Globals for $csub have been determined
         $stref = identify_globals_used_in_subroutine( $f, $stref );
         my @csubs = keys %{ $Sf->{'CalledSubs'} };
         for my $csub (@csubs) {
+#        	warn "CALLED $csub from $f\n";
             $stref = resolve_globals( $csub, $stref );
             my $Scsub = $stref->{'Subroutines'}{$csub};
             # If $csub has globasl, merge them with globals for $f
@@ -76,9 +74,11 @@ sub resolve_globals {
         print "SUB $f is LEAF\n" if $V;
         $stref = identify_globals_used_in_subroutine( $f, $stref );
     }
-
+#    warn '=' x 80, "\nEXIT resolve_globals( $f )\n" ;
+#croak Dumper($stref->{'Subroutines'}{'getfields'}{'Globals'}) if $f eq 'getfields';
     # We only come here when the recursion and merge is done.
     $stref = resolve_conflicts_with_params( $f, $stref );
+    
     return $stref;
 }    # END of resolve_globals()
 
@@ -99,11 +99,11 @@ sub resolve_conflicts_with_params {
                         print
 "WARNING: $mpar from $inc conflicts with $mpar from $commoninc\n"
                           if $V;
-                        $Sf->{'ConflictingGlobals'}{$mpar} = $mpar . '_GLOB';                         
+                        $Sf->{'ConflictingGlobals'}{$mpar} = $mpar . '_GLOB_'.$inc;                         
                         $stref->{'IncludeFiles'}{$commoninc}
-                          {'ConflictingGlobals'}{$mpar} = $mpar . '_GLOB';
+                          {'ConflictingGlobals'}{$mpar} = $mpar . '_GLOB_'.$inc;
                         $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}
-                          {$mpar} = $mpar . '_GLOB';
+                          {$mpar} = $mpar . '_GLOB_'.$inc;
 #                          print "CONFLICTING GLOBAL PARAMETER: $mpar in $f and $inc\n";
                     }
                 }
@@ -197,6 +197,9 @@ sub identify_globals_used_in_subroutine {
     }
 #   print Dumper($stref->{'IncludeFiles'}{'includecom'}{'Commons'}{'vdepn'}) if $f eq 'interpol_all'; OK here ...
 #   die if $f eq 'interpol_all';
+#croak Dumper($Sf->{'Globals'}) if $f eq 'xyindex_to_ll_wrf';
+
+#warn '-' x 80,"\n","identify_globals_used_in_subroutine() $f:\n",Dumper($Sf->{'Globals'}),'-' x 80,"\n";
     return $stref;
 }    # END of identify_globals_used_in_subroutine()
 # -----------------------------------------------------------------------------

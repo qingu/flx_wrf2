@@ -35,7 +35,7 @@ use Exporter;
 # Then we merge the original args, renamed for local/global clashes, with the globals
 
 sub create_refactored_subroutine_call {
-    ( my $stref, my $f, my $annline, my $rlines ) = @_;
+    ( my $stref, my $f, my $annline, my $rlines ) = @_;;
     my $Sf        = $stref->{'Subroutines'}{$f};
     my $line      = $annline->[0] || '';
     my $tags_lref = $annline->[1];
@@ -43,7 +43,7 @@ sub create_refactored_subroutine_call {
 
     # simply tag the common vars onto the arguments
     my $name = $tags{'SubroutineCall'}{'Name'};
-
+croak 'WRONG: SHOULD NOT BE REFACTORED!',$f,':',$name if $name eq 'getfields';
     my $conflicting_locals = {};
     if ( exists $Sf->{'ConflictingGlobals'} ) {
         $conflicting_locals = $Sf->{'ConflictingGlobals'};

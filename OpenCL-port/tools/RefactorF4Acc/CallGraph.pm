@@ -27,11 +27,20 @@ use Exporter;
 
 # -----------------------------------------------------------------------------
 sub create_call_graph { ( my $stref, my $subname ) = @_;
-    create_dot_call_graph($stref);
-    print "\nCall tree for $subname:\n\n" if $main_tree;
-    for my $entry ( @{ $stref->{'CallTree'} } ) {
-        print $entry;
-    }   
+#    create_dot_call_graph($stref);
+#    print "\nCall tree for $subname:\n\n" if $main_tree;
+#
+#    for my $entry ( @{ $stref->{'CallTree'} } ) {
+#        print $entry;
+#    }   
+#    print "P: $subname\n";
+    for my $entry ( @{ $stref->{'CallGraph'}{ $subname } } ) {
+    	my $str = format_call_tree_line($entry,$stref);
+    	print $str;
+    	$stref->{'Indents'} += 4;    	
+    	create_call_graph ($stref,$entry);
+    	$stref->{'Indents'} -= 4; 
+    }
 }
 # -----------------------------------------------------------------------------
 sub create_dot_call_graph {
@@ -72,10 +81,15 @@ ratio="fill";
 }
 
 # -----------------------------------------------------------------------------
-# -----------------------------------------------------------------------------
+
 sub add_to_call_tree {
-    ( my $f, my $stref, my $stubbed ) = @_;
-    $stubbed ||= ' ';
+    ( my $f, my $stref, my $p) = @_;
+    push @{ $stref->{'CallGraph'}{$p} }, $f;
+    return $stref;
+}    # END of add_to_call_tree()
+# -----------------------------------------------------------------------------
+sub format_call_tree_line {
+	(my $f, my $stref ) = @_;
     my $sub_or_func = sub_func_or_incl( $f, $stref );
     my $src         = $stref->{$sub_or_func}{$f}{'Source'};
     my $nspaces     = 64 - $stref->{'Indents'} - length($f); # -length($src) -2;
@@ -85,10 +99,11 @@ sub add_to_call_tree {
     my $tgt        = uc( substr( $sub_or_func, 0, 3 ) );
     my @strs       = (
         ' ' x $stref->{'Indents'},
-        $f, $stubbed, ' ' x $nspaces,
+        $f, 
+        ' ' x $nspaces,
         $tgt, ' ', $src_padded, "\t", $incls, "\n"
     );
     my $str = join( '', @strs );
-    push @{ $stref->{'CallTree'} }, $str;
-    return $stref;
-}    # END of add_to_call_tree()
+	
+	return $str;
+}

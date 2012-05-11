@@ -670,15 +670,15 @@ sub parse_subroutine_and_function_calls {
 	my $pnid        = $stref->{'NId'};
 	my $sub_or_func = sub_func_or_incl( $f, $stref );
 	my $Sf          = $stref->{$sub_or_func}{$f};
-
+    
 	# For C translation and call tree generation
 	if ( $translate == $GO
 		|| ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
 	{
-		if ( $translate != $GO ) {
-			print "ADDING $f to CALL TREE\n" if $V;
-			$stref = add_to_call_tree( $f, $stref );
-		}    # else {
+#		if ( $translate != $GO ) {
+#			print "ADDING $f to CALL TREE\n" if $V;
+##			$stref = add_to_call_tree( $f, $stref, 'TOP' );
+#		}    # else {
 		if ( $translate == $GO ) {
 			$stref = add_to_C_build_sources( $f, $stref );
 		}
@@ -697,9 +697,8 @@ sub parse_subroutine_and_function_calls {
 	  # Subroutine calls. Surprisingly, these even occur in functions! *shudder*
 			if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )
 			{
-
 				my $name = $1;
-
+                $stref = add_to_call_tree( $name, $stref, $f);
 				my $Sname = $stref->{'Subroutines'}{$name};
 
 				$stref->{'NId'}++;
@@ -757,29 +756,17 @@ sub parse_subroutine_and_function_calls {
 				$info->{'SubroutineCall'}{'Name'} = $name;
 
 				if ( defined $Sname
-					and not exists $Sf->{'CalledSubs'}{$name} )
-				{
+					and not exists $Sf->{'CalledSubs'}{$name} 
+                )
+				{					
 					$Sf->{'CalledSubs'}{$name} = 1;
-
 					if (   not exists $Sname->{'Status'}
 						or $Sname->{'Status'} < $PARSED
 						or $gen_sub )
 					{
-						die $name
-						  if $f eq 'calcpar' && $line =~ /call\s+xyindex_/;
-						print "\tFOUND SUBROUTINE CALL $name in $f\n" if $V;
-						if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
-							$stref->{'Indents'} += 4;
-						}
+						print "\tFOUND SUBROUTINE CALL $name in $f\n" if $V;						
 						$stref = parse_fortran_src( $name, $stref );
-						if ( $call_tree_only && ( $gen_sub || $main_tree ) ) {
-							$stref->{'Indents'} -= 4;
-						}
-					} else {
-						$stref->{'Indents'} += 4;
-						$stref = add_to_call_tree( $name, $stref, '*' );
-						$stref->{'Indents'} -= 4;
-					}
+					} 
 				}
 			}
 
@@ -818,13 +805,9 @@ sub parse_subroutine_and_function_calls {
 							or $stref->{'Functions'}{$chunk}{'Status'} <
 							$PARSED )
 						{
-							$stref->{'Indents'} += 4;
 							$stref = parse_fortran_src( $chunk, $stref );
-							$stref->{'Indents'} -= 4;
 						} else {
-							$stref->{'Indents'} += 4;
-							$stref = add_to_call_tree( $chunk, $stref, '*' );
-							$stref->{'Indents'} -= 4;
+							$stref = add_to_call_tree( $chunk, $stref, $f);
 						}
 					}
 				}
