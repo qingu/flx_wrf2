@@ -34,7 +34,7 @@ use Exporter;
 sub parse_fortran_src {
 	( my $f, my $stref ) = @_;
 
-	#local $V=1;
+#	local $V=1 if $f eq 'particles_main_loop';
 	print "PARSING $f\n " if $V;
 
 	# 1. Read the source and do some minimal processsing
@@ -116,7 +116,7 @@ sub analyse_lines {
 			if ( $line =~ /^\!\s+/ ) {
 				next;
 			}
-
+#print "LINE: $line\n" if $f eq 'particles_main_loop' && $line=~/drydep/;
 			# FIXME Trailing comments are ignored!
 			#            if ( $line =~ /^\!\s/ ) {
 			#                $stref->{$sub_func_incl}{$f}{'Info'}
@@ -231,7 +231,8 @@ sub analyse_lines {
 			if ($is_vardecl) {
 				$is_vardecl = 0;
 				my $tvarlst = $varlst;
-				my $pvars   = parse_vardecl($varlst);
+				my $T= 0;#($f eq 'particles_main_loop' && $varlst=~/drydep/) ? 1:0;
+				my $pvars   = parse_vardecl($varlst,$T);
 
 				#                if ($f eq 'read_ncwrfout_1realfield') {
 				#	               print Dumper($pvars);
@@ -297,7 +298,7 @@ sub analyse_lines {
 
 #                $Data::Dumper::Indent=2;
 #                die Dumper(%vars) if $line=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
-				print "\t", join( ',', @varnames ), "\n" if $V;
+				print "\tVARS:", join( ',', @varnames ), "\n" if $V;
 
 #                $stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'VarDecl'} = \@varnames;
 				$info->{'VarDecl'} = \@varnames;
@@ -313,7 +314,7 @@ sub analyse_lines {
 		$stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;
 
 #                $Data::Dumper::Indent=2;
-#                croak Dumper( $stref->{$sub_func_incl}{$f}{'Vars'}{'drydeposit'}) if $f eq 'timemanager';
+#                croak Dumper( $stref->{$sub_func_incl}{$f}{'Vars'}{'drydeposit'}) if $f eq 'particles_main_loop';
 
 	}
 
@@ -593,7 +594,12 @@ sub separate_blocks {
 #			my $decl = $vars{$argv}{'Decl'};
 #print $f,$Sf->{'FStyle'},"\n";            
 			my $decl = ( $Sf->{'FStyle'} eq 'F77' ) ? format_f77_var_decl($Sf->{'Vars'},$argv) : format_f95_var_decl($Sf->{'Vars'},$argv);
-			push @{$decls}, $sixspaces.$decl;
+#			if ($f eq 'timemanager' && $block eq 'particles_main_loop' && $decl=~/drydeposit/) {
+#				print "DECL: $decl\n";
+#				print "VARS: ".Dumper( $Sf->{'Vars'}{$argv});
+#			}
+			push @{$decls}, $sixspaces.$decl; # Why do we need this anyway?
+			$Sf->{'Vars'}{$argv}{'Decl'}= $sixspaces.$decl;
 		}
 		$sig =~ s/\,$/)/s;
 		$Sblock->{'Sig'}   = $sig;
@@ -602,11 +608,8 @@ sub separate_blocks {
 		# Add variable declarations and info to line
 		my $sigline = shift @{ $Sblock->{'AnnLines'} };
 		for my $argv ( @{ $args{$block} } ) {
-			my $decl = $vars{$argv}{'Decl'};
-			unshift @{ $Sblock->{'AnnLines'} },
-			  [ $decl, { 'VarDecl' => [$argv] } ];
-
-		  #            unshift @{ $Sblock->{'Info'} }, { 'VarDecl' => [$argv] };
+			my $decl = $Sf->{'Vars'}{$argv}{'Decl'};			
+			unshift @{ $Sblock->{'AnnLines'} }, [ $decl, { 'VarDecl' => [$argv] } ];
 		}
 		unshift @{ $Sblock->{'AnnLines'} }, $sigline;
 
@@ -834,8 +837,8 @@ sub get_commons_params_from_includes {
 		$Sf->{'Parameters'} = {};
 		$Sf->{'Parameters'}{'OrderedList'} = [];
 
-		#       warn "GETTING COMMONS/PARAMS from INCLUDE $f\n";
 		my %vars = %{ $stref->{'IncludeFiles'}{$f}{'Vars'} };
+		
 		if ( exists $vars{''} ) { croak "EMPTY VAR! in $f" }
 		my $has_pars    = 0;
 		my $has_commons = 0;
@@ -857,6 +860,7 @@ sub get_commons_params_from_includes {
 					} else {
 						print $var, "\t", $vars{$var}{'Type'}, "\n"
 						  if $V;
+						  
 						$stref->{'IncludeFiles'}{$f}{'Commons'}{$var} =
 						  $vars{$var};
 					}
@@ -1270,9 +1274,10 @@ sub read_fortran_src {
 # -----------------------------------------------------------------------------
 # Proper FSM parser for F77 variable declarations (apart from the type)
 sub parse_vardecl {
-	( my $varlst ) = @_;
-	my $T = 0;    # test output
+	( my $varlst, my $T ) = @_;
+	
 
+print "VARLST: <$varlst>\n" if $T;
 	# parse varlst into this hash
 	my $vars = {};
 

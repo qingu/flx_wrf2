@@ -104,7 +104,7 @@ sub create_refactored_vardecls {
 #                    $val=$Sf->{'Parameters'}{$vars[0]}{'Val'};                    
                     $rline = format_f95_par_decl( $stref,$f,$tnvar );
                 } else {
-                	$rline = format_f95_var_decl($Sf->{'Vars'},$tnvar);
+                	$rline = format_f95_var_decl($Sf->{'Vars'},$tnvar);# WV: seems this never happens!                	
                 }
 #            $rline = format_f95_decl($Sf->{'Vars'}, [$tnvar,$is_par,$val]);
             $tags_lref->{'VarDecl'} = [$tnvar];
@@ -135,6 +135,9 @@ sub create_exglob_var_declarations {
                     if ( $f ne $stref->{'IncludeFiles'}{$inc}{'Root'} ) {
                         print "\tGLOBAL $var from $inc in $f\n" if $V;                        
                         my $rline = format_f95_var_decl( $stref->{'IncludeFiles'}{$inc}{'Commons'},$var);
+                        print Dumper($stref->{'IncludeFiles'}{$inc}{'Commons'}{$var}) if $rline=~/\bdrydep\b/;
+                        print Dumper($Sf->{'Vars'}{$var}) if $rline=~/\bdrydep\b/;
+                        print "LINE: $f: $rline\n" if $rline=~/\bdrydep\b/;
                         if ( exists $Sf->{'ConflictingParams'}{$var} ) {
                             my $gvar = $Sf->{'ConflictingParams'}{$var};
                             print

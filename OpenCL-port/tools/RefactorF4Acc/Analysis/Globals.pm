@@ -146,9 +146,6 @@ sub identify_globals_used_in_subroutine {
             print "COMMONS from $inc in $f? \n" if $V;
             $commons{$inc} = { %{ $stref->{'IncludeFiles'}{$inc}{'Commons'} } }; # This was a bug: ref insteaf of copy!         
         }
-# Commons in Includes OK here        
-#print "SUB: $f\n";
-#        	print Dumper( $stref->{'IncludeFiles'}{'includecom'}{'Commons'}{'vdepn'}) ;
 
         $Sf->{'Commons'}    = \%commons;
         $Sf->{'HasCommons'} = 1;
@@ -184,22 +181,18 @@ sub identify_globals_used_in_subroutine {
                   ( @globs, look_for_variables( $stref, $f, $line, $tvars ) );
 #                  $srcref->[$index]= [ $line, $info];
             }    # for each line
+            
             if ($V) {
                 print "\nGLOBAL VARS from $cinc in subroutine $f:\n\n";
                 for my $var (@globs) {
-                    print "$var\n";
+                    print "VAR: $var\n".Dumper( $stref->{'IncludeFiles'}{$cinc}{'Commons'}{$var} );                    
                 }
                 print "\n";
             }
-#            $Sf->{'Globals'}{$cinc} = \@globs;
+            
             $Sf->{'Globals'}{$cinc} = \@globs;
         }
     }
-#   print Dumper($stref->{'IncludeFiles'}{'includecom'}{'Commons'}{'vdepn'}) if $f eq 'interpol_all'; OK here ...
-#   die if $f eq 'interpol_all';
-#croak Dumper($Sf->{'Globals'}) if $f eq 'xyindex_to_ll_wrf';
-
-#warn '-' x 80,"\n","identify_globals_used_in_subroutine() $f:\n",Dumper($Sf->{'Globals'}),'-' x 80,"\n";
     return $stref;
 }    # END of identify_globals_used_in_subroutine()
 # -----------------------------------------------------------------------------

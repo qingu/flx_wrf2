@@ -36,9 +36,6 @@ sub analyse_all {
     # Now we can do proper globals handling
     # We need to walk the tree again, find the globals in rec descent.
     $stref = resolve_globals( $subname, $stref );
-#    croak Dumper($stref->{'Subroutines'}{'getfields'}{'RefactorGlobals'}) ;
-#    print "TEST:",Dumper( $stref->{'IncludeFiles'}{'includecom'}{'Commons'}{'memind'}) ; #OK HERE!
-    
 
 # I think we need to refactor the source first without creating the new sources,
 # then us this info to determine the IO direction

@@ -182,7 +182,7 @@ sub context_free_refactorings {
 						$line = '!! Original line for info !! ' . $line;
 						$info->{'Deleted'} = 1;
 					} else {
-						$line = format_f95_var_decl( $Sf->{'Vars'}, $vars[0] );
+						$line = format_f95_var_decl( $Sf->{'Vars'}, $vars[0] );						
 					}
 				} else {
 
@@ -542,8 +542,6 @@ sub format_f95_decl {
 }    # format_f95_decl()
 
 # -----------------------------------------------------------------------------
-# format_f95_decl( $stref->{'IncludeFiles'}{$inc}{'Commons'},[$var,0,0]
-# format_f95_var_decl ($stref->{'IncludeFiles'}{$inc}{'Commons'},$var)
 sub format_f95_var_decl {
 	( my $Sfv, my $var ) = @_;
 	my $Sv = $Sfv->{$var};
@@ -571,7 +569,7 @@ sub format_f95_var_decl {
 		$dim = ', dimension(' . join( ',', @dims ) . ') ';
 	}
 	my $decl_line =
-	  $spaces . $Sv->{'Type'} .$Sv->{'Attr'}. $dim . ' :: ' . $var . ' !! Context-free !! ';
+	  $spaces . $Sv->{'Type'} .$Sv->{'Attr'}. $dim . ' :: ' . $var;
 
 	#    die $decl_line  if $dim;
 	return $decl_line;

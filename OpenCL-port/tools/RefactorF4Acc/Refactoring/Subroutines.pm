@@ -276,8 +276,10 @@ sub refactor_calls_globals {
 #            }
 #            $skip = 1;
         }
-        if ( exists $tags{'SubroutineCall'} ) {
-croak Dumper(%tags) if $f eq 'timemanager';
+        if ( exists $tags{'SubroutineCall'} 
+        &&  exists $stref->{'Subroutines'}{ $tags{'SubroutineCall'}{'Name'} }{'RefactorGlobals'} 
+        &&  $stref->{'Subroutines'}{ $tags{'SubroutineCall'}{'Name'} }{'RefactorGlobals'} ==1
+        ) {
             # simply tag the common vars onto the arguments
             $rlines = create_refactored_subroutine_call( $stref, $f, $annline,
                 $rlines );

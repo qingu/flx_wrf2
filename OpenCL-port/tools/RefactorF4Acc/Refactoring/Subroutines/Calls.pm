@@ -43,7 +43,6 @@ sub create_refactored_subroutine_call {
 
     # simply tag the common vars onto the arguments
     my $name = $tags{'SubroutineCall'}{'Name'};
-#croak 'WRONG: SHOULD NOT BE REFACTORED!',$f,':',$name if $name eq 'getfields';
     my $conflicting_locals = {};
     if ( exists $Sf->{'ConflictingGlobals'} ) {
         $conflicting_locals = $Sf->{'ConflictingGlobals'};
