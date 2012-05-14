@@ -229,6 +229,7 @@ sub context_free_refactorings {
                         	print "CONFLICT: $rhs_val in $line ($f)\n";
                             $n_rhs_vals[$i]=$Sf->{'ConflictingGlobals'}{$rhs_val};
                         } else {
+croak Dumper(keys %{ $Sf->{'LiftedIncludes'} }) if $f eq 'timemanager';
                             for my $inc (keys %{ $Sf->{'Includes'} }) {                                        
                                 if (exists $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$rhs_val}) {
                                 	print "CONFLICT: $rhs_val in <$line> ($f), from $inc\n";

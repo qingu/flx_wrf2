@@ -256,7 +256,7 @@ sub refactor_calls_globals {
 #        if ( exists $tags{'Include'} && $firstinc ) {
         	$firstinc =0;
             # First, add addional includes if required
-            $rlines =
+            ($rlines,$stref) =
               create_additional_include_statements( $stref, $f, $annline, $rlines );
             
 ## While we're here, might as well generate the declarations for remapping and reshaping.
@@ -290,6 +290,15 @@ sub refactor_calls_globals {
         push @{$rlines}, $annline unless $skip;
         $idx++;
     }
+croak "
+Given e.g. timemanager.f,
+we add globals from particles_main_loop by lifting the includes.
+When we do that, we should actually test if any of the globals conflicts with a local variable. If that is the case, we should rename all occurences of this local variable!
+
+-> Look at Vars from LiftedIncludes, test against every line in the same way as 
+";
+
+
     
 #    $stref->{'Subroutines'}{$f}{'RefactoredCode'}=$rlines;
 #    return $stref;

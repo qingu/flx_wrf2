@@ -57,11 +57,13 @@ sub create_additional_include_statements {
     my $Sf        = $stref->{'Subroutines'}{$f};    
         # Which child has RefactorGlobals==1?
     my @additional_includes=();
+    $Sf->{'LiftedIncludes'} =[];
     for my $cs (keys %{ $Sf->{'CalledSubs'} }) {             
         if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
             for my $inc (keys %{ $stref->{'Subroutines'}{$cs}{'CommonIncludes'} }) {
                 if (not exists $Sf->{'Includes'}{$inc} and $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common') {
                     push @additional_includes, $inc;
+	            push @{ $Sf->{'LiftedIncludes'} }, $inc;
                 } 
             }
         }
@@ -75,7 +77,7 @@ sub create_additional_include_statements {
             push @{$rlines}, [ $rline, $tags_lref ];                    
     }
 #croak "FIXME: INCLUDE _AFTER_ OTHER INCLUDES!!!";
-    return $rlines;
+    return ($rlines,$stref);
 }    # END of create_additional_include_statements()
 
 # --------------------------------------------------------------------------------
