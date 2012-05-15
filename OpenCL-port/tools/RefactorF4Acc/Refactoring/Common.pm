@@ -74,7 +74,7 @@ sub context_free_refactorings {
 			  "Undefined source code line for $f in create_refactored_source()";
 		}
 		my $line = $annline->[0];
-		
+		print "LINE: $line\n" if $f eq 'timemanager' && $line=~/gridunc/;
 		my $info = $annline->[1];
 		my %tags      = %{$info};
 		if( exists $info->{'Deleted'} and $line eq '') {			
@@ -211,13 +211,17 @@ sub context_free_refactorings {
 				while ( $line =~ /\.\s*(?:eq|ne|gt|lt|le|ge)\s*\./ ) {
 					$line =~ s/\.\s*(eq|ne|gt|lt|le|ge)\s*\./ $f95ops{$1} /;
 				}
-    		} elsif (exists $tags{'Assignment'}) {
-#    			print "ASSIGNMENT: <$line> in $f\n" if $f eq 'xyindex_to_ll_wrf' ; 
+				# FIXME: it is possible that there is a conflict in the conditional expression!
+				$line = rename_conflicting_vars($line,$stref,$f);
+    		} elsif (exists $tags{'Assignment'}) { 
     			my $kv=$line;
     			my $spaces=$line; $spaces=~s/\S.*$//;
     			$kv=~s/^\s+//;    			
     			$kv=~s/\s+$//;
     			(my $k, my $rhs_expr) = split(/\s*=\s*/,$kv);
+    			
+    			$rhs_expr = rename_conflicting_vars($rhs_expr,$stref,$f);
+=obsolete    			
     			my @rhs_vals= grep {/[a-z]\w*/} split( /\W+/, $rhs_expr );    			
     			my @n_rhs_vals=@rhs_vals;
     			my $conflict=0;
@@ -229,7 +233,6 @@ sub context_free_refactorings {
                         	print "CONFLICT: $rhs_val in $line ($f)\n";
                             $n_rhs_vals[$i]=$Sf->{'ConflictingGlobals'}{$rhs_val};
                         } else {
-croak Dumper(@{ $Sf->{'LiftedIncludes'} }) if $f eq 'timemanager';
                             for my $inc (keys %{ $Sf->{'Includes'} }) {                                        
                                 if (exists $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$rhs_val}) {
                                 	print "CONFLICT: $rhs_val in <$line> ($f), from $inc\n";
@@ -249,6 +252,8 @@ croak Dumper(@{ $Sf->{'LiftedIncludes'} }) if $f eq 'timemanager';
     				}
     			}	
     			print "RHS: $rhs_expr\n" if $conflict;
+	
+
     			my $nk=$k;
     			if (exists $Sf->{'ConflictingGlobals'}{$k}) {
     				$nk = $Sf->{'ConflictingGlobals'}{$k};
@@ -261,6 +266,8 @@ croak Dumper(@{ $Sf->{'LiftedIncludes'} }) if $f eq 'timemanager';
                     }    				
     			}	   		    
 		      }
+=cut            		      
+		      my $nk= rename_conflicting_vars($k,$stref,$f);
 		      $line = $spaces.$nk. ' = '.$rhs_expr;
 		} # assignment
 		
@@ -270,6 +277,9 @@ croak Dumper(@{ $Sf->{'LiftedIncludes'} }) if $f eq 'timemanager';
 
 			#    	$line='';$info ={};
 
+		} 
+		elsif ( exists $tags{'SubroutineCall'} ) {			
+			$line = rename_conflicting_vars($line,$stref,$f);
 		}
 		push @{ $Sf->{'RefactoredCode'} }, [ $line, $info ] if $line ne '';
 		if (@extra_lines) {
@@ -918,4 +928,48 @@ sub rename_conflicting_global_pars {
               }	
               return ($nk, $rhs_expr);
 	
+}
+sub rename_conflicting_vars {
+	(my $expr, my $stref, my $f)=@_;
+    my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
+    my $Sf = $stref->{$sub_or_func_or_inc}{$f};
+	
+	               my @vals= grep {/[a-z]\w*/} split( /\W+/, $expr );     
+#	               print 'VALS: ',join(';',@vals),"\n";         
+                my @n_vals=@vals;
+                my $conflict=0;
+                if (@vals) {
+                    my $i=0;
+                    for my $val (@vals) {
+                    	next if $val eq 'if';
+                    	next if $val eq 'then';
+                    	next if $val eq 'else';
+                    	next if $val eq 'call';
+                        $n_vals[$i]=$val;
+                        if (exists $Sf->{'ConflictingGlobals'}{$val}) {
+                            print "CONFLICT: $val in $expr ($f)\n";
+                            $n_vals[$i]=$Sf->{'ConflictingGlobals'}{$val};
+                        } elsif (exists $Sf->{'ConflictingLiftedVars'}{$val}) {
+                        	warn "CONFLICT (LIFT): $f: $expr\n";   
+                        } else {
+                            for my $inc (keys %{ $Sf->{'Includes'} }) {                                        
+                                if (exists $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$val}) {
+                                    print "CONFLICT (INC): $val in <$expr> ($f), from $inc\n";
+                                    $conflict=1;
+                                    $n_vals[$i] = $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$val};
+                                    last; 
+                                }                    
+                            }       
+                        }               
+                        $i++;
+                    }
+                }
+                for my $v (@vals) {
+                    my $nv=shift @n_vals;
+                    if ($nv ne $v) {
+                        $expr=~s/\b$v\b/$nv/;
+                    }
+                }   
+                print "EXPR: $expr\n" if $conflict;
+    return 	$expr;  		
 }

@@ -318,7 +318,7 @@ sub lift_includes {
 #    	print "$f: VAR $var\n"; 
         for my $lifted_inc ( @{ $Sf->{'LiftedIncludes'} } ) {
             if (exists $stref->{'IncludeFiles'}{$lifted_inc}{'Vars'}{$var}) {
-            	$Sf->{'ConflictingLiftedVars'}{$var}=1;
+            	$Sf->{'ConflictingLiftedVars'}{$var}=$var.'_LOCAL_'.$f;
             	print "lift_includes( $f ): $var CONFLICT with $lifted_inc\n";
             	last;
             }

@@ -290,18 +290,6 @@ sub refactor_calls_globals {
         push @{$rlines}, $annline unless $skip;
         $idx++;
     }
-croak "
-Given e.g. timemanager.f,
-we add globals from particles_main_loop by lifting the includes.
-When we do that, we should actually test if any of the globals conflicts with a local variable. If that is the case, we should rename all occurences of this local variable!
-
--> Look at Vars from LiftedIncludes, test against every line in the same way as 
-";
-
-
-    
-#    $stref->{'Subroutines'}{$f}{'RefactoredCode'}=$rlines;
-#    return $stref;
     return $rlines;    
 }    # END of refactor_calls_globals()
 
