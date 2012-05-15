@@ -314,15 +314,16 @@ sub lift_includes {
         }
     }            
     # Once we know the includes, we can check for conflicts.
-    for my $var (keys %{ $Sf->{'Vars'} }) {
+    my @vars = keys %{ $Sf->{'Vars'} };
+    for my $var (@vars) {
 #    	print "$f: VAR $var\n"; 
         for my $lifted_inc ( @{ $Sf->{'LiftedIncludes'} } ) {
             if (exists $stref->{'IncludeFiles'}{$lifted_inc}{'Vars'}{$var}) {
             	$Sf->{'ConflictingLiftedVars'}{$var}=$var.'_LOCAL_'.$f;
-            	print "lift_includes( $f ): $var CONFLICT with $lifted_inc\n";
+            	print "lift_includes( $f ): $var CONFLICT with $lifted_inc\n" if $V;
             	last;
             }
         }
     }
     return $stref;
-}    # END of create_additional_include_statements()
+}    # END of lift_includes()

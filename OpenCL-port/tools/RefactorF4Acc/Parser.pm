@@ -230,7 +230,7 @@ sub analyse_lines {
 
 			if ($is_vardecl) {
 				$is_vardecl = 0;
-				my $tvarlst = $varlst;
+#				my $tvarlst = $varlst;
 				my $T= 0;#($f eq 'particles_main_loop' && $varlst=~/drydep/) ? 1:0;
 				my $pvars   = parse_vardecl($varlst,$T);
 

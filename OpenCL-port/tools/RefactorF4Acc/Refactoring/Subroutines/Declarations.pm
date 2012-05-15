@@ -103,7 +103,7 @@ sub create_refactored_vardecls {
 #                    $val=$Sf->{'Parameters'}{$vars[0]}{'Val'};                    
                     $rline = format_f95_par_decl( $stref,$f,$tnvar );
                 } else {
-                	$rline = format_f95_var_decl($Sf->{'Vars'},$tnvar);# WV: seems this never happens!                	
+                	$rline = format_f95_var_decl($Sf,$tnvar);# WV: seems this never happens!                	
                 }
 #            $rline = format_f95_decl($Sf->{'Vars'}, [$tnvar,$is_par,$val]);
             $tags_lref->{'VarDecl'} = [$tnvar];
@@ -132,8 +132,11 @@ sub create_exglob_var_declarations {
             } else {
                 if ( exists $Sf->{'Commons'}{$inc} ) {
                     if ( $f ne $stref->{'IncludeFiles'}{$inc}{'Root'} ) {
-                        print "\tGLOBAL $var from $inc in $f\n" if $V;                        
-                        my $rline = format_f95_var_decl( $stref->{'IncludeFiles'}{$inc}{'Commons'},$var);
+                        print "\tGLOBAL $var from $inc in $f\n" if $V;
+#                        croak "$f: INC $inc: VAR $var\n" if not exists $stref->{IncludeFiles}{$inc}{'Vars'}{$var};                        
+#                        my $rline = format_f95_var_decl( $stref->{'IncludeFiles'}{$inc}{'Commons'},$var);
+                        my $rline = format_f95_var_decl( $stref->{'IncludeFiles'}{$inc},$var);
+#                        croak "$f: INC $inc: VAR $var\n" if $rline ne $tline;
                         if ( exists $Sf->{'ConflictingParams'}{$var} ) {
                             my $gvar = $Sf->{'ConflictingParams'}{$var};
                             print
@@ -147,7 +150,7 @@ sub create_exglob_var_declarations {
                             # FIXME: is it OK to just generate the decls here?
 #                            my $decl_from_inc = $stref->{IncludeFiles}{$inc}{Vars}{$var}{Decl};
                             # FIXME: make this decl Fortran-95 style!!
-                            $rline = format_f95_var_decl($stref->{IncludeFiles}{$inc}{'Vars'},$var);
+                            $rline = format_f95_var_decl($stref->{IncludeFiles}{$inc},$var);
 #                            $rline ="$decl_from_inc"." ! from $inc";
                             $rline .= " ! from $inc";   
 #                            die $rline,"\n" if $f eq 'interpol_all';         

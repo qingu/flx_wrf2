@@ -74,7 +74,7 @@ sub context_free_refactorings {
 			  "Undefined source code line for $f in create_refactored_source()";
 		}
 		my $line = $annline->[0];
-		print "LINE: $line\n" if $f eq 'timemanager' && $line=~/gridunc/;
+#		print "LINE: $line\n" if $f eq 'timemanager' && $line=~/gridunc/;
 		my $info = $annline->[1];
 		my %tags      = %{$info};
 		if( exists $info->{'Deleted'} and $line eq '') {			
@@ -165,8 +165,7 @@ sub context_free_refactorings {
 				if (@vars_not_pars) {
 #					print "LINE:",$line,"\n" if $f eq 'particles_main_loop';
 					$filtered_line =
-					  format_f95_multiple_var_decls( $Sf->{'Vars'},
-						@vars_not_pars );
+					  format_f95_multiple_var_decls( $Sf,@vars_not_pars );
 					my %tr = %{$info};
 					$tr{'Extra'} = 1;
 					push @extra_lines, [ $filtered_line, \%tr ];
@@ -182,7 +181,7 @@ sub context_free_refactorings {
 						$line = '!! Original line for info !! ' . $line;
 						$info->{'Deleted'} = 1;
 					} else {
-						$line = format_f95_var_decl( $Sf->{'Vars'}, $vars[0] );						
+						$line = format_f95_var_decl( $Sf, $vars[0] );						
 					}
 				} else {
 
@@ -191,8 +190,7 @@ sub context_free_refactorings {
 					  grep { not exists $Sf->{'Parameters'}{$_} } @vars;
 					if (@vars_not_pars) {
 						$line =
-						  format_f95_multiple_var_decls( $Sf->{'Vars'},
-							@vars_not_pars );
+						  format_f95_multiple_var_decls( $Sf,@vars_not_pars );
 					} else {
 						$line = '!! Original line for info !! ' . $line;
 						$info->{'Deleted'} = 1;
@@ -554,15 +552,19 @@ sub format_f95_decl {
 
 # -----------------------------------------------------------------------------
 sub format_f95_var_decl {
-	( my $Sfv, my $var ) = @_;
-	my $Sv = $Sfv->{$var};
+	( my $Sf, my $var ) = @_;
+	my $Sv = $Sf->{'Vars'}{$var};
 	if ( not exists $Sv->{'Decl'} ) {
 		print "WARNING: VAR $var does not exist in format_f95_decl()!\n" if $W;
 		croak $var;
+	} 
+	my $nvar=$var;
+	if (exists $Sf->{'ConflictingLiftedVars'}{$var} ){
+	   $nvar=$Sf->{'ConflictingLiftedVars'}{$var};
 	}
 	my $spaces = $Sv->{'Decl'};
 	$spaces =~ s/\S.*$//;
-
+    
 	# FIXME: for multiple vars, we need to split this in multiple statements.
 	# So I guess as soon as the Shape is not empty, need to split.
 	my $shape = $Sv->{'Shape'};
@@ -580,7 +582,7 @@ sub format_f95_var_decl {
 		$dim = ', dimension(' . join( ',', @dims ) . ') ';
 	}
 	my $decl_line =
-	  $spaces . $Sv->{'Type'} .$Sv->{'Attr'}. $dim . ' :: ' . $var;
+	  $spaces . $Sv->{'Type'} .$Sv->{'Attr'}. $dim . ' :: ' . $nvar;
 
 	#    die $decl_line  if $dim;
 	return $decl_line;
@@ -624,106 +626,114 @@ sub format_f77_var_decl {
 }    # format_f77_var_decl()
 
 # -----------------------------------------------------------------------------
-sub format_f95_multiple_decl {
-	( my $Sfv, my $var_is_par_tups ) = @_;
-	my @vars = map { $_->[0] } @{$var_is_par_tups};
-
-	my @var_vals = map { "$_->[0] = $_->[2]" } @{$var_is_par_tups};
-	my %test = map { ( $_->[1], 1 ) } @{$var_is_par_tups};
-	my $Sv = $Sfv->{ $vars[0] };
-	if ( not exists $Sv->{'Decl'} ) {
-		print "WARNING: VAR $vars[0] does not exist in format_f95_decl()!\n"
-		  if $W;
-		croak $vars[0];
-	}
-	my $spaces = $Sv->{'Indent'};
-	
-	my $type = $Sv->{'Type'};
- 	
-    my $attr = $Sv->{'Attr'};
-	# FIXME: for multiple vars, we need to split this in multiple statements.
-	# So I guess as soon as the Shape is not empty, need to split.
-	my $split = ( exists $test{0} and exists $test{1} );
-	if ( !$split ) {
-		for my $var (@vars) {
-			my $shape = $Sfv->{$var}{'Shape'};
-			if ( @{$shape} > 0 && @vars > 1 ) {
-				$split = 1;
-				last;
-			}
-		}
-	}
-
-	if ($split) {
-
-		my $decl_line = $spaces;    #.$Sv->{'Type'}.' :: '.join(', ',@vars);
-		  # What we need to do is split these into separate statements with semicolons
-		for my $tup ( @{$var_is_par_tups} ) {
-			( my $var, my $is_par, my $val ) = @{$tup};
-			my $dim   = '';
-			my $shape = $Sfv->{$var}{'Shape'};
-			if ( @{$shape} > 1 ) {
-
-				my @dims = ();
-				for my $i ( 0 .. ( @{$shape} / 2 - 1 ) ) {
-					my $range =
-					  ( "$shape->[2*$i]" eq '1' )
-					  ? $shape->[ 2 * $i + 1 ]
-					  : $shape->[ 2 * $i ] . ':' . $shape->[ 2 * $i + 1 ];
-					push @dims, $range;
-				}
-				$dim = ', dimension(' . join( ',', @dims ) . ') ';
-			}
-
-			my $decl = '';
-			if ($is_par) {
-				$decl =
-				  "$type$attr $dim ,parameter :: $var = $val; "
-				  ; # FIXME: it is possible that $val is a function of another parameter
-			} else {
-				$decl = "$type$attr $dim :: $var; ";
-			}
-			$decl_line .= $decl;
-		}
-		return $decl_line;
-	} else {
-
-		# for Shape, it means they are all empty OR there is just one!
-		my $dim = '';
-		if ( @vars == 1 ) {
-			my $shape = $Sfv->{ $vars[0] }{'Shape'};
-			if ( @{$shape} ) {
-				my @dims = ();
-				for my $i ( 0 .. ( @{$shape} / 2 - 1 ) ) {
-					my $range =
-					  ( $shape->[ 2 * $i ] eq '1' )
-					  ? $shape->[ 2 * $i + 1 ]
-					  : $shape->[ 2 * $i ] . ':' . $shape->[ 2 * $i + 1 ];
-					push @dims, $range;
-				}
-				$dim = ', dimension(' . join( ',', @dims ) . ') ';
-			}
-		}
-		my $decl_line = $spaces . $type . $attr . $dim;
-		if ( exists $test{1} ) {
-			$decl_line .= ' ,parameter :: ' . join( ', ', @var_vals );
-
-		} else {
-			$decl_line .= ' :: ' . join( ', ', @vars );
-		}
-		return $decl_line;
-	}
-}    # format_f95_multiple_decl()
+#sub format_f95_multiple_decl {
+#	( my $Sfv, my $var_is_par_tups ) = @_;
+#	my @vars = map { $_->[0] } @{$var_is_par_tups};
+#
+#	my @var_vals = map { "$_->[0] = $_->[2]" } @{$var_is_par_tups};
+#	my %test = map { ( $_->[1], 1 ) } @{$var_is_par_tups};
+#	my $Sv = $Sfv->{ $vars[0] };
+#	if ( not exists $Sv->{'Decl'} ) {
+#		print "WARNING: VAR $vars[0] does not exist in format_f95_decl()!\n"
+#		  if $W;
+#		croak $vars[0];
+#	}
+#	my $spaces = $Sv->{'Indent'};
+#	
+#	my $type = $Sv->{'Type'};
+# 	
+#    my $attr = $Sv->{'Attr'};
+#	# FIXME: for multiple vars, we need to split this in multiple statements.
+#	# So I guess as soon as the Shape is not empty, need to split.
+#	my $split = ( exists $test{0} and exists $test{1} );
+#	if ( !$split ) {
+#		for my $var (@vars) {
+#			my $shape = $Sfv->{$var}{'Shape'};
+#			if ( @{$shape} > 0 && @vars > 1 ) {
+#				$split = 1;
+#				last;
+#			}
+#		}
+#	}
+#
+#	if ($split) {
+#
+#		my $decl_line = $spaces;    #.$Sv->{'Type'}.' :: '.join(', ',@vars);
+#		  # What we need to do is split these into separate statements with semicolons
+#		for my $tup ( @{$var_is_par_tups} ) {
+#			( my $var, my $is_par, my $val ) = @{$tup};
+#			my $dim   = '';
+#			my $shape = $Sfv->{$var}{'Shape'};
+#			if ( @{$shape} > 1 ) {
+#
+#				my @dims = ();
+#				for my $i ( 0 .. ( @{$shape} / 2 - 1 ) ) {
+#					my $range =
+#					  ( "$shape->[2*$i]" eq '1' )
+#					  ? $shape->[ 2 * $i + 1 ]
+#					  : $shape->[ 2 * $i ] . ':' . $shape->[ 2 * $i + 1 ];
+#					push @dims, $range;
+#				}
+#				$dim = ', dimension(' . join( ',', @dims ) . ') ';
+#			}
+#
+#			my $decl = '';
+#			if ($is_par) {
+#				$decl =
+#				  "$type$attr $dim ,parameter :: $var = $val; "
+#				  ; # FIXME: it is possible that $val is a function of another parameter
+#			} else {
+#				$decl = "$type$attr $dim :: $var; ";
+#			}
+#			$decl_line .= $decl;
+#		}
+#		return $decl_line;
+#	} else {
+#
+#		# for Shape, it means they are all empty OR there is just one!
+#		my $dim = '';
+#		if ( @vars == 1 ) {
+#			my $shape = $Sfv->{ $vars[0] }{'Shape'};
+#			if ( @{$shape} ) {
+#				my @dims = ();
+#				for my $i ( 0 .. ( @{$shape} / 2 - 1 ) ) {
+#					my $range =
+#					  ( $shape->[ 2 * $i ] eq '1' )
+#					  ? $shape->[ 2 * $i + 1 ]
+#					  : $shape->[ 2 * $i ] . ':' . $shape->[ 2 * $i + 1 ];
+#					push @dims, $range;
+#				}
+#				$dim = ', dimension(' . join( ',', @dims ) . ') ';
+#			}
+#		}
+#		my $decl_line = $spaces . $type . $attr . $dim;
+#		if ( exists $test{1} ) {
+#			$decl_line .= ' ,parameter :: ' . join( ', ', @var_vals );
+#
+#		} else {
+#			$decl_line .= ' :: ' . join( ', ', @vars );
+#		}
+#		return $decl_line;
+#	}
+#}    # format_f95_multiple_decl()
 
 # -----------------------------------------------------------------------------
 sub format_f95_multiple_var_decls {
-	( my $Sfv, my @vars ) = @_;
+	( my $Sf, my @vars ) = @_;
 
-	my $Sv = $Sfv->{ $vars[0] };
+	my $Sv = $Sf->{'Vars'}{ $vars[0] };
 	if ( not exists $Sv->{'Decl'} ) {
 		print "WARNING: VAR $vars[0] does not exist in format_f95_decl()!\n"
-		  if $W;
+		  if $W;		  
 		croak $vars[0];
+	}
+	my @nvars=();
+	for my $var (@vars) {
+		if (exists $Sf->{'ConflictingLiftedVars'}{$var} ){
+            push @nvars, $Sf->{'ConflictingLiftedVars'}{$var};
+        } else {
+        	push @nvars,$var;
+        }
 	}
 	my $spaces = $Sv->{'Indent'};
 	
@@ -735,7 +745,7 @@ sub format_f95_multiple_var_decls {
 	my $split = 0;
 	if ( !$split ) {
 		for my $var (@vars) {
-			my $shape = $Sfv->{$var}{'Shape'};
+			my $shape = $Sf->{'Vars'}{$var}{'Shape'};
 			if ( @{$shape} > 0 && @vars > 1 ) {
 				$split = 1;
 				last;
@@ -748,9 +758,9 @@ sub format_f95_multiple_var_decls {
 		my $decl_line = $spaces;    #.$Sv->{'Type'}.' :: '.join(', ',@vars);
 		  # What we need to do is split these into separate statements with semicolons
 		for my $var (@vars) {
-
+            my $nvar=shift @nvars;
 			my $dim   = '';
-			my $shape = $Sfv->{$var}{'Shape'};
+			my $shape = $Sf->{'Vars'}{$var}{'Shape'};
 			if ( @{$shape} > 1 ) {
 
 				my @dims = ();
@@ -763,8 +773,8 @@ sub format_f95_multiple_var_decls {
 				}
 				$dim = ', dimension(' . join( ',', @dims ) . ') ';
 			}
-
-			my $decl = "$type$attr $dim :: $var; ";
+            
+			my $decl = "$type$attr $dim :: $nvar; ";
 			$decl_line .= $decl;
 		}
 		return $decl_line;
@@ -773,7 +783,7 @@ sub format_f95_multiple_var_decls {
 		# for Shape, it means they are all empty OR there is just one!
 		my $dim = '';
 		if ( @vars == 1 ) {
-			my $shape = $Sfv->{ $vars[0] }{'Shape'};
+			my $shape = $Sf->{'Vars'}{ $vars[0] }{'Shape'};
 			if ( @{$shape} ) {
 				my @dims = ();
 				for my $i ( 0 .. ( @{$shape} / 2 - 1 ) ) {
@@ -788,7 +798,7 @@ sub format_f95_multiple_var_decls {
 		}
 		my $decl_line =
 		    $spaces . $type . $attr. $dim . ' :: '
-		  . join( ', ', @vars )
+		  . join( ', ', @nvars )
 		  . ' !! Context-free, multi !! ';
 		return $decl_line;
 	}
@@ -850,7 +860,7 @@ sub format_f95_par_decl {
 		croak $var;
 	}
 	
-	# Here we should rename for globals!
+	# Here we should rename for globals!
 	($var, $val) = rename_conflicting_global_pars($stref, $f, $var, $val);
 	my $spaces = $Sv->{'Indent'};
 	
@@ -934,33 +944,40 @@ sub rename_conflicting_vars {
     my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
     my $Sf = $stref->{$sub_or_func_or_inc}{$f};
 	
-	               my @vals= grep {/[a-z]\w*/} split( /\W+/, $expr );     
-#	               print 'VALS: ',join(';',@vals),"\n";         
+    my @vals= grep {/[a-z]\w*/} split( /\W+/, $expr );     
                 my @n_vals=@vals;
                 my $conflict=0;
                 if (@vals) {
                     my $i=0;
                     for my $val (@vals) {
-                    	next if $val eq 'if';
-                    	next if $val eq 'then';
-                    	next if $val eq 'else';
-                    	next if $val eq 'call';
                         $n_vals[$i]=$val;
+                        if ( $val eq 'if' ||
+                           $val eq 'then' ||
+                           $val eq 'else' ||
+                           $val eq 'call'
+                        ) {
+                           #skip 
+                        } else { 
+                        
                         if (exists $Sf->{'ConflictingGlobals'}{$val}) {
-                            print "CONFLICT: $val in $expr ($f)\n";
+                            print "CONFLICT: $val in $expr ($f)\n" if $V;
                             $n_vals[$i]=$Sf->{'ConflictingGlobals'}{$val};
+                            $conflict=1;
                         } elsif (exists $Sf->{'ConflictingLiftedVars'}{$val}) {
-                        	warn "CONFLICT (LIFT): $f: $expr\n";   
+                        	warn "CONFLICT (LIFT): $f: $expr\n" if $V;   
+                        	$n_vals[$i]=$Sf->{'ConflictingLiftedVars'}{$val};
+                        	$conflict=1;
                         } else {
                             for my $inc (keys %{ $Sf->{'Includes'} }) {                                        
                                 if (exists $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$val}) {
-                                    print "CONFLICT (INC): $val in <$expr> ($f), from $inc\n";
+                                    print "CONFLICT (INC): $val in <$expr> ($f), from $inc\n" if $V;
                                     $conflict=1;
                                     $n_vals[$i] = $stref->{'IncludeFiles'}{$inc}{'ConflictingGlobals'}{$val};
                                     last; 
                                 }                    
                             }       
-                        }               
+                        }       
+                        }        
                         $i++;
                     }
                 }
@@ -970,6 +987,6 @@ sub rename_conflicting_vars {
                         $expr=~s/\b$v\b/$nv/;
                     }
                 }   
-                print "EXPR: $expr\n" if $conflict;
+                print "EXPR: $expr\n" if $conflict && $V;
     return 	$expr;  		
 }

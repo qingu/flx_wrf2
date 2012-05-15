@@ -256,8 +256,7 @@ sub refactor_calls_globals {
 #        if ( exists $tags{'Include'} && $firstinc ) {
         	$firstinc =0;
             # First, add addional includes if required
-            ($rlines,$stref) =
-              create_additional_include_statements( $stref, $f, $annline, $rlines );
+            $rlines = create_additional_include_statements( $stref, $f, $annline, $rlines );
             
 ## While we're here, might as well generate the declarations for remapping and reshaping.
 ## If the subroutine contains a call to a function that requires this, of course.

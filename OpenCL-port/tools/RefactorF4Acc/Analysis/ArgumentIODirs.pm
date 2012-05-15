@@ -178,25 +178,20 @@ sub get_iodirs_from_subcall {
 	( my $stref, my $f, my $index, my $annlines ) = @_;
 	
 	my $Sf    = $stref->{'Subroutines'}{$f};
-#	my $tags = ${get_annotated_sourcelines($stref,$f)}[$index][1];
-	my $line = $annlines->[$index][0];
+
+#	my $line = $annlines->[$index][0];
 	my $tags = $annlines->[$index][1];
-#	print Dumper($tags);
+
 	my $name  = $tags->{'SubroutineCall'}{'Name'};			 	
 	my $Sname = $stref->{'Subroutines'}{$name};
-#	print "get_iodirs_from_subcall() for $name in $f\n";
-#	print Dumper( $Sname->{ 'RefactoredArgs' } );
     if (not exists $tags->{'SubroutineCall'} or not exists $tags->{'SubroutineCall'}{'RefactoredArgs'}) {
-#    	warn "ASSUMING call to $name in $f has NO RefactoredArgs\n";
        $stref = refactor_subroutine_call_args( $stref, $f, $index );
     } 
-#print "CALL TO $name in $f:".Dumper( $Sname->{ 'RefactoredArgs' })   if $name=~/interpol_all/;	
 	my $args = $Sf->{'RefactoredArgs'}{'Set'};
 	my $called_arg_iodirs = {};
 
 	# Now get the RefactoredArgs
 	my $ref_call_args =
-#	  $Sf->{'Info'}->[$index]{'SubroutineCall'}{'RefactoredArgs'};
 	  $tags->{'SubroutineCall'}{'RefactoredArgs'};
     # Get the RefactoredArgs List for the signature
 	my $ref_sig_args = $Sname->{'RefactoredArgs'}{'List'};
@@ -208,12 +203,8 @@ sub get_iodirs_from_subcall {
 #	    $Sname->{'RefactoredArgs'}={};
 #	    $Sname->{'RefactoredArgs'}{'List'}=$Sname->{'Args'};
 #    }
-#	#               print " SIG $name: ",join(',',@{ $ref_sig_args })."\n";
 	my $ca = scalar( @{$ref_call_args} );
 	my $sa = scalar( @{$ref_sig_args} );
-#	if ($name eq 'calcfluxes') {
-#		die Dumper($Sname);
-#	}
 	if ( $ca != $sa ) {
         print "WARNING ($f): NOT SAME LENGTH! ($ca<>$sa)\n" if $W;
 		print "\n$f".'->'.$name.":\nCALL:".Dumper( $ref_call_args )."\nSIG:". Dumper( $ref_sig_args )."\n";

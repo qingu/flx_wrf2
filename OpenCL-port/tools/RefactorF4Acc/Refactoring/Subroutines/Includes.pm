@@ -56,28 +56,28 @@ sub create_additional_include_statements {
 #   local $V=1;
     my $Sf        = $stref->{'Subroutines'}{$f};    
         # Which child has RefactorGlobals==1?
-    my @additional_includes=();
-    $Sf->{'LiftedIncludes'} =[];
-    for my $cs (keys %{ $Sf->{'CalledSubs'} }) {             
-        if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
-            for my $inc (keys %{ $stref->{'Subroutines'}{$cs}{'CommonIncludes'} }) {
-                if (not exists $Sf->{'Includes'}{$inc} and $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common') {
-                    push @additional_includes, $inc;
-	            push @{ $Sf->{'LiftedIncludes'} }, $inc;
-                } 
-            }
-        }
-    }        
+#    my @additional_includes=();
+#    $Sf->{'LiftedIncludes'} =[];
+#    for my $cs (keys %{ $Sf->{'CalledSubs'} }) {             
+#        if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
+#            for my $inc (keys %{ $stref->{'Subroutines'}{$cs}{'CommonIncludes'} }) {
+#                if (not exists $Sf->{'Includes'}{$inc} and $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common') {
+#                    push @additional_includes, $inc;
+#	            push @{ $Sf->{'LiftedIncludes'} }, $inc;
+#                } 
+#            }
+#        }
+#    }        
     
     my $tags_lref = $annline->[1];
-    for my $inc (@additional_includes) {
+    for my $inc (@{ $Sf->{'LiftedIncludes'} }) {
             print "INFO: instantiating merged INC $inc in $f\n" if $V;
             my $rline = "      include '$inc'";
             $tags_lref->{'Include'}{'Name'} = $inc;
             push @{$rlines}, [ $rline, $tags_lref ];                    
     }
 #croak "FIXME: INCLUDE _AFTER_ OTHER INCLUDES!!!";
-    return ($rlines,$stref);
+    return $rlines;
 }    # END of create_additional_include_statements()
 
 # --------------------------------------------------------------------------------

@@ -29,7 +29,7 @@ use Exporter;
 );
 
 sub analyse_all {
-	print "ANALYSE ALL SOURCES\n" ;#if $V;
+	print "ANALYSE ALL SOURCES\n" if $V;
 	(my $stref, my $subname)=@_;
 	   # Find the root for each include in a proper way
     $stref = find_root_for_includes( $stref, $subname );
