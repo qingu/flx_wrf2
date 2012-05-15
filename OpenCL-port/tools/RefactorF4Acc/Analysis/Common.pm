@@ -1,7 +1,8 @@
-package RefactorF4Acc::Analysis::LoopsBreaks;
+package RefactorF4Acc::Analysis::Common;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
+use RefactorF4Acc::Analysis::Globals qw( lift_includes );
 # 
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
 #   
@@ -18,9 +19,9 @@ use Data::Dumper;
 
 use Exporter;
 
-@RefactorF4Acc::Analysis::LoopsBreaks::ISA = qw(Exporter);
+@RefactorF4Acc::Analysis::Common::ISA = qw(Exporter);
 
-@RefactorF4Acc::Analysis::LoopsBreaks::EXPORT = qw(
+@RefactorF4Acc::Analysis::Common::EXPORT = qw(
     &analyse_sources
 );
 
@@ -41,6 +42,9 @@ sub analyse_sources {
         } else {
             print "INFO: Subroutine $f is never called, skipping analysis\n"
               if $I;
+        }
+        if (defined $Sf->{'RefactorGlobals'} && $Sf->{'RefactorGlobals'}==2) {
+        	$stref=lift_includes($stref,$f);
         }
     }
     for my $f ( keys %{ $stref->{'Functions'} } ) {

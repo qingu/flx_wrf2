@@ -22,6 +22,7 @@ use Exporter;
 
 @RefactorF4Acc::Analysis::Globals::EXPORT = qw(
     &resolve_globals
+    &lift_includes
 );
 
 
@@ -296,3 +297,32 @@ sub look_for_variables {
 }    # END of look_for_variables()
 
 # -----------------------------------------------------------------------------
+# Only to be called for subs with RefactorGlobals == 2
+sub lift_includes {
+    ( my $stref, my $f) = @_;
+    my $Sf = $stref->{'Subroutines'}{$f};    
+        # Which child has RefactorGlobals==1?    
+    $Sf->{'LiftedIncludes'} =[]; # We will use this to create the additional include statements
+    for my $cs (keys %{ $Sf->{'CalledSubs'} }) {             
+        if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
+            for my $inc (keys %{ $stref->{'Subroutines'}{$cs}{'CommonIncludes'} }) {
+                if (not exists $Sf->{'Includes'}{$inc} and $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common') {
+#                	print "LIFTED $inc\n";                	        
+                    push @{ $Sf->{'LiftedIncludes'} }, $inc;
+                } 
+            }
+        }
+    }            
+    # Once we know the includes, we can check for conflicts.
+    for my $var (keys %{ $Sf->{'Vars'} }) {
+#    	print "$f: VAR $var\n"; 
+        for my $lifted_inc ( @{ $Sf->{'LiftedIncludes'} } ) {
+            if (exists $stref->{'IncludeFiles'}{$lifted_inc}{'Vars'}{$var}) {
+            	$Sf->{'ConflictingLiftedVars'}{$var}=1;
+            	print "lift_includes( $f ): $var CONFLICT with $lifted_inc\n";
+            	last;
+            }
+        }
+    }
+    return $stref;
+}    # END of create_additional_include_statements()

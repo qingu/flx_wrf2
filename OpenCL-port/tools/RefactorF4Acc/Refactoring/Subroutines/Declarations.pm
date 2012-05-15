@@ -38,7 +38,7 @@ Subroutines
 sub create_refactored_vardecls {
 	
     ( my $stref, my $f, my $annline, my $rlines, my $is_C_target ) = @_; 
-local $V=1;
+#local $V=1;
     print "create_refactored_vardecls( $f )\n" if $V;
 #    die "Bug to be fixed: applying context-free refactoring breaks the next stage!";
     my $Sf        = $stref->{'Subroutines'}{$f};

@@ -20,7 +20,7 @@ use Exporter;
 
 @RefactorF4Acc::Refactoring::Subroutines::Includes::ISA = qw(Exporter);
 
-@RefactorF4Acc::Refactoring::Subroutines::Includes::EXPORT = qw(
+@RefactorF4Acc::Refactoring::Subroutines::Includes::EXPORT_OK = qw(
     &skip_common_include_statement
     &create_new_include_statements
     &create_additional_include_statements
