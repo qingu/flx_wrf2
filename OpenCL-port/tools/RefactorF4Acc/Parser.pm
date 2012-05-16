@@ -1081,6 +1081,7 @@ my $show=0;
 					$cont     = 1;
 					$prevline = $line;
 				}
+				# Continuation line handling for free form
 				if ( $free_form == 1 && $cont == 1 and $line !~ /^\!\s/ ) {
 					if ( $line =~ /^\s*\&/ ) {
 						$line =~ s/^\s*\&\s*/ /;
@@ -1093,6 +1094,7 @@ my $show=0;
 					}
 				}
 
+				# Continuation line handling for fixed form
 				if ( $free_form == 0 && $line =~ /^\ {5}[^0\s]/ )
 				{   # continuation line. Continuation character can be anything!
 					$line =~ s/^\s{5}.\s*/ /;
@@ -1115,10 +1117,10 @@ my $show=0;
 					# A comment occuring after a continuation line. Skip!
 					next;
 				} else {
-
-					#                    warn "HERE: $line";
+					# Not a continuation line
 					my $sixspaces = ' ' x 6;
 					$prevline =~ s/^\t/$sixspaces/;
+# Label reformatting
 					$prevline =~ /^(\d+)\t/ && do {
 						my $label  = $1;
 						my $ndig   = length($label);
@@ -1133,7 +1135,7 @@ my $show=0;
 						my $str    = $label . $indent;
 						$prevline =~ s/^(\d+)\s+/$str/;
 					};
-
+# We want to replace quoted strings by placeholders, but not for comments or include statements
 					if ( substr( $prevline, 0, 2 ) ne '! ' ) {
 						if ( $prevline !~ /^\s+include\s+\'/i ) {
 
@@ -1147,20 +1149,20 @@ my $show=0;
 								$ct++;
 							}
 						}
-
-	# remove trailing comments
-	#                  ( $prevline, my $comment ) = split( /\s+\!/, $prevline );
 					}
+# Convert to lowercase
 					my $lcprevline =
 					  ( substr( $prevline, 0, 2 ) eq '! ' )
 					  ? $prevline
 					  : lc($prevline);
+# But turn placeholders back to uppercase
 					$lcprevline =~ s/__ph(\d+)__/__PH$1__/g;
                     if ($show) {
                     	warn "LINE: $line\n";
                      warn "PREVLINE: $lcprevline\n";
                     }
 					push @{$lines}, $lcprevline;
+# Stash placeholders
 					push @placeholders_per_line, [@phs];
 					@phs      = ();
 					$prevline = $line;
@@ -1188,6 +1190,7 @@ my $show=0;
 
 				# the last line was already appended to the previous line!
 			} else {
+# FIXME: should this not be '! ' ?
 				my $lcline =
 				  ( substr( $line, 0, 2 ) eq 'C ' ) ? $line : lc($line);
 				push @{$lines}, $lcline;
@@ -1195,7 +1198,7 @@ my $show=0;
 			push @placeholders_per_line, [];
 			push @placeholders_per_line, [];
 			close $SRC;
-
+# Now we parse in a 2nd step and store in the State
 			my $name = 'NONE';
 			my $ok   = 0;
 			if ($is_incl) {
@@ -1230,12 +1233,9 @@ my $show=0;
 						$info = { 'SubroutineSig' => 1 };
 					}
 
-					#                   warn "\t$name\n";
 					$ok                                       = 1;
 					$index                                    = 0;
 					$stref->{$sub_func_incl}{$name}{'Status'} = $READ;
-
-		#                   $stref->{$sub_func_incl}{$name}{'HasBlocks'}    = 0;
 					$stref->{$sub_func_incl}{$name}{'StringConsts'} =
 					  \%strconsts
 					  ; # Means we have all consts in the file, not just the sub, but who cares?
@@ -1245,9 +1245,6 @@ my $show=0;
 					if ( $line =~ /^\!/ ) {
 						$info->{'Comments'} = 1;
 						$annlineref = [ $line, $info ];
-
-				#                        $stref->{$sub_func_incl}{$name}{'Info'}
-				#                          ->[$index]{'Comments'} = {};
 					} else {
 						if ( @{$phs_ref} ) {
 							$info->{'PlaceHolders'} = $phs_ref;
@@ -1258,10 +1255,6 @@ my $show=0;
 					}
 					push @{ $stref->{$sub_func_incl}{$name}{'AnnLines'} },
 					  $annlineref;
-
-		#                    $stref->{$sub_func_incl}{$name}{'Info'}->[$index] =
-		#                      { 'PlaceHolders' => $phs_ref }
-
 					$index++;
 				}
 
