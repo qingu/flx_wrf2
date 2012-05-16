@@ -49,11 +49,22 @@ sub find_subroutines_functions_and_includes {
     		
 #    		die; 
     	}
+	my $srctype=''; # sub, func or incl
+	my $f=''; # name of the entity
+	my $has_blocks=0;
         open my $SRC, '<', $src;
         while ( my $line = <$SRC> ) {
 
             # Skip blanks
             $line =~ /^\s*$/ && next;
+
+	    # Detect blocks
+            if ( $has_blocks == 0 ) {
+            	if ( $line =~ /^[Cc\*\!]\s+BEGIN\sSUBROUTINE\s(\w+)/ 
+		or $line =~ /^\!\s\$acc\ssubroutine\s(\w+)/i ){
+                        $has_blocks = 1;
+                }
+            }
 
             # Detect and standardise comments
             $line =~ /^[C\*\!]/i && next;
@@ -65,6 +76,8 @@ sub find_subroutines_functions_and_includes {
                     print "Found program $2 in $src\n" if $V;
                 }                
                 my $sub  = lc($2);
+		$f=$sub;
+		$srctype='Subroutines';
                 $stref->{'Subroutines'}{$sub}={};
                 my $Ssub = $stref->{'Subroutines'}{$sub};
                 if (
@@ -101,6 +114,8 @@ sub find_subroutines_functions_and_includes {
                 my $inc = $1;
                 if ( not exists $stref->{'IncludeFiles'}{$inc} ) {
                     $stref->{'IncludeFiles'}{$inc}{'Status'} = $UNREAD;
+		    $f=$inc;
+		    $srctype='IncludeFiles';
                 }
             };
 
@@ -109,10 +124,13 @@ sub find_subroutines_functions_and_includes {
                 my $func = lc($1);
                 $stref->{'Functions'}{$func}{'Source'} = $src;
                 $stref->{'Functions'}{$func}{'Status'} = $UNREAD;
+		$f=$func;
+		$srctype='Functions';
             };
 
         }
         close $SRC;
     }
+    $stref->{$srctype}{$f}{'HasBlocks'}=$has_blocks;
     return $stref;
 }    # END of find_subroutines_functions_and_includes()

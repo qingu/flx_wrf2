@@ -1305,7 +1305,7 @@ sub read_fortran_src_better {
             my @lines = <$SRC>;
             close $SRC;
             my @newlines=();
-            $stref = testFreeForm_Blocks($stref,$s,@lines);
+            $stref = testFreeForm($stref,$s,@lines);
             my $free_form=$stref->{$sub_func_incl}{$s}{'FreeForm'};
             if ($free_form) {
                 while (@lines) {                
@@ -1380,40 +1380,33 @@ sub read_fortran_src_better {
     return $stref;
 }    # END of read_fortran_src_better()
 # -----------------------------------------------------------------------------
-sub testFreeForm_Blocks { (my $stref, my $s,my @lines)=@_;
+sub testFreeForm{ (my $stref, my $s,my @lines)=@_;
 	my $sub_func_incl = sub_func_or_incl( $s, $stref );
 	my $free_form=0;
-	my $has_blocks=0;
 	for my $line (@lines) {
         chomp $line;
 
                 # Skip blanks
                 $line =~ /^\s*$/ && next;
                 
-                # Detect blocks
-                if ( $has_blocks == 0 ) {
-                    if ( $line =~ /^\!\s+BEGIN\sSUBROUTINE\s(\w+)/ ) {
-                        $has_blocks = 1;
-                    }
-                }
-
 # If it's not a comment and we still have to check if it's fixed or free form
 # Testing a single line is maybe not enough, it might be 6-space by coincidence ...
 # The real test is on continuation lines
                    
                     if ( $line !~ /^[\s\d]{6}.+/ and $line !~ /^\t\w/ ) {
                         $free_form = 1;                                                
+			last;
                     } 
                
                 if ( $free_form == 0 && $line =~ /\&\s*$/ ) {
                     $free_form = 1;
-                   
+		    last; 
                 }
 	}
-	$stref->{$sub_func_incl}{$s}{'HasBlocks'}=$has_blocks;
 	$stref->{$sub_func_incl}{$s}{'FreeForm'}=$free_form;
 	return $stref ;
 }
+# -----------------------------------------------------------------------------
 sub isCont {
 	
 }
