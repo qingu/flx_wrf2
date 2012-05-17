@@ -10,7 +10,7 @@ $VERSION = "1.0.0";
 
 use warnings;
 use strict;
-
+use Data::Dumper;
 use Exporter;
 
 @RefactorF4Acc::Inventory::ISA = qw(Exporter);
@@ -22,6 +22,11 @@ use Exporter;
 use File::Find;
 
 # Find all source files in the current directory
+# The files are parsed to determine the following information:
+# Subroutines, Functions or IncludeFile
+# Fortran style: FStyle
+# Free or fixed form: FreeForm
+# Are there blocks to be refactored: HasBlocks
 sub find_subroutines_functions_and_includes {	
     my $stref = shift;
     my $dir   = '.';
@@ -52,6 +57,9 @@ sub find_subroutines_functions_and_includes {
 	my $srctype=''; # sub, func or incl
 	my $f=''; # name of the entity
 	my $has_blocks=0;
+	my $free_form=0;
+	my $fstyle='F77';	
+	
         open my $SRC, '<', $src;
         while ( my $line = <$SRC> ) {
 
@@ -66,9 +74,29 @@ sub find_subroutines_functions_and_includes {
                 }
             }
 
-            # Detect and standardise comments
-            $line =~ /^[C\*\!]/i && next;
-
+            # Skip comments 
+            $line =~ /^\s*[C\*\!]/i && next;
+            
+        # Tests for free or fixed form
+        if ($free_form==0) {
+            if ( $line !~ /^[\s\d]{5}.+/ and $line !~ /^\t[\t\s]*\w/ and $line !~/^\s+\t/) {
+                $free_form = 1;       die $line,$src;                                                     
+            } 
+               
+            if ($line =~ /\&\s*$/ ) {
+                    $free_form = 1;          
+            }
+        }   
+        # Tests for F77 or F95
+        if ($fstyle eq 'F77') {
+            if ( $line =~ /\bmodule\b/i ) { 
+                    $fstyle='F95';
+            } elsif ( $line =~ /^\s*(.*)\s*::\s*(.*?)\s*$/ ) {
+                 $fstyle='F95';
+            }
+        }
+        
+             
             # Find subroutine/program signatures
             $line =~ /^\s*(subroutine|program)\s+(\w+)/i && do {            	
                 my $is_prog = ($1 eq 'program') ? 1 : 0;
@@ -120,17 +148,23 @@ sub find_subroutines_functions_and_includes {
             };
 
             # Find function signatures
-            $line =~ /^\s*\w*\s+function\s+(\w+)/i && do {
-                my $func = lc($1);
+            $line =~ /\bfunction\s+(\w+)/i && do {
+                my $func = lc($1);               
                 $stref->{'Functions'}{$func}{'Source'} = $src;
                 $stref->{'Functions'}{$func}{'Status'} = $UNREAD;
-		$f=$func;
-		$srctype='Functions';
+		          $f=$func;
+		          $srctype='Functions';
             };
+            
+            $stref->{$srctype}{$f}{'Fstyle'}=$fstyle;
+            $stref->{$srctype}{$f}{'FreeForm'}=$free_form;  
+            $stref->{$srctype}{$f}{'HasBlocks'}=$has_blocks;
 
         }
+            
         close $SRC;
     }
-    $stref->{$srctype}{$f}{'HasBlocks'}=$has_blocks;
+    
+
     return $stref;
 }    # END of find_subroutines_functions_and_includes()
