@@ -35,15 +35,16 @@ use Exporter;
 # All that should happen in a separate pass. But we do it here anyway
 sub parse_fortran_src {
 	( my $f, my $stref ) = @_;
-
+    local $V=1;
 	#	local $V=1 if $f eq 'particles_main_loop';
-	print "PARSING $f\n " if $V;
+	print "parse_fortran_src(): PARSING $f\n " if $V;
 
 	# 1. Read the source and do some minimal processsing
 	$stref = read_fortran_src_better( $f, $stref );
 	
 	
 	my $sub_or_func = sub_func_or_incl( $f, $stref );
+	print "SRC TYPE: $sub_or_func\n" if $V;
 	my $Sf          = $stref->{$sub_or_func}{$f};
 
 	$Data::Dumper::Indent = 1;
@@ -358,10 +359,11 @@ sub analyse_lines {
 # If the include was not yet read, do it now.
 sub parse_includes {
 	( my $f, my $stref ) = @_;
-	print "PARSING INCLUDES for $f\n" if $V;
+	local $V=1;
+	
 	my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
 	my $Sf                 = $stref->{$sub_or_func_or_inc}{$f};
-
+print "PARSING INCLUDES for $f ($sub_or_func_or_inc)\n" if $V;
 	my $srcref       = $Sf->{'AnnLines'};
 	my $last_inc_idx = 0;
 	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
@@ -1320,7 +1322,7 @@ sub read_fortran_src {
 # -----------------------------------------------------------------------------
 sub read_fortran_src_better {
 	( my $s, my $stref ) = @_;
-	my $show    = 0;
+#	my $show    = 0;
 	my $is_incl = exists $stref->{'IncludeFiles'}{$s} ? 1 : 0;
 
 	my $sub_func_incl = sub_func_or_incl( $s, $stref );
@@ -1334,7 +1336,7 @@ sub read_fortran_src_better {
 			$ok = 0;
 		};
 		if ($ok) {
-			print "READING SOURCE for $f ($sub_func_incl)\n" if $V;
+			print "READING SOURCE for $f ($s, $sub_func_incl)\n" if $V;
 
 			my $line       = '';
 			my $nextline   = '';
@@ -1350,9 +1352,10 @@ sub read_fortran_src_better {
 
 			#            $stref = testFreeForm($stref,$s,@lines);
 			my $free_form = $stref->{$sub_func_incl}{$s}{'FreeForm'};
-			my $srctype='';
-			my $f=''; 
+			my $srctype=$sub_func_incl;
+#			my $f=''; 
 			if ($free_form) {
+				croak "BROKEN! Must be reworked like fixed form below";
 				while (@lines) {
 					if ($next2) {
 						$line = shift @lines;						
@@ -1402,16 +1405,17 @@ sub read_fortran_src_better {
 						# +? line
 						# +  nextline
 						if ($joinedline ne '' and not isCont($line, $free_form ) and not isCommentOrBlank($line) ) {
-                            my $pline = procLine( $joinedline, $free_form );
-                            if ( exists $pline->[1]{'SubroutineSig'} ) {
-                            	$srctype='Subroutines';
-                            	$f=$pline->[1]{'SubroutineSig'};                            	
-                            } elsif (exists $pline->[1]{'FunctionSig'} ) {
-                            	$srctype='Functions';
-                            	$f=$pline->[1]{'FunctionSig'};
-                            }
-                            push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
-                            print "PUSH7: $pline->[0]\n";
+#                            my $pline = procLine( $joinedline, $free_form );
+#                            if ( exists $pline->[1]{'SubroutineSig'} ) {
+#                            	$srctype='Subroutines';
+#                            	$f=$pline->[1]{'SubroutineSig'};                            	
+#                            } elsif (exists $pline->[1]{'FunctionSig'} ) {
+#                            	$srctype='Functions';
+#                            	$f=$pline->[1]{'FunctionSig'};
+#                            }
+#                            push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
+#                            print "PUSH7: $pline->[0]\n";
+                            ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
                             $joinedline='';
                         }
 						print "STASH1 $line";
@@ -1427,9 +1431,10 @@ sub read_fortran_src_better {
 			 #   nextline -> could be a split line, unless it's a blank or a comment
 			            print "STASH2 $line";
 						$joinedline .= removeCont( $line, $free_form );
-						my $pline = procLine( $joinedline, $free_form );
-						push @newlines, $pline;
-						print "PUSH2: $pline->[0]\n";
+#						my $pline = procLine( $joinedline, $free_form );
+#						push @newlines, $pline;
+#						print "PUSH2: $pline->[0]\n";
+						($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
 						$joinedline = '';
 #						if ( not isCommentOrBlank( $nextline, $free_form ) ) {
 							$line  = $nextline;
@@ -1445,32 +1450,36 @@ sub read_fortran_src_better {
 			   if ($joinedline ne '' and not isCommentOrBlank($nextline) ) { # FIXME: still weak: if there are a lot of comments in a broken-up line, 
 			   # it could be that we still get a continuation. 
 			   	print "ACC2 $joinedline\n";
-			   	        my $pline = procLine( $joinedline, $free_form );
-                        push @newlines, $pline;
-                        print "PUSH6: $pline->[0]\n";
+#			   	        my $pline = procLine( $joinedline, $free_form );
+#                        push @newlines, $pline;
+#                        print "PUSH6: $pline->[0]\n";
+                        ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
                         $joinedline='';
 			   }
-						my $pline = procLine( $line, $free_form );
-						push @newlines, $pline;
-						print "PUSH4: $pline->[0]\n";
+#						my $pline = procLine( $line, $free_form );
+#						push @newlines, $pline;
+#						print "PUSH4: $pline->[0]\n";
+						($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$line, $free_form);
 						if ( not isCommentOrBlank( $nextline, $free_form ) ) {
 							$line  = $nextline;
 							$next2 = 0;
 						} else {
-							my $pline = procLine( $nextline, $free_form );
-							push @newlines, $pline;
-							print "PUSH5: $pline->[0]\n";
+#							my $pline = procLine( $nextline, $free_form );
+#							push @newlines, $pline;
+#							print "PUSH5: $pline->[0]\n";
+                            ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$nextline, $free_form);
 						}
 					}
 				}
 				if ($joinedline ne '') {
-					   my $pline = procLine( $joinedline, $free_form );
-                            push @newlines, $pline;
-                            print "PUSH9: $pline->[0]\n";
+#					   my $pline = procLine( $joinedline, $free_form );
+#                            push @newlines, $pline;
+#                            print "PUSH9: $pline->[0]\n";
+                        ($stref,$f,$srctype) = pushAnnLine($stref,$f,$srctype,$joinedline, $free_form);                            
 				}
-				croak "Fatal flaw: need to separate out per sub/func!!";
+#				croak "Fatal flaw: need to separate out per sub/func!!";
 			}    # free form or not
-			$stref->{$sub_func_incl}{$s}{'AnnLines'} = [@newlines];
+#			$stref->{$sub_func_incl}{$s}{'AnnLines'} = [@newlines];
 		}    # if OK
 	}    # if Status==0
 
@@ -1489,8 +1498,8 @@ sub pushAnnLine {
         $f=$pline->[1]{'FunctionSig'};
     }
     push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
-    print "PUSH7: $pline->[0]\n";
-	return $stref	
+    print "PUSH: {$srctype}{$f}{'AnnLines'} $pline->[0]\n";
+	return ($stref,$f,$srctype);	
 }
 #sub testFreeForm{ (my $stref, my $s,my @lines)=@_;
 #	my $sub_func_incl = sub_func_or_incl( $s, $stref );
