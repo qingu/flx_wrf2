@@ -1350,7 +1350,8 @@ sub read_fortran_src_better {
 
 			#            $stref = testFreeForm($stref,$s,@lines);
 			my $free_form = $stref->{$sub_func_incl}{$s}{'FreeForm'};
-			 
+			my $srctype='';
+			my $f=''; 
 			if ($free_form) {
 				while (@lines) {
 					if ($next2) {
@@ -1402,7 +1403,14 @@ sub read_fortran_src_better {
 						# +  nextline
 						if ($joinedline ne '' and not isCont($line, $free_form ) and not isCommentOrBlank($line) ) {
                             my $pline = procLine( $joinedline, $free_form );
-                            push @newlines, $pline;
+                            if ( exists $pline->[1]{'SubroutineSig'} ) {
+                            	$srctype='Subroutines';
+                            	$f=$pline->[1]{'SubroutineSig'};                            	
+                            } elsif (exists $pline->[1]{'FunctionSig'} ) {
+                            	$srctype='Functions';
+                            	$f=$pline->[1]{'FunctionSig'};
+                            }
+                            push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
                             print "PUSH7: $pline->[0]\n";
                             $joinedline='';
                         }
@@ -1470,6 +1478,20 @@ sub read_fortran_src_better {
 }    # END of read_fortran_src_better()
 
 # -----------------------------------------------------------------------------
+sub pushAnnLine {
+	(my $stref, my $f, my $srctype,my $line, my $free_form)=@_;
+	my $pline = procLine( $line, $free_form );
+    if ( exists $pline->[1]{'SubroutineSig'} ) {
+        $srctype='Subroutines';
+        $f=$pline->[1]{'SubroutineSig'};                                
+    } elsif (exists $pline->[1]{'FunctionSig'} ) {
+        $srctype='Functions';
+        $f=$pline->[1]{'FunctionSig'};
+    }
+    push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
+    print "PUSH7: $pline->[0]\n";
+	return $stref	
+}
 #sub testFreeForm{ (my $stref, my $s,my @lines)=@_;
 #	my $sub_func_incl = sub_func_or_incl( $s, $stref );
 #	my $free_form=0;
@@ -1516,7 +1538,6 @@ sub isCont {
 	}
 	return $is_cont;
 }
-
 # -----------------------------------------------------------------------------
 sub removeCont {
 	( my $line, my $free_form ) = @_;
@@ -1565,7 +1586,10 @@ sub removeCont {
 }
 
 # -----------------------------------------------------------------------------
-
+sub isSubOrFunc { (my $line)=@_;
+	
+}
+# -----------------------------------------------------------------------------
 =pod
  What we do is:
  - reformat lines with labels
@@ -1643,9 +1667,9 @@ sub procLine {
                     my $name = $2;
 
                     if ( $keyword =~ /function/ ) {                        
-                        $info-> { 'FunctionSig'} = 1;
+                        $info-> { 'FunctionSig'} = $name;
                     } else {                        
-                        $info ->{ 'SubroutineSig'} = 1 ;
+                        $info ->{ 'SubroutineSig'} = $name ;
                     }
 
 		} else {
