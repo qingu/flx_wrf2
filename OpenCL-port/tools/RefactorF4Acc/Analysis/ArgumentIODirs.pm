@@ -207,6 +207,7 @@ sub get_iodirs_from_subcall {
 	my $sa = scalar( @{$ref_sig_args} );
 	if ( $ca != $sa ) {
         print "WARNING ($f): NOT SAME LENGTH! ($ca<>$sa)\n" if $W;
+        print Dumper( $stref->{'Subroutines'}{$name}{'AnnLines'}),"\n";
 		print "\n$f".'->'.$name.":\nCALL:".Dumper( $ref_call_args )."\nSIG:". Dumper( $ref_sig_args )."\n";
         croak;
 	} else {

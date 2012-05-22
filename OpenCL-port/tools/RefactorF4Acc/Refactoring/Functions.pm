@@ -39,9 +39,11 @@ sub refactor_called_functions {
 
     for my $f ( keys %{ $stref->{'Functions'} } ) {
         my $Ff = $stref->{'Functions'}{$f};
-        if ( defined $Ff->{'Called'} ) {        	
+        if ( defined $Ff->{'Called'} ) { # FIXME: This test is weak because the caller might not be called itself!
+        if (reallyCalled($stref,$f)) {        
             $stref = refactor_function( $f, $stref );
             $stref = create_refactored_source($stref, $f);
+        }
         } 
     }
     return $stref;
@@ -70,3 +72,9 @@ sub refactor_function {
 
 }    # END of refactor_function()
 # -----------------------------------------------------------------------------
+sub reallyCalled {
+	( my $stref, my $f ) = @_;
+	my $really_called=1;
+	
+	return $really_called;	
+}

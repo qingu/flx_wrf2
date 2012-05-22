@@ -156,7 +156,7 @@ sub find_subroutines_functions_and_includes {
 		          $srctype='Functions';
             };
             
-            $stref->{$srctype}{$f}{'Fstyle'}=$fstyle;
+            $stref->{$srctype}{$f}{'FStyle'}=$fstyle;
             $stref->{$srctype}{$f}{'FreeForm'}=$free_form;  
             $stref->{$srctype}{$f}{'HasBlocks'}=$has_blocks;
 

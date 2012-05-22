@@ -62,7 +62,7 @@ sub context_free_refactorings {
 	my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
 	my $Sf = $stref->{$sub_or_func_or_inc}{$f};
 	if ( $Sf->{'Status'} != $PARSED ) {
-		croak caller;
+		croak "NOT PARSED: $f\n".caller()."\n";
 	}
 	my $annlines = get_annotated_sourcelines( $stref, $f );
 	
@@ -133,9 +133,9 @@ sub context_free_refactorings {
 			# $line=~s/goto\s+(\d+)/call break($1)/;
 		}
 		if ( exists $tags{'PlaceHolders'} ) {
-			my @phs = @{ $tags{'PlaceHolders'} };
-			for my $ph (@phs) {
-				my $str = $Sf->{'StringConsts'}{$ph};
+			
+			for my $ph (keys %{ $tags{'PlaceHolders'} }) {
+				my $str = $tags{'PlaceHolders'}->{$ph};
 				$line =~ s/$ph/$str/;
 			}
 		}
@@ -504,7 +504,8 @@ sub get_annotated_sourcelines {
 		warn "get_annotated_sourcelines( $f ) \n";
 		warn "STATUS: $Sf->{'Status'} \n";
 		warn Dumper($Sf);
-		die caller;
+		croak "$f NOT PARSED";
+		die "\n",caller,"\n";
 	}
 	return $annlines;
 }    # END of get_annotated_sourcelines()
@@ -855,19 +856,25 @@ sub format_f95_par_decl {
     my $Sf = $stref->{$sub_or_func_or_inc}{$f};	
 	my $val = $Sf->{'Parameters'}{$var}{'Val'};
 	my $Sv  = $Sf->{'Vars'}{$var};
+	my $local_par=0;
 	if ( not exists $Sv->{'Decl'} ) {
-		print "WARNING: VAR $var does not exist in format_f95_decl()!\n" if $W;
-		croak $var;
+		print "WARNING: PAR $var is probably local to $f in format_f95_par_decl()!\n" if $W;
+		$local_par=1;
+#		croak $var;
+        $Sv->{'Type'} = $Sf->{'Parameters'}{$var}{'Type'};
+        $Sv->{'Indent'} = ' ' x 6;
+        $Sv->{'Shape'} = [1,1];
+        $Sv->{'Attr'}='';
 	}
 	
 	# Here we should rename for globals!
 	($var, $val) = rename_conflicting_global_pars($stref, $f, $var, $val);
-	my $spaces = $Sv->{'Indent'};
+	my $spaces = $Sv->{'Indent'} ;
 	
 
 	# FIXME: for multiple vars, we need to split this in multiple statements.
 	# So I guess as soon as the Shape is not empty, need to split.
-	my $shape = $Sv->{'Shape'};
+	my $shape = $Sv->{'Shape'} ;
 	die Dumper($shape) if join( '', @{$shape} ) =~ /;/;
 	my $dim = '';
 	if ( @{$shape} ) {
@@ -890,6 +897,9 @@ sub format_f95_par_decl {
 	  . $val;
 
 	#    die $decl_line  if $dim;
+	if ($local_par) {
+		print "WARNING: LOCAL PAR: $decl_line\n" if $W;  
+	}
 	return $decl_line;
 }    # format_f95_decl()
 

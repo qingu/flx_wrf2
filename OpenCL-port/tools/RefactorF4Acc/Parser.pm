@@ -5,6 +5,7 @@ use RefactorF4Acc::Utils;
 use RefactorF4Acc::CallGraph qw ( add_to_call_tree );
 use RefactorF4Acc::Refactoring::Common
   qw( format_f95_var_decl format_f77_var_decl );
+use RefactorF4Acc::Parser::SrcReader qw( read_fortran_src );
 
 #
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
@@ -35,25 +36,22 @@ use Exporter;
 # All that should happen in a separate pass. But we do it here anyway
 sub parse_fortran_src {
 	( my $f, my $stref ) = @_;
-    local $V=1;
+#    local $V=1;
 	#	local $V=1 if $f eq 'particles_main_loop';
 	print "parse_fortran_src(): PARSING $f\n " if $V;
 
 	# 1. Read the source and do some minimal processsing
-	$stref = read_fortran_src_better( $f, $stref );
+	$stref = read_fortran_src( $f, $stref );#
 	
-	
+	print "DONE read_fortran_src_better( $f )\n";
 	my $sub_or_func = sub_func_or_incl( $f, $stref );
 	print "SRC TYPE: $sub_or_func\n" if $V;
 	my $Sf          = $stref->{$sub_or_func}{$f};
 
-	$Data::Dumper::Indent = 1;
-	 if ($f eq 'ran1') {
-	 	for my $annline (@{ $Sf->{'AnnLines'} }) {
-	 		print $annline->[0],"\t",join(';',keys %{ $annline->[1] }),"\n";
-	 	}
-	 	die; 
-	 }
+#	 if ($f eq 'calcfluxes') {
+#	 	show( $Sf->{'AnnLines'} ); 
+#	 	die; 
+#	 }
 	my $is_incl     = exists $stref->{'IncludeFiles'}{$f} ? 1 : 0;
 
 	#    my $is_func     = exists $stref->{'Functions'}{$f} ? 1 : 0;
@@ -236,8 +234,30 @@ sub analyse_lines {
 				for my $var (@pvarl) {
 
 					if ( not defined $vars{$var} ) {
-						print "WARNING: PARAMETER $var not declared in $f\n"
+						print "WARNING: PARAMETER $var not declared in $f, trying to infer type\n"
 						  if $W;
+						if (exists $pvars{$var}) {
+							
+                          my $val=$pvars{$var};
+                          if ($val=~/[0-9eE\.\+\-]/) {
+                          	my $type='Unknown';
+                          if ($val=~/\./ or $val=~/e/i) {
+                          	$type = 'real'; # FIXME: could be double!
+                          } else {
+                          	$type = 'integer';
+                          }
+                            $Sf->{'Parameters'}{$var} = {
+                            'Type' => $type,
+                            'Var'  => $var,
+                            'Val'  => $val                            
+                            };
+                            push @{$pars}, $var;
+                          
+                          } else {
+                          	print "WARNING: PARAMETER $var has NON_NUMERIC val $pvars{$var} in $f\n"
+                          if $W;
+                          }
+						}  
 					} else {
 						$Sf->{'Parameters'}{$var} = {
 							'Type' => 'Unknown',
@@ -245,7 +265,6 @@ sub analyse_lines {
 							'Val'  => $pvars{$var}
 						};
 						push @{$pars}, $var;
-
 					}
 				}
 				$info->{'Parameter'} = $pars;
@@ -311,7 +330,7 @@ sub analyse_lines {
 					# make it [$type,$var] ?
 					$vars{$tvar}{'Indent'} = $indent;
 
-					if ( exists $stref->{'Functions'}{$tvar} ) {
+					if ( exists $stref->{'Functions'}{$tvar} and $tvar ne $f) { # FIXME: NO RECURSION!
 
 						$stref->{'Functions'}{$tvar}{'Called'} = 1;
 						$stref->{'Functions'}{$tvar}{'Callers'}{$f}++;
@@ -359,7 +378,7 @@ sub analyse_lines {
 # If the include was not yet read, do it now.
 sub parse_includes {
 	( my $f, my $stref ) = @_;
-	local $V=1;
+#	local $V=1;
 	
 	my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
 	my $Sf                 = $stref->{$sub_or_func_or_inc}{$f};
@@ -630,7 +649,7 @@ sub separate_blocks {
 			$sig .= "$argv,";
 
 			#			my $decl = $vars{$argv}{'Decl'};
-			#print $f,$Sf->{'FStyle'},"\n";
+#			print '<',$f,$Sf->{'FStyle'},">\n";
 			my $decl =
 			  ( $Sf->{'FStyle'} eq 'F77' )
 			  ? format_f77_var_decl( $Sf->{'Vars'}, $argv )
@@ -842,7 +861,10 @@ sub parse_subroutine_and_function_calls {
 					{
 						$Sf->{'CalledFunctions'}{$chunk} = 1;
 						print "FOUND FUNCTION CALL $chunk in $f\n" if $V;
-						if ( $chunk eq $f ) { die $line }
+						if ( $chunk eq $f ) {							
+							show($srcref); 
+							die $line 
+						}
 						$stref->{'Functions'}{$chunk}{'Called'} = 1;
 
 # We need to parse the function to detect called functions inside it, unless that has been done
@@ -1041,7 +1063,7 @@ sub get_commons_params_from_includes {
 # The routine is called by parse_fortran_src()
 # A better way is to extract all subs in a single pass
 # I guess the best wat is to first join the lines, then separate the subs
-sub read_fortran_src {
+sub read_fortran_src_ORIG {
 	( my $s, my $stref ) = @_;
 	my $show    = 0;
 	my $is_incl = exists $stref->{'IncludeFiles'}{$s} ? 1 : 0;
@@ -1317,9 +1339,10 @@ sub read_fortran_src {
 	}    # if Status==0
 
 	return $stref;
-}    # END of read_fortran_src()
+}    # END of read_fortran_src_ORIG()
 
 # -----------------------------------------------------------------------------
+=replaced_by_new_module
 sub read_fortran_src_better {
 	( my $s, my $stref ) = @_;
 #	my $show    = 0;
@@ -1361,8 +1384,8 @@ sub read_fortran_src_better {
 						$line = shift @lines;						
 						# We could skip blank lines here
 						$nextline = shift( @lines) // ''; # '/					
-                } else {
-                   $nextline= shift( @lines) // ''; # '/
+                    } else {
+                        $nextline= shift( @lines) // ''; # '/
 						$next2 = 1;
 					}
 					if ( isCont( $line, $free_form ) ) {
@@ -1383,12 +1406,16 @@ sub read_fortran_src_better {
 				}
 				                if ($joinedline ne '') {
                        my $pline = procLine( $joinedline, $free_form );
-                            push @newlines, $pline;
-                
+                            push @newlines, $pline;                
                 }
 				
-			} else {
+			} else { # Fixed form
+			     my $line_set_to_nextline=0;
+			     my $is_cont=0;
+			     my $maybe_is_cont=0;
+			     my @comments_stack=();
 				while (@lines) {
+					$line_set_to_nextline=0;
 					if ($next2) {
 						$line = shift @lines;
 #						print "LINE: $line";
@@ -1404,79 +1431,73 @@ sub read_fortran_src_better {
 					if ( isCont( $nextline, $free_form ) ) {
 						# +? line
 						# +  nextline
-						if ($joinedline ne '' and not isCont($line, $free_form ) and not isCommentOrBlank($line) ) {
-#                            my $pline = procLine( $joinedline, $free_form );
-#                            if ( exists $pline->[1]{'SubroutineSig'} ) {
-#                            	$srctype='Subroutines';
-#                            	$f=$pline->[1]{'SubroutineSig'};                            	
-#                            } elsif (exists $pline->[1]{'FunctionSig'} ) {
-#                            	$srctype='Functions';
-#                            	$f=$pline->[1]{'FunctionSig'};
-#                            }
-#                            push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
-#                            print "PUSH7: $pline->[0]\n";
-                            ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
-                            $joinedline='';
-                        }
-						print "STASH1 $line";
-						print "STASH1 $nextline";
-						$joinedline .= removeCont( $line, $free_form );
-						$joinedline .= removeCont( $nextline, $free_form );
-                        print "ACC1 $joinedline\n";
+						if (isCommentOrBlank($line) ) {
+							if ($joinedline ne '') {
+                                ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$nextline, $free_form);
+							} else {
+								croak "Continuation without starting line!";
+							}
+						} else {
+    						if (not isCont($line, $free_form )) {
+	       						$joinedline='';
+			     			}
+                               $joinedline .= removeCont( $line, $free_form );
+                                $joinedline .= removeCont( $nextline, $free_form );
+						  }
+#						if ($joinedline ne '' and not isCont($line, $free_form ) and not isCommentOrBlank($line) ) {
+#                            ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
+#                            $joinedline='';
+#                        }
+##						print "STASH1 $line";
+##						print "STASH1 $nextline";
+#						$joinedline .= removeCont( $line, $free_form );
+#						$joinedline .= removeCont( $nextline, $free_form );
+##                        print "ACC1 $joinedline\n";
 					} elsif ( isCont( $line, $free_form )
 						&& !isCont( $nextline, $free_form ) )
 					{
 
 			 # + line
 			 #   nextline -> could be a split line, unless it's a blank or a comment
-			            print "STASH2 $line";
-						$joinedline .= removeCont( $line, $free_form );
-#						my $pline = procLine( $joinedline, $free_form );
-#						push @newlines, $pline;
-#						print "PUSH2: $pline->[0]\n";
-						($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
-						$joinedline = '';
-#						if ( not isCommentOrBlank( $nextline, $free_form ) ) {
-							$line  = $nextline;
-							$next2 = 0;
-#						} else {
-#							my $pline = procLine($nextline);
-#							push @newlines, $pline;
-#							print "PUSH3: $pline->[0]\n";
-#						}
+#			            print "STASH2 $line";
+						$joinedline .= removeCont( $line, $free_form );						 
+						if (not isCommentOrBlank($nextline) ) {
+						  ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
+						  $joinedline = '';						  
+						} else {
+							# next line is a comment, do nothing
+						}
+						$line  = $nextline;
+						$next2 = 0; 
 					} else {
 			   # line
 			   # nextline -> could be a split line, unless it's a blank or a comment
-			   if ($joinedline ne '' and not isCommentOrBlank($nextline) ) { # FIXME: still weak: if there are a lot of comments in a broken-up line, 
+			   
+			             if ($joinedline ne '' and not isCommentOrBlank($nextline) ) { # FIXME: still weak: if there are a lot of comments in a broken-up line, 
 			   # it could be that we still get a continuation. 
-			   	print "ACC2 $joinedline\n";
-#			   	        my $pline = procLine( $joinedline, $free_form );
-#                        push @newlines, $pline;
-#                        print "PUSH6: $pline->[0]\n";
-                        ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
-                        $joinedline='';
-			   }
-#						my $pline = procLine( $line, $free_form );
-#						push @newlines, $pline;
-#						print "PUSH4: $pline->[0]\n";
-						($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$line, $free_form);
-						if ( not isCommentOrBlank( $nextline, $free_form ) ) {
-							$line  = $nextline;
-							$next2 = 0;
-						} else {
-#							my $pline = procLine( $nextline, $free_form );
-#							push @newlines, $pline;
-#							print "PUSH5: $pline->[0]\n";
-                            ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$nextline, $free_form);
-						}
+#			   	print "ACC2 $joinedline\n";
+                            ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
+                            $joinedline='';
+			             }
+					   ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$line, $free_form);
+					   if ( not isCommentOrBlank( $nextline, $free_form ) ) {							
+					       $line  = $nextline;
+					       $line_set_to_nextline=1;
+						  $next2 = 0;
+					   } else {
+                        ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$nextline, $free_form);
+					   }
 					}
-				}
+				} # loop over source lines
 				if ($joinedline ne '') {
-#					   my $pline = procLine( $joinedline, $free_form );
-#                            push @newlines, $pline;
-#                            print "PUSH9: $pline->[0]\n";
-                        ($stref,$f,$srctype) = pushAnnLine($stref,$f,$srctype,$joinedline, $free_form);                            
+                        ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);                            
+				} else {
+                ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$line, $free_form);
+                if( not $line_set_to_nextline ) {
+				    ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$nextline, $free_form);
+                } 
 				}
+				$stref->{$srctype}{$s}{'Status'} = $READ; 
 #				croak "Fatal flaw: need to separate out per sub/func!!";
 			}    # free form or not
 #			$stref->{$sub_func_incl}{$s}{'AnnLines'} = [@newlines];
@@ -1485,22 +1506,31 @@ sub read_fortran_src_better {
 
 	return $stref;
 }    # END of read_fortran_src_better()
-
+=cut
 # -----------------------------------------------------------------------------
 sub pushAnnLine {
 	(my $stref, my $f, my $srctype,my $line, my $free_form)=@_;
 	my $pline = procLine( $line, $free_form );
+	
     if ( exists $pline->[1]{'SubroutineSig'} ) {
+    	$stref->{$srctype}{$f}{'Status'} = $READ;
         $srctype='Subroutines';
-        $f=$pline->[1]{'SubroutineSig'};                                
+#        print "FOUND SUB $f\n";        
+        $f=$pline->[1]{'SubroutineSig'};      
+        $stref->{$srctype}{$f}{'AnnLines'}=[];                          
     } elsif (exists $pline->[1]{'FunctionSig'} ) {
-        $srctype='Functions';
+    	$stref->{$srctype}{$f}{'Status'} = $READ;
+        $srctype='Functions';        
         $f=$pline->[1]{'FunctionSig'};
+#        print "FOUND FUNC $f\n";
+        $stref->{$srctype}{$f}{'AnnLines'}=[];
     }
     push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
-    print "PUSH: {$srctype}{$f}{'AnnLines'} $pline->[0]\n";
+    print "PUSH: {$srctype}{$f}{'AnnLines'} $pline->[0]\n" if $V;
+#    print "NOW IN $f\n";
 	return ($stref,$f,$srctype);	
-}
+} # pushAnnLine()
+# -----------------------------------------------------------------------------
 #sub testFreeForm{ (my $stref, my $s,my @lines)=@_;
 #	my $sub_func_incl = sub_func_or_incl( $s, $stref );
 #	my $free_form=0;
@@ -1595,9 +1625,21 @@ sub removeCont {
 }
 
 # -----------------------------------------------------------------------------
-sub isSubOrFunc { (my $line)=@_;
-	
-}
+#sub isSubFuncProg { (my $line)=@_;
+#	my $sub_func_prog = 'Unknown';
+#	my $name='None';
+#       # FIXME: weak, the return type of the function can be more than one word!
+#                if (
+#                     $line =~
+#                    /^\s*\b(program|subroutine|function)\s+(\w+)/ )
+#                {
+#                	print "LINE: $line\n";
+#                    $sub_func_prog = $1;
+#                    $name = $2;
+#                }
+#return ($sub_func_prog,$name);
+#	
+#}
 # -----------------------------------------------------------------------------
 =pod
  What we do is:
@@ -1663,24 +1705,27 @@ sub procLine {
 			$line =~ s/^(\d+)\s+/$str/;
 		};
 	}
+	;
 	if ( substr( $line, 0, 2 ) ne '! ' ) {
 		if ( $line =~ /^\s+include\s+\'(\w+)\'/i ) {
 			$info->{'Includes'} = $1;
 			$line =~ s/\bINCLUDE\b/include/;
 			
 			
-		} elsif (  $line =~
-                    /^\s*(program|subroutine|(?:\w+\s+)?function)\s+(\w+)/ )
+		} elsif (  $line!~/\'/ && $line =~
+                    /\b(program|subroutine|function)\s+(\w+)/i )
                 {
-                    my $keyword = $1;
-                    my $name = $2;
+#                	print "LINE: $line\n";
+#                	die if $line=~/\'/;
+                    my $keyword = lc($1);
+                    my $name = lc($2);
 
-                    if ( $keyword =~ /function/ ) {                        
+                    if ( $keyword eq 'function' ) {                        
                         $info-> { 'FunctionSig'} = $name;
                     } else {                        
-                        $info ->{ 'SubroutineSig'} = $name ;
-                    }
-
+                        $info ->{ 'SubroutineSig'} = $name ;                        
+                    }            
+                    $line=lc($line);
 		} else {
 
 			# replace string constants by placeholders
@@ -1699,11 +1744,11 @@ sub procLine {
 			  : lc($line);
 			$lcline =~ s/__ph(\d+)__/__PH$1__/g;
 			$line = $lcline;
-			$info->{'PlaceHolders'} = $phs_ref;
+			$info->{'PlaceHolders'} = $phs_ref unless (keys %{$phs_ref} == 0);
 		}
 	}
 	return [ $line, $info ];
-}
+} # procLine()
 
 # -----------------------------------------------------------------------------
 sub isCommentOrBlank {
@@ -1892,4 +1937,11 @@ sub parse_vardecl {
 	}
 
 	return $vars;
+}
+
+sub show {
+	(my $annlines)=@_;
+	for my $annline (@{ $annlines }) {
+		print $annline->[0],"\t<",join(';',keys %{ $annline->[1] }),">\n";
+	}
 }
