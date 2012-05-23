@@ -29,16 +29,32 @@ use Exporter;
 );
 sub read_fortran_src {
 	( my $s, my $stref ) = @_;
-#    local $V=1;
-#	*DBG = *STDERR;
-    open DBG, '>/dev/null';
+	print "\n",'-' x 80,"\nread_fortran_src( $s )\n"; 
+    local $V=1;
+	*DBG = *STDOUT;
+#    open DBG, '>/dev/null';
 	my $is_incl = exists $stref->{'IncludeFiles'}{$s} ? 1 : 0;
 
 	my $sub_func_incl = sub_func_or_incl( $s, $stref );
 	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
 	my $f = $is_incl ? $s : $stref->{$sub_func_incl}{$s}{'Source'};
-
-	if ( $stref->{$sub_func_incl}{$s}{'Status'} == $UNREAD ) {
+	my $no_need_to_read=1;
+	print "\nCHECK $f SourceContains\n";
+	if (not exists $stref->{'SourceContains'}{$f} ) {
+		$no_need_to_read=0;
+	} else {
+	for my $item (keys %{ $stref->{'SourceContains'}{$f} } ) {
+		my $srctype=$stref->{'SourceContains'}{$f}{$item};
+		my $status =$stref->{$srctype}{$item}{'Status'};
+		print "\tSTATUS $srctype $item = $status\n";
+		# if one of them is still UNREAD, need to read.
+		$no_need_to_read *= ($status != $UNREAD);
+	}
+	}
+	my $need_to_read = 1 - $no_need_to_read; 
+    print ''.($need_to_read ? '' : 'NO ')."NEED TO READ $f\n";
+#	if ( $stref->{$sub_func_incl}{$s}{'Status'} == $UNREAD ) {
+		if ($need_to_read) {		 
 		my $ok = 1;
 
 		open my $SRC, '<', $f or do {
@@ -60,14 +76,15 @@ sub read_fortran_src {
 
 			#my @lines = grep {!/^\s*$/} @rawlines;
 			my @lines     = @rawlines;
+			push @lines,("      \n");
 			my $free_form = $stref->{$sub_func_incl}{$s}{'FreeForm'};
 			my $srctype   = $sub_func_incl;
 
-			#			my $f='';
+			
 			if ($free_form) {
 				croak "BROKEN! Must be implemented like fixed form below";
 			} else {
-
+                my $s=($srctype eq 'IncludeFiles') ? $s : '';
 				my $line_set_to_nextline = 0;
 				my $in_cont              = 0;
 				my @comments_stack       = ();
@@ -270,14 +287,15 @@ sub read_fortran_src {
 								#=> push both comments
 								push @comments_stack, $line;
 								push @comments_stack, $nextline;
+								print Dumper(@comments_stack);
 
 					 #warn join("\n",("<$line>","<$nextline>","<$joinedline>"));
 							} else {    # isPlain
 								print DBG "M! \n";
 
-			   #! l
-			   #  n
-			   #=> emit $joinedline, emit the comments, l=n, (set maybe_in_cont)
+                			   #! l
+                			   #  n
+                			   #=> emit $joinedline, emit the comments, l=n, (set maybe_in_cont)
 								if ( $joinedline ne '' ) {
 									( $stref, $s, $srctype ) =
 									  pushAnnLine( $stref, $s, $srctype,
@@ -323,9 +341,9 @@ sub read_fortran_src {
 							} elsif ( isCommentOrBlank($nextline) ) {
 								print DBG "M !\n";
 
-#  l
-#! n
-#=> emit $joinedline; emit the comments, push l onto joinedline, push comment onto stack (set maybe_in_cont)
+                                #  l
+                                #! n
+                                #=> emit $joinedline; emit the comments, push l onto joinedline, push comment onto stack (set maybe_in_cont)
 								if ( $joinedline ne '' ) {
 									( $stref, $s, $srctype ) =
 									  pushAnnLine( $stref, $s, $srctype,
@@ -339,10 +357,8 @@ sub read_fortran_src {
 								}
 								@comments_stack = ();
 								$joinedline .= removeCont( $line, $free_form );
+								$line=''; # TEST
 								push @comments_stack, $nextline;
-
-					 #warn join("\n",("<$line>","<$nextline>","<$joinedline>"));
-
 							} else {    # isPlain
 								print DBG "M  \n";
 
@@ -376,20 +392,361 @@ sub read_fortran_src {
 					}
 				}    # loop over source lines
 
-				# TODO: deal with final lines
-				if ( $joinedline ne '' ) {
-					( $stref, $s, $srctype ) =
-					  pushAnnLine( $stref, $s, $srctype, $joinedline,
-						$free_form );
-				} else {
-					( $stref, $s, $srctype ) =
-					  pushAnnLine( $stref, $s, $srctype, $line, $free_form );
-					if ( not $line_set_to_nextline ) {
-						( $stref, $s, $srctype ) =
-						  pushAnnLine( $stref, $s, $srctype, $nextline,
-							$free_form );
-					}
-				} # end of postamble
+print "POSTAMBLE\n";
+                if ($in_cont) {
+                        if ( isCont( $line, $free_form ) ) {
+                            if ( isCont( $nextline, $free_form ) ) {
+                                print DBG "C++\n";
+
+                                #+ l
+                                #+ n
+                                $joinedline .= removeCont( $line, $free_form );
+                                $joinedline .=
+                                  removeCont( $nextline, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $joinedline, $free_form );
+                            } elsif ( isCommentOrBlank($nextline) ) {
+                                print DBG "C+!\n";
+
+                                #+ l
+                                #! n
+                                $joinedline .= removeCont( $line, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $joinedline, $free_form );
+                                $joinedline           = '';
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $nextline, $free_form );
+                            } else {    # isPlain
+                                print DBG "C+ \n";
+
+                             #+ l
+                             #  n
+                             #=> join l, emit joined, set l=n, set maybe_in_cont
+                                $joinedline .= removeCont( $line, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $joinedline, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $nextline, $free_form );
+                            }
+                        } elsif ( isCommentOrBlank($line) ) {
+                            if ( isCont( $nextline, $free_form ) ) {
+                                print DBG "C!+\n";
+                                #! l
+                                #+ n
+                                #=> ignore the comment, join n
+                                $joinedline .=
+                                  removeCont( $nextline, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $joinedline, $free_form );
+                                  
+                            } elsif ( isCommentOrBlank($nextline) ) {
+                                print DBG "C!!\n";
+                                #! l
+                                #! n
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $joinedline, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $line, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $nextline, $free_form );
+                                
+                            } else {    # isPlain
+                                print DBG "C! \n";
+                                #! l
+                                #  n
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $joinedline, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $line, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $nextline, $free_form );
+                            }
+                        } else {    # isPlain
+                            if ( isCont( $nextline, $free_form ) ) {
+                                print DBG "C +\n";
+
+                                #  l
+                                #+ n
+                                #=> emit the joinedline
+                                if ( $joinedline ne '' ) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                    $joinedline = '';
+                                }
+
+                       #=> push l onto joined; push n onto joined; (set in_cont)
+                                $joinedline .= removeCont( $line, $free_form );
+                                $joinedline .=
+                                  removeCont( $nextline, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $joinedline, $free_form );
+                                  
+                            } elsif ( isCommentOrBlank($nextline) ) {
+                                print DBG "C !\n";
+  #  l
+  #! n
+  #=> emit the joined line; set maybe_in_cont; push l on joined; push n on stack
+                                if ( $joinedline ne '' ) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                    $joinedline = '';
+                                }                                
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $line, $free_form );
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $nextline, $free_form );
+                                
+                            } else {    # isPlain
+                                print DBG "C  \n";
+
+                                #  l
+                                #  n
+                                #=> emit the joinedline; emit l
+                                #=> l=n , set maybe_in_cont
+                                if ( $joinedline ne '' ) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                    $joinedline = '';
+                                }
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype, $line,
+                                    $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype, $nextline,
+                                    $free_form );
+                            }
+                        }
+                    } else {    # not $in_cont
+                        if ( isCont( $line, $free_form ) ) {
+                            if ( isCont( $nextline, $free_form ) ) {
+                                print DBG "M++\n";
+
+                                #+ l
+                                #+ n
+                                #=> dump the comments, join both, set in_cont
+
+                                $joinedline .= removeCont( $line, $free_form );
+                                $joinedline .=
+                                  removeCont( $nextline, $free_form );
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+
+                            } elsif ( isCommentOrBlank($nextline) ) {
+                                print DBG "M+!\n";
+
+                            #+ l
+                            #! n
+                            #=> dump the comments, join l, set $in_cont, set l=n
+                                
+                                $joinedline .= removeCont( $line, $free_form );
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $nextline, $free_form );
+                            } else {    # isPlain
+                                print DBG "M+ \n";
+
+         #+ l
+         #  n
+         #=> dump the comments, join l, emit joined, set l=n (set maybe_in_cont)
+                                
+                                $joinedline .= removeCont( $line, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype,
+                                    $joinedline, $free_form );
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $nextline, $free_form );
+                            }
+                        } elsif ( isCommentOrBlank($line) ) {
+                            if ( isCont( $nextline, $free_form ) ) {
+                                print DBG "M!+\n";
+
+                                #! l
+                                #+ n
+                                #=> dump the comments, join n, set in_cont
+                                
+                                $joinedline .=
+                                  removeCont( $nextline, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+
+                            } elsif ( isCommentOrBlank($nextline) ) {
+                                print DBG "M!!\n";
+
+                                #! l
+                                #! n
+                                #=> push both comments
+                                if ( $joinedline ne '' ) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                    $joinedline = '';
+                                }
+                                for my $commentline (@comments_stack) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $commentline, $free_form );
+                                }
+
+                                ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $line, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $nextline, $free_form );
+                                
+                            } else {    # isPlain
+                                print DBG "M! \n";
+
+               #! l
+               #  n
+               #=> emit $joinedline, emit the comments, l=n, (set maybe_in_cont)
+                                if ( $joinedline ne '' ) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                    $joinedline = '';
+                                }
+                                for my $commentline (@comments_stack) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $commentline, $free_form );
+                                }
+                                ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $line, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $nextline, $free_form );
+                            }
+                        } else {    # isPlain
+                            if ( isCont( $nextline, $free_form ) ) {
+                                print DBG "M +\n";
+
+                                #  l
+                                #+ n
+                                #=> emit $joinedline; emit the comments
+                                #=> set $in_cont, join l & n
+                                if ( $joinedline ne '' ) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                    $joinedline = '';
+                                }
+                                for my $commentline (@comments_stack) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $commentline, $free_form );
+                                }
+                                $joinedline .= removeCont( $line, $free_form );
+                                $joinedline .=
+                                  removeCont( $nextline, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                  
+                            } elsif ( isCommentOrBlank($nextline) ) {
+                                print DBG "M !\n";
+
+                                #  l
+                                #! n
+                                #=> emit $joinedline; emit the comments, push l onto joinedline, push comment onto stack (set maybe_in_cont)
+                                if ( $joinedline ne '' ) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+#                                    $joinedline = '';
+                                }
+                                for my $commentline (@comments_stack) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $commentline, $free_form );
+                                }                                
+                                ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $line, $free_form );
+                                ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $nextline, $free_form );
+                                        print join("\n",("<L:$line>","<N:$nextline>","<J:$joinedline>"));
+                            } else {    # isPlain
+                                print DBG "M  \n";
+
+                                #  l
+                                #  n
+                                #=> emit the comments and l
+                                #=> l=n , (set maybe_in_cont)
+                                print DBG "--\n";
+                                if ( $joinedline ne '' ) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                    $joinedline = '';
+                                    print DBG "---\n";
+                                }
+                                for my $commentline (@comments_stack) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $commentline, $free_form );
+                                }
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype, $line,
+                                    $free_form );
+                                ( $stref, $s, $srctype ) =
+                                  pushAnnLine( $stref, $s, $srctype, $nextline,
+                                    $free_form );
+                                    
+                            }
+                        }
+                    }
+####### POSTAMBLE
+#
+#				if ( $joinedline ne '' ) {
+#					( $stref, $s, $srctype ) =
+#					  pushAnnLine( $stref, $s, $srctype, $joinedline,
+#						$free_form );
+#				}
+#				if (!$in_cont) {
+#					if ($line ne $joinedline) { # FIXME: WEAK! 					
+#					( $stref, $s, $srctype ) =
+#					  pushAnnLine( $stref, $s, $srctype, $line, $free_form );
+#					}
+#					if ( not $line_set_to_nextline ) {
+#						( $stref, $s, $srctype ) =
+#						  pushAnnLine( $stref, $s, $srctype, $nextline,
+#							$free_form );
+#					}
+#				}
+#				 # end of postamble
+				if ($stref->{$srctype}{$s}{'Status'} == $UNREAD ) {
+					$stref->{$srctype}{$s}{'Status'} = $READ;
+				}
 				
 			} # free or fixed form
 			
@@ -401,17 +758,38 @@ sub read_fortran_src {
  # -----------------------------------------------------------------------------
 
  # -----------------------------------------------------------------------------
+ # How to skip the funcs/subs that have been read/parsed already?
+ # One way is maybe to record for every item which other items occur in the source.
+ # If it turns out the source was fully read, skip it
+ # So we'd need a field 'AlsoInSource' or 'SourceContains'
+ 
+ 
 	sub pushAnnLine {
-		( my $stref, my $f, my $srctype, my $line, my $free_form ) = @_;
-		my $pline = procLine( $line, $free_form );
-
+		( my $stref, my $f, my $srctype, my $line, my $free_form ) = @_;		
+		my $pline = procLine( $line, $free_form );    
 		if ( exists $pline->[1]{'SubroutineSig'} ) {
+			print "$srctype $f: FOUND Subroutine ". $pline->[1]{'SubroutineSig'}."\n";
+			if ($f ne '') {
+			if ($stref->{$srctype}{$f}{'Status'}   == $UNREAD ) { # FIXME: bit late, can I catch this earlier?
 			$stref->{$srctype}{$f}{'Status'}   = $READ;
+			print "SETTING $srctype $f has Status to READ\n";
+			} else {
+				print "WARNING: $srctype $f has Status ".$stref->{$srctype}{$f}{'Status'}."\n";
+			}
+			}
 			$srctype                           = 'Subroutines';
 			$f                                 = $pline->[1]{'SubroutineSig'};
 			$stref->{$srctype}{$f}{'AnnLines'} = [];
 		} elsif ( exists $pline->[1]{'FunctionSig'} ) {
+			print "$srctype $f: FOUND Function ". $pline->[1]{'FunctionSig'}."\n";
+			if ($f ne '') {
+			if ($stref->{$srctype}{$f}{'Status'}   == $UNREAD ) {
 			$stref->{$srctype}{$f}{'Status'}   = $READ;
+			print "SETTING $srctype $f has Status to READ\n";
+			} else {
+			print "WARNING: $srctype $f has Status ".$stref->{$srctype}{$f}{'Status'}."\n";
+			}
+			}
 			$srctype                           = 'Functions';
 			$f                                 = $pline->[1]{'FunctionSig'};
 			$stref->{$srctype}{$f}{'AnnLines'} = [];
@@ -573,6 +951,9 @@ sub read_fortran_src {
 					$info->{'SubroutineSig'} = $name;
 				}
 				$line = lc($line);
+			} elsif ($line=~/^\s*$/) {
+				$line='';
+				$info->{'Blank'}=1;	
 			} else {
 				# replace string constants by placeholders
 				my $phs_ref = {};

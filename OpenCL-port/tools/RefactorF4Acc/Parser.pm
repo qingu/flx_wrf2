@@ -2,7 +2,7 @@ package RefactorF4Acc::Parser;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
-use RefactorF4Acc::CallGraph qw ( add_to_call_tree );
+use RefactorF4Acc::CallGraph qw( add_to_call_tree );
 use RefactorF4Acc::Refactoring::Common
   qw( format_f95_var_decl format_f77_var_decl );
 use RefactorF4Acc::Parser::SrcReader qw( read_fortran_src );
@@ -43,12 +43,12 @@ sub parse_fortran_src {
 	# 1. Read the source and do some minimal processsing
 	$stref = read_fortran_src( $f, $stref );#
 	
-	print "DONE read_fortran_src_better( $f )\n";
+	print "DONE read_fortran_src_better( $f )\n" if $V;
 	my $sub_or_func = sub_func_or_incl( $f, $stref );
 	print "SRC TYPE: $sub_or_func\n" if $V;
 	my $Sf          = $stref->{$sub_or_func}{$f};
 
-#	 if ($f eq 'calcfluxes') {
+#	 if ($f eq 'boundcond_domainfill') {
 #	 	show( $Sf->{'AnnLines'} ); 
 #	 	die; 
 #	 }
@@ -85,6 +85,7 @@ sub parse_fortran_src {
 # Recursive descent via subroutine calls
 		$stref = parse_subroutine_and_function_calls( $f, $stref );
 		$stref->{$sub_or_func}{$f}{'Status'} = $PARSED;
+		print "DONE PARSING $sub_or_func $f\n" if $V;		
 	} else {    # includes
 
 # 4. For includes, parse common blocks and parameters, create $stref->{'Commons'}
@@ -102,6 +103,7 @@ sub parse_fortran_src {
 #	}
 
 	#    $stref=create_annotated_lines($stref,$f);
+	print "LEAVING parse_fortran_src( $f ) with Status $stref->{$sub_or_func}{$f}{'Status'}\n" if $V; 
 	return $stref;
 }    # END of parse_fortran_src()
 
@@ -378,11 +380,11 @@ sub analyse_lines {
 # If the include was not yet read, do it now.
 sub parse_includes {
 	( my $f, my $stref ) = @_;
-#	local $V=1;
+	local $V=1;
 	
 	my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
 	my $Sf                 = $stref->{$sub_or_func_or_inc}{$f};
-print "PARSING INCLUDES for $f ($sub_or_func_or_inc)\n" if $V;
+    print "PARSING INCLUDES for $f ($sub_or_func_or_inc)\n" if $V;
 	my $srcref       = $Sf->{'AnnLines'};
 	my $last_inc_idx = 0;
 	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
@@ -416,8 +418,15 @@ print "PARSING INCLUDES for $f ($sub_or_func_or_inc)\n" if $V;
 	}
 
 	# tag the next line after the last include
+	
 	$last_inc_idx++;
+	while ($srcref->[$last_inc_idx][0] =~/^\s*$/) {
+		$last_inc_idx++;
+	}
 	$srcref->[$last_inc_idx][1]{'ExtraIncludesHook'} = 1;
+	print '<'.$srcref->[$last_inc_idx][0].">\n";
+	print '<'.Dumper($srcref->[$last_inc_idx][1]).">\n";
+#	die if $f eq 'timemanager';
 	return $stref;
 }    # END of parse_includes()
 
@@ -584,6 +593,7 @@ sub separate_blocks {
 
 		#        $Sblock->{'Info'}  = $blocks{$block}{'Info'};
 		$Sblock->{'Source'}          = $Sf->{'Source'};
+		$stref->{'SourceContains'}{$Sf->{'Source'}}{$block} = 'Subroutines';
 		$Sblock->{'RefactorGlobals'} = 1;
 		if ( $Sf->{'RefactorGlobals'} == 0 ) {
 			$Sf->{'RefactorGlobals'} = 2;
@@ -742,10 +752,6 @@ sub parse_subroutine_and_function_calls {
 		|| ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
 	{
 
-		#		if ( $translate != $GO ) {
-		#			print "ADDING $f to CALL TREE\n" if $V;
-##			$stref = add_to_call_tree( $f, $stref, 'TOP' );
-		#		}    # else {
 		if ( $translate == $GO ) {
 			$stref = add_to_C_build_sources( $f, $stref );
 		}

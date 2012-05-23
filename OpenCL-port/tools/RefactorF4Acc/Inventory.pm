@@ -104,9 +104,10 @@ sub find_subroutines_functions_and_includes {
                     print "Found program $2 in $src\n" if $V;
                 }                
                 my $sub  = lc($2);
-		$f=$sub;
-		$srctype='Subroutines';
+		        $f=$sub;
+		        $srctype='Subroutines';
                 $stref->{'Subroutines'}{$sub}={};
+                $stref->{'SourceContains'}{$src}{$f}=$srctype;
                 my $Ssub = $stref->{'Subroutines'}{$sub};
                 if (
                     not exists $Ssub->{'Source'}
@@ -154,6 +155,7 @@ sub find_subroutines_functions_and_includes {
                 $stref->{'Functions'}{$func}{'Status'} = $UNREAD;
 		          $f=$func;
 		          $srctype='Functions';
+		          $stref->{'SourceContains'}{$src}{$f}=$srctype;
             };
             
             $stref->{$srctype}{$f}{'FStyle'}=$fstyle;

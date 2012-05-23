@@ -252,7 +252,9 @@ sub refactor_calls_globals {
 # so we need $prevline in the reader or parser
 # Basically I can keep an index counter and increment it every time I find an include
 # then the next line, whatever it is, becomes "ExtraIncludesHook"        
+#croak "Hook" if $f eq 'timemanager';
         if ( exists $tags{'ExtraIncludesHook'} && $firstinc) {
+#        	croak "Hook" if $f eq 'timemanager';
 #        if ( exists $tags{'Include'} && $firstinc ) {
         	$firstinc =0;
             # First, add addional includes if required

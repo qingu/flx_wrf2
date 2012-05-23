@@ -34,13 +34,17 @@ Functions
 
 
 # -----------------------------------------------------------------------------
+# The test for called functions is weak, a better test is the status:
+# if the function was not parsed, it's not used, because we parse via recursive descent
 sub refactor_called_functions {
     ( my $stref ) = @_;
 
     for my $f ( keys %{ $stref->{'Functions'} } ) {
         my $Ff = $stref->{'Functions'}{$f};
         if ( defined $Ff->{'Called'} ) { # FIXME: This test is weak because the caller might not be called itself!
-        if (reallyCalled($stref,$f)) {        
+        if ($Ff->{'Status'} == $READ) { 
+        	warn "refactor_called_functions(): Function $f was never parsed";
+        } else {        
             $stref = refactor_function( $f, $stref );
             $stref = create_refactored_source($stref, $f);
         }

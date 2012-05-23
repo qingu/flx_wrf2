@@ -481,6 +481,8 @@ sub split_long_line {
 		}
 		if ( $fin_lines[-1] =~ /\&\s*$/ ) {
 			$fin_lines[-1] =~ s/\s*\&\s*$//;
+		} elsif ( @fin_lines>1 && $fin_lines[-1] =~ /^\s*$/ && $fin_lines[-2] =~ /\&\s*$/) {
+			$fin_lines[-2] =~ s/\&\s*$//;
 		}
 		return @fin_lines;
 	}
@@ -863,7 +865,7 @@ sub format_f95_par_decl {
 #		croak $var;
         $Sv->{'Type'} = $Sf->{'Parameters'}{$var}{'Type'};
         $Sv->{'Indent'} = ' ' x 6;
-        $Sv->{'Shape'} = [1,1];
+        $Sv->{'Shape'} = [];
         $Sv->{'Attr'}='';
 	}
 	
