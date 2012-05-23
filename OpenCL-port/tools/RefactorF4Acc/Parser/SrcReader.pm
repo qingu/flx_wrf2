@@ -29,30 +29,30 @@ use Exporter;
 );
 sub read_fortran_src {
 	( my $s, my $stref ) = @_;
-	print "\n",'-' x 80,"\nread_fortran_src( $s )\n"; 
-    local $V=1;
-	*DBG = *STDOUT;
-#    open DBG, '>/dev/null';
+#	print "\n",'-' x 80,"\nread_fortran_src( $s )\n"; 
+#    local $V=1;
+#	*DBG = *STDOUT;
+    open DBG, '>/dev/null';
 	my $is_incl = exists $stref->{'IncludeFiles'}{$s} ? 1 : 0;
 
 	my $sub_func_incl = sub_func_or_incl( $s, $stref );
 	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
 	my $f = $is_incl ? $s : $stref->{$sub_func_incl}{$s}{'Source'};
 	my $no_need_to_read=1;
-	print "\nCHECK $f SourceContains\n";
+#	print "\nCHECK $f SourceContains\n";
 	if (not exists $stref->{'SourceContains'}{$f} ) {
 		$no_need_to_read=0;
 	} else {
 	for my $item (keys %{ $stref->{'SourceContains'}{$f} } ) {
 		my $srctype=$stref->{'SourceContains'}{$f}{$item};
 		my $status =$stref->{$srctype}{$item}{'Status'};
-		print "\tSTATUS $srctype $item = $status\n";
+#		print "\tSTATUS $srctype $item = $status\n";
 		# if one of them is still UNREAD, need to read.
 		$no_need_to_read *= ($status != $UNREAD);
 	}
 	}
 	my $need_to_read = 1 - $no_need_to_read; 
-    print ''.($need_to_read ? '' : 'NO ')."NEED TO READ $f\n";
+#    print ''.($need_to_read ? '' : 'NO ')."NEED TO READ $f\n";
 #	if ( $stref->{$sub_func_incl}{$s}{'Status'} == $UNREAD ) {
 		if ($need_to_read) {		 
 		my $ok = 1;
@@ -287,7 +287,7 @@ sub read_fortran_src {
 								#=> push both comments
 								push @comments_stack, $line;
 								push @comments_stack, $nextline;
-								print Dumper(@comments_stack);
+#								print Dumper(@comments_stack);
 
 					 #warn join("\n",("<$line>","<$nextline>","<$joinedline>"));
 							} else {    # isPlain
@@ -392,7 +392,7 @@ sub read_fortran_src {
 					}
 				}    # loop over source lines
 
-print "POSTAMBLE\n";
+#print "POSTAMBLE\n";
                 if ($in_cont) {
                         if ( isCont( $line, $free_form ) ) {
                             if ( isCont( $nextline, $free_form ) ) {
@@ -694,7 +694,7 @@ print "POSTAMBLE\n";
                                 ( $stref, $s, $srctype ) =
                                       pushAnnLine( $stref, $s, $srctype,
                                         $nextline, $free_form );
-                                        print join("\n",("<L:$line>","<N:$nextline>","<J:$joinedline>"));
+#                                        print join("\n",("<L:$line>","<N:$nextline>","<J:$joinedline>"));
                             } else {    # isPlain
                                 print DBG "M  \n";
 
@@ -768,26 +768,26 @@ print "POSTAMBLE\n";
 		( my $stref, my $f, my $srctype, my $line, my $free_form ) = @_;		
 		my $pline = procLine( $line, $free_form );    
 		if ( exists $pline->[1]{'SubroutineSig'} ) {
-			print "$srctype $f: FOUND Subroutine ". $pline->[1]{'SubroutineSig'}."\n";
+#			print "$srctype $f: FOUND Subroutine ". $pline->[1]{'SubroutineSig'}."\n";
 			if ($f ne '') {
 			if ($stref->{$srctype}{$f}{'Status'}   == $UNREAD ) { # FIXME: bit late, can I catch this earlier?
 			$stref->{$srctype}{$f}{'Status'}   = $READ;
-			print "SETTING $srctype $f has Status to READ\n";
+#			print "SETTING $srctype $f has Status to READ\n";
 			} else {
-				print "WARNING: $srctype $f has Status ".$stref->{$srctype}{$f}{'Status'}."\n";
+#				print "WARNING: $srctype $f has Status ".$stref->{$srctype}{$f}{'Status'}."\n";
 			}
 			}
 			$srctype                           = 'Subroutines';
 			$f                                 = $pline->[1]{'SubroutineSig'};
 			$stref->{$srctype}{$f}{'AnnLines'} = [];
 		} elsif ( exists $pline->[1]{'FunctionSig'} ) {
-			print "$srctype $f: FOUND Function ". $pline->[1]{'FunctionSig'}."\n";
+#			print "$srctype $f: FOUND Function ". $pline->[1]{'FunctionSig'}."\n";
 			if ($f ne '') {
 			if ($stref->{$srctype}{$f}{'Status'}   == $UNREAD ) {
 			$stref->{$srctype}{$f}{'Status'}   = $READ;
-			print "SETTING $srctype $f has Status to READ\n";
+#			print "SETTING $srctype $f has Status to READ\n";
 			} else {
-			print "WARNING: $srctype $f has Status ".$stref->{$srctype}{$f}{'Status'}."\n";
+#			print "WARNING: $srctype $f has Status ".$stref->{$srctype}{$f}{'Status'}."\n";
 			}
 			}
 			$srctype                           = 'Functions';

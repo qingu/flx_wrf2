@@ -59,7 +59,5 @@ sub refactor_all {
     		print "WARNING: SKIPPING $f: Callers: ",scalar keys %{$stref->{'Subroutines'}{$f}{'Callers'} },'; Program: ',$stref->{'Subroutines'}{$f}{'Program'},"\n" if $V;
     	}
     }
-    
-    
     return $stref;	
 } # END of  

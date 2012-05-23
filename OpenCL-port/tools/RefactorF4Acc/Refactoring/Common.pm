@@ -65,9 +65,9 @@ sub context_free_refactorings {
 		croak "NOT PARSED: $f\n".caller()."\n";
 	}
 	my $annlines = get_annotated_sourcelines( $stref, $f );
-	
 	my $firstdecl = 1;
 	$Sf->{'RefactoredCode'} = [];
+	
 	for my $annline ( @{$annlines} ) {
 		if ( not defined $annline or not defined $annline->[0] ) {
 			croak
@@ -81,8 +81,7 @@ sub context_free_refactorings {
             next;
 		}
 		if ( exists $tags{'ImplicitNone'} ) {
-#			print "SKIPPING $line in $f\n";
-			next;
+			 next;
 		}
         if ( exists $tags{'Signature'} ) {
 	       push @extra_lines, ['        implicit none',{'ImplicitNone'=>1}];
@@ -139,13 +138,8 @@ sub context_free_refactorings {
 				$line =~ s/$ph/$str/;
 			}
 		}
-#if ($line=~/drydeposit/ && $f eq 'particles_main_loop' and not exists $info->{'Signature'}) {
-#	die Dumper($Sf->{'Vars'}{'drydeposit'});
-#}
 		if ( exists $tags{'VarDecl'} and not exists $tags{'FunctionSig'} ) {
 			my @vars = @{ $tags{'VarDecl'} };
-#                $Data::Dumper::Indent=2;
-#                die Dumper($Sf->{'Vars'}) if $f eq 'read_ncwrfout_1realfield';
 
 			# first create all parameter declarations
 			if ( $firstdecl == 1 ) {
@@ -157,13 +151,11 @@ sub context_free_refactorings {
 					my $new_line = format_f95_par_decl( $stref, $f, $par );					
 					push @extra_lines,
 					  [ $new_line, { 'Extra' => 1, 'Parameter' => [$par] } ];
-#					  die Dumper($Sf->{'Parameters'}{$par});
 				}
 				my @vars_not_pars =
 				  grep { not exists $Sf->{'Parameters'}{$_} } @vars;
 				my $filtered_line = '';				
 				if (@vars_not_pars) {
-#					print "LINE:",$line,"\n" if $f eq 'particles_main_loop';
 					$filtered_line =
 					  format_f95_multiple_var_decls( $Sf,@vars_not_pars );
 					my %tr = %{$info};
@@ -173,10 +165,8 @@ sub context_free_refactorings {
 				$line = '!! Original line for info !! ' . $line;
 				$info->{'Deleted'} = 1;
 			} else {
-
 				if ( scalar @vars == 1 ) {
 					if ( exists( $Sf->{'Parameters'}{ $vars[0] } ) ) {
-
 						# Remove this line
 						$line = '!! Original line for info !! ' . $line;
 						$info->{'Deleted'} = 1;
@@ -184,7 +174,6 @@ sub context_free_refactorings {
 						$line = format_f95_var_decl( $Sf, $vars[0] );						
 					}
 				} else {
-
 					# filter out parameters
 					my @vars_not_pars =
 					  grep { not exists $Sf->{'Parameters'}{$_} } @vars;
@@ -197,8 +186,7 @@ sub context_free_refactorings {
 					}
 				}
 			}
-		}
-		
+		}		
 			if (exists $tags{'If'} or exists $tags{'ElseIf'} ) {
 				while ( $line =~ /\.\s+(?:and|not|or|neqv|eqv)\./ ) {
 					$line =~ s/\.\s+(and|not|or|neqv|eqv)\./ .$1. /;
@@ -268,21 +256,15 @@ sub context_free_refactorings {
 		      my $nk= rename_conflicting_vars($k,$stref,$f);
 		      $line = $spaces.$nk. ' = '.$rhs_expr;
 		} # assignment
-		
 		elsif ( exists $tags{'Parameter'} ) {
 			$line = '!! Original line for info !! ' . $line;
 			$info->{'Deleted'} = 1;
-
-			#    	$line='';$info ={};
-
 		} 
 		elsif ( exists $tags{'SubroutineCall'} ) {			
 			$line = rename_conflicting_vars($line,$stref,$f);
 		}
-		push @{ $Sf->{'RefactoredCode'} }, [ $line, $info ] if $line ne '';
+		push @{ $Sf->{'RefactoredCode'} }, [ $line, $info ];# if $line ne '';
 		if (@extra_lines) {
-
-			#            	warn "Extra lines in context free refactoring:\n";
 			for my $extra_line (@extra_lines) {
 				push @{ $Sf->{'RefactoredCode'} }, $extra_line;
 			}

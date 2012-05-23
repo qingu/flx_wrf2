@@ -20,6 +20,7 @@ use Exporter;
 
 @RefactorF4Acc::Utils::EXPORT = qw(
     &sub_func_or_incl
+    &show_annlines
     &get_maybe_args_globs
     &union
     &ordered_union
@@ -42,6 +43,12 @@ sub sub_func_or_incl {
 }
 
 # -----------------------------------------------------------------------------
+sub show_annlines {
+    (my $annlines)=@_;
+    for my $annline (@{ $annlines }) {
+        print $annline->[0],"\t<",join(';',keys %{ $annline->[1] }),">\n";
+    }
+}
  # -----------------------------------------------------------------------------
  # Quick and dirty way to get the Kinds of all arguments
 

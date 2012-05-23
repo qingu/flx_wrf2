@@ -49,7 +49,7 @@ sub parse_fortran_src {
 	my $Sf          = $stref->{$sub_or_func}{$f};
 
 #	 if ($f eq 'boundcond_domainfill') {
-#	 	show( $Sf->{'AnnLines'} ); 
+#	 	show_annlines( $Sf->{'AnnLines'} ); 
 #	 	die; 
 #	 }
 	my $is_incl     = exists $stref->{'IncludeFiles'}{$f} ? 1 : 0;
@@ -380,7 +380,7 @@ sub analyse_lines {
 # If the include was not yet read, do it now.
 sub parse_includes {
 	( my $f, my $stref ) = @_;
-	local $V=1;
+#	local $V=1;
 	
 	my $sub_or_func_or_inc = sub_func_or_incl( $f, $stref );
 	my $Sf                 = $stref->{$sub_or_func_or_inc}{$f};
@@ -420,12 +420,12 @@ sub parse_includes {
 	# tag the next line after the last include
 	
 	$last_inc_idx++;
-	while ($srcref->[$last_inc_idx][0] =~/^\s*$/) {
-		$last_inc_idx++;
-	}
+#	while ($srcref->[$last_inc_idx][0] =~/^\s*$/) {
+#		$last_inc_idx++;
+#	}
 	$srcref->[$last_inc_idx][1]{'ExtraIncludesHook'} = 1;
-	print '<'.$srcref->[$last_inc_idx][0].">\n";
-	print '<'.Dumper($srcref->[$last_inc_idx][1]).">\n";
+#	print '<'.$srcref->[$last_inc_idx][0].">\n";
+#	print '<'.Dumper($srcref->[$last_inc_idx][1]).">\n";
 #	die if $f eq 'timemanager';
 	return $stref;
 }    # END of parse_includes()
@@ -1943,11 +1943,4 @@ sub parse_vardecl {
 	}
 
 	return $vars;
-}
-
-sub show {
-	(my $annlines)=@_;
-	for my $annline (@{ $annlines }) {
-		print $annline->[0],"\t<",join(';',keys %{ $annline->[1] }),">\n";
-	}
 }

@@ -76,9 +76,3 @@ sub refactor_function {
 
 }    # END of refactor_function()
 # -----------------------------------------------------------------------------
-sub reallyCalled {
-	( my $stref, my $f ) = @_;
-	my $really_called=1;
-	
-	return $really_called;	
-}

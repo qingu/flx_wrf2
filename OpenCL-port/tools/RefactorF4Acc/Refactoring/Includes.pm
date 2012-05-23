@@ -24,14 +24,12 @@ use Exporter;
 
 @RefactorF4Acc::Refactoring::Includes::EXPORT_OK = qw(
   &refactor_includes
-  &create_refactored_include_source
 );
 
 =pod
 Includes
     refactor_includes()
-    refactor_include()  
-    create_refactored_include_source()    
+    refactor_include()      
 =cut
 
 # -----------------------------------------------------------------------------

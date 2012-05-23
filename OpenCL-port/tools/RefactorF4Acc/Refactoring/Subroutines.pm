@@ -99,8 +99,10 @@ sub refactor_subroutine_main {
         print "#" x 80, "\n";
     }
     $stref = context_free_refactorings( $stref, $f );    
+
     my $Sf = $stref->{'Subroutines'}{$f};
     my $annlines = get_annotated_sourcelines($stref,$f);
+    
     my $rlines = $annlines;
     if ( $Sf->{'HasCommons'} ) {
         if ( $Sf->{'RefactorGlobals'} == 1 ) {
@@ -209,7 +211,6 @@ sub refactor_globals {
             $skip = 1;
         }
         if ( exists $tags{'SubroutineCall'} ) {
-#croak $f,':',Dumper(%tags) ;#if $f eq 'timemanager';
             # simply tag the common vars onto the arguments
             $rlines = create_refactored_subroutine_call( $stref, $f, $annline,
                 $rlines );
@@ -253,8 +254,8 @@ sub refactor_calls_globals {
 # Basically I can keep an index counter and increment it every time I find an include
 # then the next line, whatever it is, becomes "ExtraIncludesHook"        
 #croak "Hook" if $f eq 'timemanager';
-        if ( exists $tags{'ExtraIncludesHook'} && $firstinc) {
-#        	croak "Hook" if $f eq 'timemanager';
+        if ( (exists $tags{'ExtraIncludesHook'}) && ($firstinc==1)) {        	   
+        	
 #        if ( exists $tags{'Include'} && $firstinc ) {
         	$firstinc =0;
             # First, add addional includes if required

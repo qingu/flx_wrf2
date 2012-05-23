@@ -38,5 +38,6 @@ sub analyse_all {
     # We need to walk the tree again, find the globals in rec descent.
     $stref = resolve_globals( $subname, $stref );
     $stref = analyse_sources($stref);
+    
 	return $stref;	
 }

@@ -147,8 +147,8 @@ sub main {
 
     # Analyse the source
 	$stateref = analyse_all($stateref,$subname);
-
-	# Refactor the source
+	
+    # Refactor the source
 	$stateref = refactor_all($stateref,$subname);
 
 	if ( not $call_tree_only ) {
