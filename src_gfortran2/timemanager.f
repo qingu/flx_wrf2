@@ -297,6 +297,7 @@ C Compute interval since radioactive decay of deposited mass was computed
 
 C Loop over all particles
 *************************
+!$ACC NOTRANSLATE C
 !$ACC SUBROUTINE particles_main_loop
         do 20 j=1,numpart
 

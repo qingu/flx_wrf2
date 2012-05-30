@@ -1,3 +1,4 @@
+!$ACC TRANSLATE C
       subroutine interpol_all(itime,xt,yt,zt)
 C                               i   i  i  i
 ********************************************************************************

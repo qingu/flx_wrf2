@@ -14,7 +14,7 @@ use RefactorF4Acc::CallGraph qw( create_call_graph );
 use RefactorF4Acc::Analysis qw( analyse_all );
 use RefactorF4Acc::Refactoring qw( refactor_all );
 use RefactorF4Acc::Emitter qw( emit_all );
-use RefactorF4Acc::CTranslation qw( translate_to_C );
+use RefactorF4Acc::CTranslation qw( translate_all_to_C );
 use RefactorF4Acc::Builder qw( create_build_script build_flexpart );
 
 use Getopt::Std;
@@ -167,6 +167,10 @@ sub main {
 			translate_to_C($stateref);
 		}
 	}
+	
+	translate_all_to_C($stateref);
+
+
 	create_build_script($stateref);
 	if ($build) {
 		build_flexpart();

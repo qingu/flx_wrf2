@@ -36,7 +36,9 @@ sub read_fortran_src {
 	my $is_incl = exists $stref->{'IncludeFiles'}{$s} ? 1 : 0;
 
 	my $sub_func_incl = sub_func_or_incl( $s, $stref );
+	if (not exists $stref->{$sub_func_incl}{$s}{'HasBlocks'} ){
 	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
+	}
 	my $f = $is_incl ? $s : $stref->{$sub_func_incl}{$s}{'Source'};
 	my $no_need_to_read=1;
 #	print "\nCHECK $f SourceContains\n";
@@ -110,7 +112,6 @@ sub read_fortran_src {
 						if ( isCont( $line, $free_form ) ) {
 							if ( isCont( $nextline, $free_form ) ) {
 								print DBG "C++\n";
-
 								#+ l
 								#+ n
 								@comments_stack = ();    # redundant?
@@ -163,6 +164,14 @@ sub read_fortran_src {
 								print DBG "C! \n";
 								#! l
 								#  n
+                                #=> emit the joinedline
+                                if ( $joinedline ne '' ) {
+                                    ( $stref, $s, $srctype ) =
+                                      pushAnnLine( $stref, $s, $srctype,
+                                        $joinedline, $free_form );
+                                    $joinedline = '';
+                                }
+
 								# emit the comment
 								( $stref, $s, $srctype ) =
 								  pushAnnLine( $stref, $s, $srctype, $line,
@@ -307,6 +316,8 @@ sub read_fortran_src {
 									  pushAnnLine( $stref, $s, $srctype,
 										$commentline, $free_form );
 								}
+                                pushAnnLine( $stref, $s, $srctype,
+                                        $line, $free_form );								
 								@comments_stack       = ();
 								$line                 = $nextline;
 								$next2                = 0;
@@ -744,6 +755,7 @@ sub read_fortran_src {
 #					}
 #				}
 #				 # end of postamble
+if (not exists $stref->{$srctype}{$s}{'Status'} ) {print "UNDEF: $s\n"; }
 				if ($stref->{$srctype}{$s}{'Status'} == $UNREAD ) {
 					$stref->{$srctype}{$s}{'Status'} = $READ;
 				}

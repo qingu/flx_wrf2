@@ -91,7 +91,7 @@ sub identify_loops_breaks {
             };
 
             # Goto
-            $line =~ /^\d*\s+.*?[\)\ ]\s*goto\s+(\d+)\s*$/ && do {
+            $line =~ /^\d*\s+.*?[\)\ ]\s*go\s?to\s+(\d+)\s*$/ && do {
                 my $label = $1;
                 $info->{'Goto'}{'Label'} =
                   $label;

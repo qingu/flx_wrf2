@@ -86,6 +86,9 @@ sub context_free_refactorings {
         if ( exists $tags{'Signature'} ) {
 	       push @extra_lines, ['        implicit none',{'ImplicitNone'=>1}];
         }
+        if ( exists $tags{'Goto'} ) {
+        $line=~s/\bgo\sto\b/goto/;
+        }
 		# BeginDo: just remove the label
 		if ( exists $tags{'BeginDo'} ) {
 			$line =~ s/do\s+\d+\s+/do /;
@@ -97,8 +100,7 @@ sub context_free_refactorings {
 
 			#warn "$f: END DO $line\n";
 			my $is_goto_target = 0;
-			if ( $Sf->{'Gotos'}{ $tags{'EndDo'}{'Label'} } ) {
-
+			if ( $Sf->{'Gotos'}{ $tags{'EndDo'}{'Label'} } ) {                
 				# this is an end do which serves as a goto target
 				$is_goto_target = 1;
 			}
@@ -162,13 +164,13 @@ sub context_free_refactorings {
 					$tr{'Extra'} = 1;
 					push @extra_lines, [ $filtered_line, \%tr ];
 				}
-				$line = '!! Original line for info !! ' . $line;
+				$line = '!! Original line !! ' . $line;
 				$info->{'Deleted'} = 1;
 			} else {
 				if ( scalar @vars == 1 ) {
 					if ( exists( $Sf->{'Parameters'}{ $vars[0] } ) ) {
 						# Remove this line
-						$line = '!! Original line for info !! ' . $line;
+						$line = '!! Original line !! ' . $line;
 						$info->{'Deleted'} = 1;
 					} else {
 						$line = format_f95_var_decl( $Sf, $vars[0] );						
@@ -181,7 +183,7 @@ sub context_free_refactorings {
 						$line =
 						  format_f95_multiple_var_decls( $Sf,@vars_not_pars );
 					} else {
-						$line = '!! Original line for info !! ' . $line;
+						$line = '!! Original line !! ' . $line;
 						$info->{'Deleted'} = 1;
 					}
 				}
@@ -257,7 +259,7 @@ sub context_free_refactorings {
 		      $line = $spaces.$nk. ' = '.$rhs_expr;
 		} # assignment
 		elsif ( exists $tags{'Parameter'} ) {
-			$line = '!! Original line for info !! ' . $line;
+			$line = '!! Original line !! ' . $line;
 			$info->{'Deleted'} = 1;
 		} 
 		elsif ( exists $tags{'SubroutineCall'} ) {			

@@ -6,6 +6,7 @@ use RefactorF4Acc::CallGraph qw( add_to_call_tree );
 use RefactorF4Acc::Refactoring::Common
   qw( format_f95_var_decl format_f77_var_decl );
 use RefactorF4Acc::Parser::SrcReader qw( read_fortran_src );
+use RefactorF4Acc::CTranslation qw( add_to_C_build_sources );
 
 #
 #   (c) 2010-2012 Wim Vanderbauwhede <wim@dcs.gla.ac.uk>
@@ -69,14 +70,14 @@ sub parse_fortran_src {
 	if ( not $is_incl ) {
 
 # For subroutines, we detect blocks, parse include and parse nested subroutine calls.
-		$stref = detect_blocks( $stref, $f );
+#		$stref = detect_blocks( $stref, $f );
 
 # Note that function calls have been dealt with (as a side effect) in get_var_decls()
 #        if ($is_sub) {
 # Detect the presence of a block in this target, only sets 'HasBlocks'
 # Detect include statements and add to Subroutine 'Include' field
 
-		if ( $stref->{$sub_or_func}{$f}{'HasBlocks'} == 1 ) {
+		if ( $stref->{$sub_or_func}{$f}{'HasBlocks'} == 1 ) {			
 			$stref = separate_blocks( $f, $stref );
 		}
 
@@ -398,6 +399,18 @@ sub parse_includes {
 			my $name = $1;
 			print "FOUND include $name in $f\n" if $V;
 			$Sf->{'Includes'}{$name} = $index;
+			if (
+			 exists $Sf->{'Translate'} 
+            and exists $stref->{'IncludeFiles'}{$name}
+			and not exists $stref->{'IncludeFiles'}{$name}{'Translate'}
+			) {
+			     $stref->{'IncludeFiles'}{$name}{'Translate'} = $Sf->{'Translate'};
+			     if( $Sf->{'Translate'} eq 'C') {
+                    $stref = add_to_C_build_sources( $name, $stref );
+                } else {
+                    croak '!$acc translate ('.$f.') '.$Sf->{'Translate'}.": Only C translation through F2C_ACC is currently supported.\n";
+                }
+			}
 			$last_inc_idx = $index;
 
 			#            $Sf->{'Info'}->[$index]{'Include'}{'Name'} = $name;
@@ -436,6 +449,7 @@ sub detect_blocks {
 	( my $stref, my $s ) = @_;
 	print "CHECKING BLOCKS in $s\n" if $V;
 	my $sub_func_incl = sub_func_or_incl( $s, $stref );
+	die "$sub_func_incl $s ".$stref->{$sub_func_incl}{$s}{'HasBlocks'}  if $s eq 'timemanager';
 	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
 	my $srcref = $stref->{$sub_func_incl}{$s}{'AnnLines'};
 	for my $annline ( @{$srcref} ) {
@@ -446,7 +460,7 @@ sub detect_blocks {
 # but OpenACC does not allow to provide a name
 # so I propose my own tag: !$acc subroutine name, !$acc end subroutine
 			if (   $line =~ /^\!\s+BEGIN\sSUBROUTINE\s(\w+)/
-				or $line =~ /^\!\s\$acc\ssubroutine\s(\w+)/i )
+				or $line =~ /^\!\s*\$acc\ssubroutine\s(\w+)/i )
 			{
 				$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 1;
 				my $tgt = uc( substr( $sub_func_incl, 0, 3 ) );
@@ -510,8 +524,9 @@ sub separate_blocks {
 	for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 		my $line = $srcref->[$index][0];
 		my $info = $srcref->[$index][1];
+		
 		if (   $line =~ /^\!\s+BEGIN\sSUBROUTINE\s(\w+)/
-			or $line =~ /^\!\s\$acc\s+subroutine\s(\w+)/i )
+			or $line =~ /^\!\s*\$acc\s+subroutine\s(\w+)/i )
 		{
 			$in_block = 1;
 			$block    = $1;
@@ -548,7 +563,7 @@ sub separate_blocks {
 			next;
 		}
 		if (   $line =~ /^\!\s+END\sSUBROUTINE\s(\w+)/
-			or $line =~ /^\!\s\$acc\s+end\ssubroutine\s(\w+)/i )
+			or $line =~ /^\!\s*\$acc\s+end\ssubroutine\s(\w+)/i )
 		{
 			$in_block = 0;
 			$block    = $1;
@@ -587,12 +602,22 @@ sub separate_blocks {
 # TODO: $stref=create_new_subroutine_entries($blocksref,$stref)
 	for my $block ( keys %blocks ) {
 		next if $block eq 'OUTER';
-		$stref->{'Subroutines'}{$block} = {};
+		if (not exists $stref->{'Subroutines'}{$block} ) {
+		  $stref->{'Subroutines'}{$block} = {};
+		  $stref->{'Subroutines'}{$block}{'Source'} = $Sf->{'Source'};
+		} elsif (exists $stref->{'Subroutines'}{$block}{'Translate'} ) {
+			if( $stref->{'Subroutines'}{$block}{'Translate'} eq 'C') {
+				$stref->{'Subroutines'}{$block}{'Source'} = "./$block.f";
+                 $stref = add_to_C_build_sources( $block, $stref );
+            } else {
+                croak '!$acc translate ('.$block.') '.$stref->{'Subroutines'}{$block}{'Translate'}.": Only C translation through F2C_ACC is currently supported.\n";
+            }
+		}
 		my $Sblock = $stref->{'Subroutines'}{$block};
 		$Sblock->{'AnnLines'} = $blocks{$block}{'AnnLines'};
-
+#if (exists $Sblock->{'Translate'} ) {die $block;}
 		#        $Sblock->{'Info'}  = $blocks{$block}{'Info'};
-		$Sblock->{'Source'}          = $Sf->{'Source'};
+#		$Sblock->{'Source'}          = $Sf->{'Source'};
 		$stref->{'SourceContains'}{$Sf->{'Source'}}{$block} = 'Subroutines';
 		$Sblock->{'RefactorGlobals'} = 1;
 		if ( $Sf->{'RefactorGlobals'} == 0 ) {
@@ -748,12 +773,21 @@ sub parse_subroutine_and_function_calls {
 	my $Sf          = $stref->{$sub_or_func}{$f};
 
 	# For C translation and call tree generation
+	# TODO: $translate is obsolete! 
 	if ( $translate == $GO
 		|| ( $call_tree_only && ( $gen_sub || $main_tree ) ) )
 	{
 
 		if ( $translate == $GO ) {
 			$stref = add_to_C_build_sources( $f, $stref );
+		}
+	}
+	if (exists $Sf->{'Translate'} ) {
+		
+		if( $Sf->{'Translate'} eq 'C') {
+			     $stref = add_to_C_build_sources( $f, $stref );
+		} else {
+			croak '!$acc translate ('.$f.') '.$Sf->{'Translate'}.": Only C translation through F2C_ACC is currently supported.\n";
 		}
 	}
 	my $srcref = $Sf->{'AnnLines'};
@@ -773,7 +807,11 @@ sub parse_subroutine_and_function_calls {
 				my $name = $1;
 				$stref = add_to_call_tree( $name, $stref, $f );
 				my $Sname = $stref->{'Subroutines'}{$name};
-
+                if ( exists $Sf->{'Translate'}
+                and not exists $Sname->{'Translate'}
+                 ) {
+                	$Sname->{'Translate'} = $Sf->{'Translate'}  
+                }
 				$stref->{'NId'}++;
 				my $nid = $stref->{'NId'};
 				push @{ $stref->{'Nodes'}{$pnid}{'Children'} }, $nid;
@@ -884,6 +922,14 @@ sub parse_subroutine_and_function_calls {
 						} else {
 							$stref = add_to_call_tree( $chunk, $stref, $f );
 						}
+						
+                if ( exists $Sf->{'Translate'}
+                and not exists $stref->{'Functions'}{$chunk}{'Translate'}
+                 ) {
+                    $stref->{'Functions'}{$chunk}{'Translate'} = $Sf->{'Translate'};  
+                }
+						
+						
 					}
 				}
 			}
@@ -1069,6 +1115,7 @@ sub get_commons_params_from_includes {
 # The routine is called by parse_fortran_src()
 # A better way is to extract all subs in a single pass
 # I guess the best wat is to first join the lines, then separate the subs
+=read_fortran_src_ORIG_is_OBSOLETE
 sub read_fortran_src_ORIG {
 	( my $s, my $stref ) = @_;
 	my $show    = 0;
@@ -1346,173 +1393,9 @@ sub read_fortran_src_ORIG {
 
 	return $stref;
 }    # END of read_fortran_src_ORIG()
-
-# -----------------------------------------------------------------------------
-=replaced_by_new_module
-sub read_fortran_src_better {
-	( my $s, my $stref ) = @_;
-#	my $show    = 0;
-	my $is_incl = exists $stref->{'IncludeFiles'}{$s} ? 1 : 0;
-
-	my $sub_func_incl = sub_func_or_incl( $s, $stref );
-	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
-	my $f = $is_incl ? $s : $stref->{$sub_func_incl}{$s}{'Source'};
-
-	if ( $stref->{$sub_func_incl}{$s}{'Status'} == $UNREAD ) {
-		my $ok = 1;
-		open my $SRC, '<', $f or do {
-			print "WARNING: Can't find '$f' ($s)\n";
-			$ok = 0;
-		};
-		if ($ok) {
-			print "READING SOURCE for $f ($s, $sub_func_incl)\n" if $V;
-
-			my $line       = '';
-			my $nextline   = '';
-			my $joinedline = '';
-			my $next2      = 1;
-
-			# 0. Slurp the source; standardise the comments
-
-			my @rawlines = <$SRC>;			
-			close $SRC;
-			my @lines = grep {!/^\s*$/} @rawlines;
-			my @newlines = ();
-
-			#            $stref = testFreeForm($stref,$s,@lines);
-			my $free_form = $stref->{$sub_func_incl}{$s}{'FreeForm'};
-			my $srctype=$sub_func_incl;
-#			my $f=''; 
-			if ($free_form) {
-				croak "BROKEN! Must be reworked like fixed form below";
-				while (@lines) {
-					if ($next2) {
-						$line = shift @lines;						
-						# We could skip blank lines here
-						$nextline = shift( @lines) // ''; # '/					
-                    } else {
-                        $nextline= shift( @lines) // ''; # '/
-						$next2 = 1;
-					}
-					if ( isCont( $line, $free_form ) ) {
-						$joinedline .= removeCont( $line, $free_form );
-					} else {
-						push @newlines, procLine( $line, $free_form );
-					}
-					if ( isCont( $nextline, $free_form ) ) {
-						$joinedline .= removeCont( $nextline, $free_form );
-					} else {
-						if ( $joinedline ne '' ) {
-							$joinedline = procLine( $joinedline, $free_form );
-							push @newlines, $joinedline;
-							$joinedline = '';
-						}
-						push @newlines, procLine( $nextline, $free_form );
-					}
-				}
-				                if ($joinedline ne '') {
-                       my $pline = procLine( $joinedline, $free_form );
-                            push @newlines, $pline;                
-                }
-				
-			} else { # Fixed form
-			     my $line_set_to_nextline=0;
-			     my $is_cont=0;
-			     my $maybe_is_cont=0;
-			     my @comments_stack=();
-				while (@lines) {
-					$line_set_to_nextline=0;
-					if ($next2) {
-						$line = shift @lines;
-#						print "LINE: $line";
-						# We could skip blank lines here
-						$nextline = shift(@lines) // ''; # '/
-#						print "NEXT LINE: $nextline";    
-                    } else {
-                        $nextline=shift( @lines ) // ''; # '/
-#                        print "NEXT LINE: $nextline";   
-						$next2 = 1;
-					}
-					
-					if ( isCont( $nextline, $free_form ) ) {
-						# +? line
-						# +  nextline
-						if (isCommentOrBlank($line) ) {
-							if ($joinedline ne '') {
-                                ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$nextline, $free_form);
-							} else {
-								croak "Continuation without starting line!";
-							}
-						} else {
-    						if (not isCont($line, $free_form )) {
-	       						$joinedline='';
-			     			}
-                               $joinedline .= removeCont( $line, $free_form );
-                                $joinedline .= removeCont( $nextline, $free_form );
-						  }
-#						if ($joinedline ne '' and not isCont($line, $free_form ) and not isCommentOrBlank($line) ) {
-#                            ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
-#                            $joinedline='';
-#                        }
-##						print "STASH1 $line";
-##						print "STASH1 $nextline";
-#						$joinedline .= removeCont( $line, $free_form );
-#						$joinedline .= removeCont( $nextline, $free_form );
-##                        print "ACC1 $joinedline\n";
-					} elsif ( isCont( $line, $free_form )
-						&& !isCont( $nextline, $free_form ) )
-					{
-
-			 # + line
-			 #   nextline -> could be a split line, unless it's a blank or a comment
-#			            print "STASH2 $line";
-						$joinedline .= removeCont( $line, $free_form );						 
-						if (not isCommentOrBlank($nextline) ) {
-						  ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
-						  $joinedline = '';						  
-						} else {
-							# next line is a comment, do nothing
-						}
-						$line  = $nextline;
-						$next2 = 0; 
-					} else {
-			   # line
-			   # nextline -> could be a split line, unless it's a blank or a comment
-			   
-			             if ($joinedline ne '' and not isCommentOrBlank($nextline) ) { # FIXME: still weak: if there are a lot of comments in a broken-up line, 
-			   # it could be that we still get a continuation. 
-#			   	print "ACC2 $joinedline\n";
-                            ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);
-                            $joinedline='';
-			             }
-					   ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$line, $free_form);
-					   if ( not isCommentOrBlank( $nextline, $free_form ) ) {							
-					       $line  = $nextline;
-					       $line_set_to_nextline=1;
-						  $next2 = 0;
-					   } else {
-                        ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$nextline, $free_form);
-					   }
-					}
-				} # loop over source lines
-				if ($joinedline ne '') {
-                        ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$joinedline, $free_form);                            
-				} else {
-                ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$line, $free_form);
-                if( not $line_set_to_nextline ) {
-				    ($stref,$s,$srctype) = pushAnnLine($stref,$s,$srctype,$nextline, $free_form);
-                } 
-				}
-				$stref->{$srctype}{$s}{'Status'} = $READ; 
-#				croak "Fatal flaw: need to separate out per sub/func!!";
-			}    # free form or not
-#			$stref->{$sub_func_incl}{$s}{'AnnLines'} = [@newlines];
-		}    # if OK
-	}    # if Status==0
-
-	return $stref;
-}    # END of read_fortran_src_better()
 =cut
+# -----------------------------------------------------------------------------
+
 # -----------------------------------------------------------------------------
 sub pushAnnLine {
 	(my $stref, my $f, my $srctype,my $line, my $free_form)=@_;
@@ -1537,32 +1420,7 @@ sub pushAnnLine {
 	return ($stref,$f,$srctype);	
 } # pushAnnLine()
 # -----------------------------------------------------------------------------
-#sub testFreeForm{ (my $stref, my $s,my @lines)=@_;
-#	my $sub_func_incl = sub_func_or_incl( $s, $stref );
-#	my $free_form=0;
-#	for my $line (@lines) {
-#        chomp $line;
-#
-#                # Skip blanks
-#                $line =~ /^\s*$/ && next;
-#
-## If it's not a comment and we still have to check if it's fixed or free form
-## Testing a single line is maybe not enough, it might be 6-space by coincidence ...
-## The real test is on continuation lines
-#
-#                    if ( $line !~ /^[\s\d]{6}.+/ and $line !~ /^\t\w/ ) {
-#                        $free_form = 1;
-#			last;
-#                    }
-#
-#                if ( $free_form == 0 && $line =~ /\&\s*$/ ) {
-#                    $free_form = 1;
-#		    last;
-#                }
-#	}
-#	$stref->{$sub_func_incl}{$s}{'FreeForm'}=$free_form;
-#	return $stref ;
-#}
+
 # -----------------------------------------------------------------------------
 sub isCont {
 	( my $line, my $free_form ) = @_;

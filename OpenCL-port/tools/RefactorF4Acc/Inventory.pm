@@ -59,18 +59,28 @@ sub find_subroutines_functions_and_includes {
 	my $has_blocks=0;
 	my $free_form=0;
 	my $fstyle='F77';	
+	my $translate_to='';
 	
         open my $SRC, '<', $src;
         while ( my $line = <$SRC> ) {
 
             # Skip blanks
             $line =~ /^\s*$/ && next;
+            # Translate pragma
+        if ( $line =~ /^\!\s*\$acc\stranslate\s(\w+)/i ) { 
+            $translate_to=$1;
+        }             
 
 	    # Detect blocks
             if ( $has_blocks == 0 ) {
             	if ( $line =~ /^[Cc\*\!]\s+BEGIN\sSUBROUTINE\s(\w+)/ 
-		or $line =~ /^\!\s\$acc\ssubroutine\s(\w+)/i ){
+		or $line =~ /^\!\s*\$acc\ssubroutine\s(\w+)/i ){
+			             my $sub=$1;
                         $has_blocks = 1;
+                        if ($translate_to ne '') {
+                        	$stref->{'Subroutines'}{$sub}{'Translate'}= $translate_to;
+                        	$translate_to='';                        	
+                        }
                 }
             }
 
@@ -96,7 +106,6 @@ sub find_subroutines_functions_and_includes {
             }
         }
         
-             
             # Find subroutine/program signatures
             $line =~ /^\s*(subroutine|program)\s+(\w+)/i && do {            	
                 my $is_prog = ($1 eq 'program') ? 1 : 0;
@@ -104,7 +113,7 @@ sub find_subroutines_functions_and_includes {
                     print "Found program $2 in $src\n" if $V;
                 }                
                 my $sub  = lc($2);
-		        $f=$sub;
+		        $f=$sub;		        
 		        $srctype='Subroutines';
                 $stref->{'Subroutines'}{$sub}={};
                 $stref->{'SourceContains'}{$src}{$f}=$srctype;
@@ -128,6 +137,10 @@ sub find_subroutines_functions_and_includes {
                     $Ssub->{'Status'}  = $UNREAD;
                     $Ssub->{'Program'} = $is_prog;
                     $Ssub->{'Callers'}  = {};
+                    if ($translate_to ne '') {
+                        $Ssub->{'Translate'}  = $translate_to;
+                        $translate_to = '';
+                    }
 
                 } else {
                     print
@@ -153,6 +166,10 @@ sub find_subroutines_functions_and_includes {
                 my $func = lc($1);               
                 $stref->{'Functions'}{$func}{'Source'} = $src;
                 $stref->{'Functions'}{$func}{'Status'} = $UNREAD;
+                if ($translate_to ne '') {
+                        $stref->{'Functions'}{$func}{'Translate'}  = $translate_to;
+                        $translate_to = '';
+                    }
 		          $f=$func;
 		          $srctype='Functions';
 		          $stref->{'SourceContains'}{$src}{$f}=$srctype;
@@ -161,12 +178,12 @@ sub find_subroutines_functions_and_includes {
             $stref->{$srctype}{$f}{'FStyle'}=$fstyle;
             $stref->{$srctype}{$f}{'FreeForm'}=$free_form;  
             $stref->{$srctype}{$f}{'HasBlocks'}=$has_blocks;
-
-        }
+        
+        } # loop over lines;
             
         close $SRC;
     }
     
-
+#die $stref->{'Subroutines'}{'timemanager'}{'HasBlocks'}  ;
     return $stref;
 }    # END of find_subroutines_functions_and_includes()

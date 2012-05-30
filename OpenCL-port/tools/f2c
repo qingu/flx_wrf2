@@ -16,7 +16,7 @@ if (@ARGV==2 && $ARGV[1] eq '-H') {
 }
 if ($H==0) {
     $file=~s/\.\w*$//;
-    system("$GPU_ROOT/F2C-ACC --FileType=MODULE --Fixed --Generate=C $file.f ");
+    system("$GPU_ROOT/F2C-ACC --FileType=MODULE --Free --Generate=C $file.f ");
     system("m4  $GPU_HOME/include/logical.m4 $GPU_HOME/include/ARCH.m4 $file.m4 > $file.c");
 } else {
     unlink "$file.h";

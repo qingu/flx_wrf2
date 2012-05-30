@@ -21,7 +21,8 @@ use Exporter;
 @RefactorF4Acc::CTranslation::ISA = qw(Exporter);
 
 @RefactorF4Acc::CTranslation::EXPORT_OK = qw(
-    &translate_to_C 
+    &add_to_C_build_sources
+    &translate_all_to_C        
 );
 sub translate_to_C {
 	( my $stref ) = @_;
@@ -65,10 +66,12 @@ sub emit_C_targets {
     }
 }    # END of emit_C_targets()
 # -----------------------------------------------------------------------------
-
-sub translate_sub_to_C {
+sub translate_sub_to_C { }
+# -----------------------------------------------------------------------------
+sub translate_all_to_C {
     ( my $stref ) = @_;
-
+    local $V=1;
+my $T=1;
 # At first, all we do is get the call tree and translate all sources to C with F2C_ACC
 # The next step is to fix the bugs in F2C_ACC via post-processing (later maybe actually debug F2C_ACC)
     chdir $targetdir;
@@ -79,7 +82,7 @@ sub translate_sub_to_C {
         if ( -e $csrc ) {
             my $cmd = "../OpenCL-port/tools/f2c $csrc";
             print $cmd, "\n" if $V;
-            system($cmd);
+            system($cmd) if $T;
         } else {
             print "WARNING: $csrc does not exist\n" if $W;
         }
@@ -87,25 +90,29 @@ sub translate_sub_to_C {
 
 # A minor problem is that we need to translate all includes contained in the tree as well
     foreach my $inc ( keys %{ $stref->{'BuildSources'}{'H'} } ) {
-        my $cmd = "f2c $inc -H";
+        my $cmd = "../OpenCL-port/tools/f2c $inc -H"; # FIXME: includes need -I support! NOTE $inc , not ./$inc, bug in F2C_ACC
         print $cmd, "\n" if $V;
-        system($cmd);
+        system($cmd) if $T;
     }
+    
     my $i = 0;
     print "\nPOSTPROCESSING C CODE\n\n";
     foreach my $csrc ( keys %{ $stref->{'BuildSources'}{'C'} } ) {
         $csrc =~ s/\.f/\.c/;
-        postprocess_C( $stref, $csrc, $i );
-
-        #      die if $csrc=~/hanna\./;
+         if ($T) {
+            postprocess_C( $stref, $csrc, $i );
+         } else {
+         	print "postprocess_C( \$stref, $csrc, $i );\n";
+         }
         $i++;
     }
 
     # Test the generated code
+    print "\nTESTING C CODE\n\n";
     foreach my $ii ( 0 .. $i - 1 ) {
         my $cmd = 'gcc -Wall -c -I$GPU_HOME/include tmp' . $ii . '.c';
-        print $cmd, "\n";
-        system $cmd;
+        print $cmd, "\n" if $V;
+        system $cmd if $T;
     }
 
 }    # END of translate_sub_to_C()
@@ -139,6 +146,8 @@ sub postprocess_C {
     my %labels        = ();
     my %input_scalars = ();
 
+    ### Local functions
+    
     # We need to check if this particular label is a Break
     # So we need a list of all labels per subroutine.
     my $isBreak = sub {
@@ -152,15 +161,31 @@ sub postprocess_C {
         return ( $labels{$label} eq 'NoopBreakTarget' );
     };
 
-    #    my %functions = %{ $stref->{'Functions'} };
-
-    open my $CSRC,   '<', $csrc;
+    open my $CSRC,   '<', $csrc; # FIXME: need PATH support
     open my $PPCSRC, '>', 'tmp' . $i . '.c';    # FIXME
     my $skip = 0;
-
+    my $skipline = 0;
     while ( my $line = <$CSRC> ) {
         my $decl = '';
+        $line=~/^\#define\ FALSE/ && do {
+        	$skipline=1;
+        	print $PPCSRC $line;
+            next;
+        }; 
+        if ($line=~/^\#define\s+(\w+)/ ) {
+        	my $par=$1;
+        	if ( exists $stref->{'Subroutines'}{$sub}{'Parameters'}{$par} ) { # FIXME!i
+                $skipline=0;
+        	}
+        }; 
+        if ($line=~/^\s*\/\//) {
+        	print $PPCSRC $line;
+        	next;
+        }
+        $line=~/^\s*$/ && next;
+        # Rewrite the subroutine signature. Not sure if this is still required, skip for now.
         $line =~ /^\s*void\s+(\w+)_\s+\(\s*(.*?)\s*\)\s+\{/ && do {
+        	$skipline=0;
             $sub    = $1;
             $argstr = $2;
             my $Ssub = $stref->{'Subroutines'}{$sub};
@@ -188,10 +213,10 @@ sub postprocess_C {
                 if ( exists $vars{$var} and $vars{$var}{'Type'} ) {
                     my $ftype = $vars{$var}{'Type'};
                     my $ctype = toCType($ftype);
-                    my $iodir = $Ssub->{'RefactoredArgs'}{$var}{'IODir'};
+#                    print Dumper($Ssub->{'RefactoredArgs'}{'Set'});
+                    my $iodir = $Ssub->{'RefactoredArgs'}{'Set'}{$var}{'IODir'};
                     my $kind  = $vars{$var}{'Kind'};
 
-#                    print "ARG $var\n" if ( $iodir eq 'In' and $kind eq 'Scalar');
                     if ( $iodir eq 'In' and $kind eq 'Scalar' ) {
                         $arg = "$ctype $var";
                     } else {
@@ -207,9 +232,10 @@ sub postprocess_C {
             if ( exists $Ssub->{'Gotos'} ) {
                 %labels = %{ $Ssub->{'Gotos'} };
             }
+            # Create a header file with declarations
             $decl = $line;
             $decl =~ s/\{.*$/;/;
-            my $hfile = "$sub.h";
+            my $hfile = "$sub.h";            
             open my $INC, '>', $hfile;
             my $shield = $hfile;
             $shield =~ s/\./_/;
@@ -221,13 +247,14 @@ sub postprocess_C {
             close $INC;
 
             $skip = 1;
-        };
-
+        }; # signature
+        
+        # This too might be obsolete, or at least "TODO"
         $line =~ /(\w+)=\*(\w+)__G;/ && do {
             if ( $1 eq $2 ) {
                 my $var = $1;
                 my $iodir =
-                  $stref->{'Subroutines'}{$sub}{'RefactoredArgs'}{$var}
+                  $stref->{'Subroutines'}{$sub}{'RefactoredArgs'}{'Set'}{$var}
                   {'IODir'};
                 my $kind = $vars{$var}{'Kind'};
                 if ( $iodir eq 'In' and $kind eq 'Scalar' ) {
@@ -236,6 +263,7 @@ sub postprocess_C {
                 }
             }
         };
+        # Fix translation errors
         $line =~ /F2C\-ACC\:\ Type\ not\ recognized\./ && do {
             my @chunks = split( /\,/, $line );
             for my $chunk (@chunks) {
@@ -255,20 +283,6 @@ sub postprocess_C {
             $line = join( ',', @chunks );
         };
 
-        #        if ($decl ne '') {
-        #           $decl=$line;
-        #                $decl=~s/\{.*$/;/;
-        #                my $hfile="$sub.h";
-        #               open my $INC,'>',$hfile;
-        #               my $shield=$hfile;
-        #               $shield=~s/\./_/;
-        #               $shield='_'.uc($shield).'_';
-        #               print $INC '#ifndef '.$shield."\n";
-        #               print $INC '#define '.$shield."\n";
-        #               print $INC $decl,"\n";
-        #               print $INC '#endif //'.$shield."\n";
-        #               close $INC;
-        #        }
         $line =~ /F2C\-ACC\:\ xUnOp\ not\ supported\./
           && do {    # FIXME: we assume the unitary operation is .not.
             my @chunks = split( /\,/, $line );
@@ -278,7 +292,9 @@ sub postprocess_C {
             $line = join( ',', @chunks );
 
           };
+          # Can't have externs!
         next if $line =~ /^\s*extern\s+void\s+noop/;
+        
         if ( $skip == 0 ) {
             if ( $line =~ /^\s*extern\s+\w+\s+(\w+)_\(/ ) {
                 my $inc   = $1;
@@ -286,16 +302,6 @@ sub postprocess_C {
 
                 if ( not -e $hfile ) {
                     $line =~ s/^\s*extern\s+//;
-
-                    #               open my $INC,'>',$hfile;
-                    #               my $shield=$hfile;
-                    #               $shield=~s/\./_/;
-                    #               $shield='_'.uc($shield).'_';
-                    #               print $INC '#ifndef '.$shield."\n";
-                    #               print $INC '#define '.$shield."\n";
-                    #               print $INC $line;
-                    #               print $INC '#endif //'.$shield."\n";
-                    #               close $INC;
                 }
                 print $PPCSRC '#include "' . $hfile . '"' . "\n";
                 next;
@@ -365,7 +371,7 @@ sub postprocess_C {
 
             # Subroutine call
             $line !~ /\#define/
-              && $line =~ s/\s([\+\-\*\/\%])\s/$1/g;    # super ad-hoc!
+              && $line =~ s/\s([\+\-\*\/\%])\s/$1/g;    # FIXME: super ad-hoc!
             $line =~ /(^|^.*?\{\s)\s*(\w+)_\(\s([\+\*\,\w\(\)\[\]]+)\s\);/
               && do {
 
@@ -379,7 +385,7 @@ sub postprocess_C {
                 my $called_sub_args =
                   $stref->{'Subroutines'}{$calledsub}{'RefactoredArgs'}{'List'};
                 my @nargs = ();
-#                my $ii = 0;
+
                 for my $ii ( 0 .. scalar @{$called_sub_args} - 1 ) {
                     my $arg            = shift @args;
                     my $called_sub_arg = $called_sub_args->[$ii];
@@ -392,8 +398,6 @@ sub postprocess_C {
                       ? 1
                       : 0;
 
-                #               print "CALLED SUB $calledsub ARG: $called_sub_arg\n";
-                #               my $targ=$arg;
                     if ( $arg =~ /^\((\w+)\)$/ ) {
                         $arg = $1;
                     }
@@ -502,7 +506,8 @@ sub postprocess_C {
 # int float, float int, float float
 # FIXME: we assume float, float
         $line =~ s/\s+([\w\(\)]+)\s*\%\s*([\w\(\)]+)/ mod($1,$2)/;
-        print $PPCSRC $line;
+        
+        print $PPCSRC $line unless $skipline;
     }
     close $CSRC;
     close $PPCSRC;
@@ -530,20 +535,28 @@ sub toCType {
 sub add_to_C_build_sources {
     ( my $f, my $stref ) = @_;
     my $sub_or_func = sub_func_or_incl( $f, $stref );
-    my $src = $stref->{$sub_or_func}{$f}{'Source'};
+    my $is_inc = $sub_or_func eq 'IncludeFiles';
+    if (not $is_inc ) {
+    my $src =  $stref->{$sub_or_func}{$f}{'Source'};        
     if ( not exists $stref->{'BuildSources'}{'C'}{$src} ) {
         print "ADDING $src to C BuildSources\n" if $V;
         $stref->{'BuildSources'}{'C'}{$src} = 1;
-        $stref->{$sub_or_func}{$f}{'Status'} = $C_SOURCE;
+#        $stref->{$sub_or_func}{$f}{'Status'} = $C_SOURCE;
     }
-
-# Assuming no includes in Functions, this is not needed for Functions
-# However, this might be too restrictive: surely includes with constants must be supported! FIXME!
-    for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } ) {
+    } else {
+    	my $inc=$f;
         if ( not exists $stref->{'BuildSources'}{'H'}{$inc} ) {
             print "ADDING $inc to C Header BuildSources\n" if $V;
             $stref->{'BuildSources'}{'H'}{$inc} = 1;
         }
+    	
     }
+
+#    for my $inc ( keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } ) {
+#        if ( not exists $stref->{'BuildSources'}{'H'}{$inc} ) {
+#            print "ADDING $inc to C Header BuildSources\n" if $V;
+#            $stref->{'BuildSources'}{'H'}{$inc} = 1;
+#        }
+#    }
     return $stref;
 } # END of add_to_C_build_sources()
