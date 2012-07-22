@@ -185,12 +185,18 @@ sub parse_args {
 		die "Please specifiy FORTRAN subroutine or program to refactor\n";
 	}
 	my %opts = ();
-	getopts( 'vwihCTNbBG', \%opts );
+	getopts( 'vwihCTNbBGc:', \%opts );
 	my $subname = $ARGV[0];
 	if ($subname) {
 		$subname =~ s/\.f(?:90)?$//;
 	}
-
+	
+	my $cfgrc= $ENV{HOME}.'/.rf4a';
+	if ($opts{'c'}) {
+		 $cfgrc= $opts{'c'} ;
+	} 
+    read_config($cfgrc);   
+    
 	$V = ( $opts{'v'} ) ? 1 : 0;
 	$I = ( $opts{'i'} or $V ) ? 1 : 0;
 	$W = ( $opts{'w'} or $V ) ? 1 : 0;

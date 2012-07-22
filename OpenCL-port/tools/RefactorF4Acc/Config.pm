@@ -18,7 +18,9 @@ $call_tree_only
 $main_tree
 $gen_sub
 $translate
-$targetdir    
+$targetdir
+%Config
+&read_config    
 );
 
 our $VER = '0.3';
@@ -46,3 +48,28 @@ our $translate         = $NO;
 ( our $UNREAD, our $READ, our $PARSED, our $FROM_BLOCK, our $C_SOURCE ) =
   ( 0 .. 4 );
 our $targetdir = '../RefactoredSources';
+
+our %Config=();
+
+sub read_config {
+	(my $cfgrc)=@_;
+open my $CFG, '<', $cfgrc or die $!,$cfgrc;
+for my $line (<$CFG>) {
+	next if $line=~/^\s*#/;
+	next unless $line=~/=/;
+	print $line if $V;
+	chomp $line;
+	$line=~s/\s+$//;
+	(my $k, my $v) = split(/\s*\=\s*/,$line);
+	if ($v=~/,/) {
+		my @vs=split(/\s*,\s*/,$v);
+		$Config{$k}=[@vs];
+	} else {
+		$Config{$k}=[$v];
+	}
+}
+close $CFG;
+}
+
+
+1;
