@@ -48,7 +48,7 @@ sub parse_fortran_src {
 	
 	my $sub_or_func = sub_func_or_incl( $f, $stref );
 	print "SRC TYPE: $sub_or_func\n" if $V;
-	if ($sub_or_func ne 'ExternalSubroutines') {
+#	if ($sub_or_func ne 'ExternalSubroutines') {
 	my $Sf          = $stref->{$sub_or_func}{$f};
 
 #	 if ($f eq 'boundcond_domainfill') {
@@ -79,7 +79,7 @@ sub parse_fortran_src {
 # Detect the presence of a block in this target, only sets 'HasBlocks'
 # Detect include statements and add to Subroutine 'Include' field
 
-		if ( $stref->{$sub_or_func}{$f}{'HasBlocks'} == 1 ) {			
+		if ( $stref->{$sub_or_func}{$f}{'HasBlocks'} == 1 ) {					
 			$stref = separate_blocks( $f, $stref );
 		}
 
@@ -104,7 +104,7 @@ sub parse_fortran_src {
 		#    warn "-------\n";
 #		die;
 #	}
-}
+#}
 	#    $stref=create_annotated_lines($stref,$f);
 	print "LEAVING parse_fortran_src( $f ) with Status $stref->{$sub_or_func}{$f}{'Status'}\n" if $V; 
 	return $stref;
@@ -166,11 +166,11 @@ sub analyse_lines {
 		 # So we have
 
 			elsif ( $line =~
-			/(logical|integer|real|double\s*precision|character)\s+(.+)\s*$/
-#WV23JUL				/\b(logical|integer|real|double\s*precision|character)\s+([^\*]+)\s*$/
+#			/(logical|integer|real|double\s*precision|character)\s+(.+)\s*$/
+            /\b(logical|integer|real|double\s*precision|character)\s+([^\*]+)\s*$/
 				or $line =~
-            /((?:logical|integer|real|double\s*precision|character)\*(?:\d+|\(\*\)))\s+(.+)\s*$/				
-#WV23JUL     /\b((?:logical|integer|real|double\s*precision|character)\s*\*(?:\d+|\(\*\)))\s+(.+)\s*$/
+#            /((?:logical|integer|real|double\s*precision|character)\*(?:\d+|\(\*\)))\s+(.+)\s*$/				
+            /\b((?:logical|integer|real|double\s*precision|character)\s*\*(?:\d+|\(\*\)))\s+(.+)\s*$/
 			  )
 			{
 				$type   = $1;
@@ -192,7 +192,8 @@ sub analyse_lines {
 				$indent =~ s/\S.*$//;
 
 			 # But this could be a parameter declaration, with an assignment ...
-				if ( $line =~ /,\s*parameter\s*.*?::\s*(\w+\s*=\s*.+?)\s*$/ )
+#               if ( $line =~ /,\s*parameter\s*.*?::\s*(\w+)\s*=\s*(.+?)\s*$/ )
+                if ( $line =~ /,\s*parameter\s*.*?::\s*(\w+\s*=\s*.+?)\s*$/ )
 				{    # F95-style parameters
 
 					#				    $Sf->{'FStyle'}='F95';
@@ -346,33 +347,21 @@ sub analyse_lines {
 							exists $stref->{'Functions'}{$tvar}{'AnnLines'} )
 						{
 							$stref = parse_fortran_src( $tvar, $stref );
-
-#                            die Dumper($stref->{'Functions'}{$tvar}) if $tvar eq 'cgszll';
 						}
 					}
 					push @varnames, $tvar;
 				}    # loop over all vars declared on a single line
 
-#                $Data::Dumper::Indent=2;
-#                die Dumper(%vars) if $line=~/vardata.+lendim_max/ && $f eq 'read_ncwrfout_1realfield';
 				print "\tVARS <$line>: ", join( ',', @varnames ), "\n" if $V;
-
-#                $stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'VarDecl'} = \@varnames;
 				$info->{'VarDecl'} = \@varnames;
 				if ($first) {
 					$first = 0;
-
-#                    $stref->{$sub_func_incl}{$f}{'Info'}->[$index]{'ExGlobVarDecls'} = {};
 					$info->{'ExGlobVarDecls'} = {};
 				}
 			}
 			$srcref->[$index] = [ $line, $info ];
 		}    # Loop over lines
 		$stref->{$sub_func_incl}{$f}{'Vars'} = \%vars;
-
-#                $Data::Dumper::Indent=2;
-#                croak Dumper( $stref->{$sub_func_incl}{$f}{'Vars'}{'drydeposit'}) if $f eq 'particles_main_loop';
-
 	}
 
 	#           die "FIXME: shapes not correct!";
@@ -806,10 +795,10 @@ sub parse_subroutine_and_function_calls {
 			next if $line =~ /^\!\s/;
 
 	  # Subroutine calls. Surprisingly, these even occur in functions! *shudder*
-			#if ( $line =~ /call\s+(\w+)\s*\((.*)\)/ || $line =~ /call\s+(\w+)\s*$/ ) # WV23JUL2012
-			if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )            
+            if ( $line =~ /call\s+(\w+)\s*\((.*)\)/ || $line =~ /call\s+(\w+)\s*$/ ) # WV23JUL2012
+#			if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )            
 			{
-				die if $line=~/advance/;
+#				die if $line=~/advance/;
 				my $name = $1;
 				$stref = add_to_call_tree( $name, $stref, $f );
 				my $Sname = $stref->{'Subroutines'}{$name};

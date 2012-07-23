@@ -168,7 +168,7 @@ sub main {
 		}
 	}
 	
-	translate_all_to_C($stateref);
+#	translate_all_to_C($stateref);
 
 
 	create_build_script($stateref);

@@ -120,9 +120,9 @@ sub format_call_tree_line {
 	(my $f, my $stref ) = @_;
     my $sub_or_func = sub_func_or_incl( $f, $stref );
     my $src         = $stref->{$sub_or_func}{$f}{'Source'};
-    if (not defined $src) {
-    	$src='EXTERNAL SOURCE';
-    }
+#    if (not defined $src) {
+#    	$src='EXTERNAL SOURCE';
+#    }
     my $nspaces     = 64 - $stref->{'Indents'} - length($f); # -length($src) -2;
     my $incls = join( ',', keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } );
     my $padding = ' ' x ( 32 - length($src) );

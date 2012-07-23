@@ -41,26 +41,30 @@ sub find_subroutines_functions_and_includes {
         # FIXME: we must have a list of folders to search or not to search!
         $src_files{$File::Find::name} = 1;
     };
-    for my $dir (@srcdirs) { 
-    	print "$dir\n";
-    find( $tf_finder, "$prefix/$dir" );
+    for my $dir (@srcdirs) {
+    	my $path="$prefix/$dir";
+    	if ($dir eq '.') {
+    	   $path=$prefix;
+    	} 
+    	print "$path\n";
+        find( $tf_finder, $path );
     }
-
-    for my $src ( keys %src_files ) {#sort WV23JUL2012
+#    find( $tf_finder, '.' );
+    for my $src ( sort keys %src_files ) {#sort WV23JUL2012
     	if  ($src=~/\.c$/) {
-#    		warn "C SOURCE: $src\n";
+    		warn "C SOURCE: $src\n";
     		# FIXME: ugly ad-hoc hack!
     		# WRF uses cpp to make subroutine names match with Fortran
     		# So we need to call cpp first, but with all the correct macros ...
     		# Without any defined macros, it's like this:    	
-#    		my @lines=`grep -v '#include' $src  | cpp -P -`;
+    		my @lines=`grep -v '#include' $src  | cpp -P -`;
     		# I guess we could use some command-line flag to add the macro definitions
     		# And now we must parse C sources too ...
     		
 #    		die;
             
     	} else {
-#    	   print "F90 SOURCE: $src\n"; 
+    	   print "F90 SOURCE: $src\n"; 
     	}
         $stref=process_src($src,$stref);
     }
@@ -79,11 +83,11 @@ sub process_src {
     my $fstyle='F77';   
     my $translate_to='';
     
-        open my $SRC, '<', $src;
-        while ( my $line = <$SRC> ) {
+    open my $SRC, '<', $src;
+    while ( my $line = <$SRC> ) {
 
             # Skip blanks
-            $line =~ /^\s*$/ && next;
+        $line =~ /^\s*$/ && next;
             # Translate pragma
         if ( $line =~ /^\!\s*\$acc\stranslate\s(\w+)/i ) { 
             $translate_to=$1;
@@ -101,7 +105,7 @@ sub process_src {
                         }
                 }
             }
-
+            
             # Skip comments 
             $line =~ /^\s*[C\*\!]/i && next;
             
@@ -197,6 +201,7 @@ sub process_src {
             $stref->{$srctype}{$f}{'FStyle'}=$fstyle;
             $stref->{$srctype}{$f}{'FreeForm'}=$free_form;  
             $stref->{$srctype}{$f}{'HasBlocks'}=$has_blocks;
+#            print "{$srctype}{$f}{'HasBlocks'}=$has_blocks\n";
         
         } # loop over lines;
             

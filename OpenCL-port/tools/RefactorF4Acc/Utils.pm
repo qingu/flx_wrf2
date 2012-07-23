@@ -37,10 +37,10 @@ sub sub_func_or_incl {
     } elsif ( exists $stref->{'IncludeFiles'}{$f} ) {
         return 'IncludeFiles';
     } else {
-        #print Dumper($stref);
-        #croak "No entry for $f in the state\n";
+#        #print Dumper($stref);
+#        #croak "No entry for $f in the state\n";
         # Assuming it's a C function
-        return 'ExternalSubroutines';
+#WV23JUL        return 'ExternalSubroutines';
     }
 }
 

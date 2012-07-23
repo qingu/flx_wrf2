@@ -16,6 +16,8 @@ use strict;
 use Carp;
 use Data::Dumper;
 
+use RefactorF4Acc::Parser qw( parse_fortran_src );
+
 use Exporter;
 
 @RefactorF4Acc::Analysis::Includes::ISA = qw(Exporter);
@@ -27,16 +29,23 @@ use Exporter;
 
 sub find_root_for_includes {
     ( my $stref, my $f ) = @_;
+    
     $stref = create_include_chains( $stref, 0 );  # assumes we start at node 0 in the tree
     for my $inc ( keys %{ $stref->{'IncludeFiles'} } ) {
 #       print "INC: $inc\n";
 #       print Dumper($stref->{'IncludeFiles'}{$inc});
-        if ($stref->{'IncludeFiles'}{$inc}{'Status'}==0) {
-            croak "TROUBLE: $inc not yet parsed, how come?";
+        if ($stref->{'IncludeFiles'}{$inc}{'Status'}==$UNREAD) {
+        	#WV23JUL2012: This is weak, clearly the only good way is to find the includes in rec descent 
+            croak "TROUBLE: $inc (in $f) not yet parsed, how come?";
+#            print "WARNING: $inc not yet parsed, parsing ...\n";
+#                $stref->{'IncludeFiles'}{$inc}{'Root'}      = $f;
+                $stref->{'IncludeFiles'}{$inc}{'HasBlocks'} = 0;
+                $stref = parse_fortran_src( $inc, $stref );   
+#                print Dumper($stref->{'IncludeFiles'}{$inc});         
         }
         if ( $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common' ) {
 
-            #           print "FINDING ROOT FOR $inc ($f)\n" ;
+#            print "FINDING ROOT FOR $inc ($f)\n" ;
             $stref = find_root_for_include( $stref, $inc, $f );
             print "ROOT for $inc is "
               . $stref->{'IncludeFiles'}{$inc}{'Root'} . "\n"
@@ -62,6 +71,7 @@ The algorithm is as follows:
 =cut
 sub find_root_for_include {
     ( my $stref, my $inc, my $sub ) = @_;
+    
     my $Ssub = $stref->{'Subroutines'}{$sub};
     
     if ( exists $Ssub->{'Includes'}{$inc} ) {
@@ -114,7 +124,6 @@ sub create_include_chains {
     if ( exists $stref->{'Nodes'}{$nid}{'Children'}
         and @{ $stref->{'Nodes'}{$nid}{'Children'} } )
     {
-
         # Find all children of $nid
         my @children = @{ $stref->{'Nodes'}{$nid}{'Children'} };
 
@@ -123,7 +132,6 @@ sub create_include_chains {
             $stref = create_include_chains( $stref, $child );
         }
     } else {
-
 # We reached a leaf node
 #       print "Reached leaf $nid\n";
 # Now we work our way back up via the parent using a separate recursive function
@@ -155,6 +163,7 @@ sub merge_includes {
     my $pnid = $stref->{'Nodes'}{$nid}{'Parent'};   
     my $sub  = $stref->{'Nodes'}{$nid}{'Subroutine'};
     my $Ssub = $stref->{'Subroutines'}{$sub};
+#    print "merge_includes: $sub\n";
     my $f=$stref->{'Nodes'}{$pnid}{'Subroutine'};
     if ($V) {
         if ($sub ne $f ) {
@@ -175,10 +184,12 @@ sub merge_includes {
             if ( $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common'
                 and not exists $Ssub->{'CommonIncludes'}{$inc} )
             {
+#            	print "CommonIncludes[1] ($sub) $inc\n";
                 $Ssub->{'CommonIncludes'}{$inc} = 1;
             }
         }
     }
+#    $stref->{'Subroutines'}{$sub}=$Ssub ;
 #   print "NEED TO REFACTOR $sub, CREATE CHAIN\n";
 #    } else {
 #       print "NO NEED TO REFACTOR $sub, STOP CHAIN\n";
@@ -189,11 +200,13 @@ sub merge_includes {
         if ( exists $Scsub->{'CommonIncludes'} ) {
             for my $inc ( keys %{ $Scsub->{'CommonIncludes'} } ) {
                 if ( not exists $Ssub->{'CommonIncludes'}{$inc} ) {
+#                    print "CommonIncludes[2] ($sub) $inc\n";	
                     $Ssub->{'CommonIncludes'}{$inc} = 1;
                 }
             }
         }
     }
+    $stref->{'Subroutines'}{$sub}=$Ssub ;
     if ( $nid != 0 ) {
         $stref = merge_includes( $stref, $pnid, $nid,$chain );
     }
