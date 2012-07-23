@@ -46,7 +46,7 @@ sub find_subroutines_functions_and_includes {
     find( $tf_finder, "$prefix/$dir" );
     }
 
-    for my $src ( sort keys %src_files ) {
+    for my $src ( keys %src_files ) {#sort WV23JUL2012
     	if  ($src=~/\.c$/) {
 #    		warn "C SOURCE: $src\n";
     		# FIXME: ugly ad-hoc hack!

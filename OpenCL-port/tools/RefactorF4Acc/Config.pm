@@ -53,7 +53,7 @@ our %Config=();
 
 sub read_config {
 	(my $cfgrc)=@_;
-open my $CFG, '<', $cfgrc or die $!,$cfgrc;
+open my $CFG, '<', $cfgrc or die $!,': ',$cfgrc;
 for my $line (<$CFG>) {
 	next if $line=~/^\s*#/;
 	next unless $line=~/=/;

@@ -166,9 +166,11 @@ sub analyse_lines {
 		 # So we have
 
 			elsif ( $line =~
-				/\b(logical|integer|real|double\s*precision|character)\s+([^\*]+)\s*$/
+			/(logical|integer|real|double\s*precision|character)\s+(.+)\s*$/
+#WV23JUL				/\b(logical|integer|real|double\s*precision|character)\s+([^\*]+)\s*$/
 				or $line =~
-/\b((?:logical|integer|real|double\s*precision|character)\s*\*(?:\d+|\(\*\)))\s+(.+)\s*$/
+            /((?:logical|integer|real|double\s*precision|character)\*(?:\d+|\(\*\)))\s+(.+)\s*$/				
+#WV23JUL     /\b((?:logical|integer|real|double\s*precision|character)\s*\*(?:\d+|\(\*\)))\s+(.+)\s*$/
 			  )
 			{
 				$type   = $1;
@@ -804,8 +806,10 @@ sub parse_subroutine_and_function_calls {
 			next if $line =~ /^\!\s/;
 
 	  # Subroutine calls. Surprisingly, these even occur in functions! *shudder*
-			if ( $line =~ /call\s+(\w+)\s*\((.*)\)/ || $line =~ /call\s+(\w+)\s*$/ )
+			#if ( $line =~ /call\s+(\w+)\s*\((.*)\)/ || $line =~ /call\s+(\w+)\s*$/ ) # WV23JUL2012
+			if ( $line =~ /call\s(\w+)\((.*)\)/ || $line =~ /call\s(\w+)\s*$/ )            
 			{
+				die if $line=~/advance/;
 				my $name = $1;
 				$stref = add_to_call_tree( $name, $stref, $f );
 				my $Sname = $stref->{'Subroutines'}{$name};
@@ -1633,7 +1637,7 @@ sub isCommentOrBlank {
 # Proper FSM parser for F77 variable declarations (apart from the type)
 sub parse_vardecl {
 	( my $varlst, my $T ) = @_;
-#if ($varlst=~/sysdepinfo/) {$T=1};
+
 	print "VARLST: <$varlst>\n" if $T;
 
 	# parse varlst into this hash

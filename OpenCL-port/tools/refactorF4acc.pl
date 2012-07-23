@@ -31,7 +31,7 @@ our $usage = "
     -N: Don't replace CONTINUE by CALL NOOP
     -b: Generate SCons build script, currently ignored 
     -B: Build FLEXPART (implies -b)
-    -G: Generate Markdown documentation
+    -G: Generate Markdown documentation (currently broken)
     \n";
 
 &main();

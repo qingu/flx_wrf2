@@ -26,14 +26,49 @@ use Exporter;
 );
 
 # -----------------------------------------------------------------------------
+
+=info_break_cycles
+To break cycles, I see only one way: we must keep track of the call chain and
+as soon as there is a duplication, we stop.
+But we must clear this list when we reach a leaf. Which means that
+@{ $stref->{'CallGraph'}{ $subname } } has no entries
+
+if (exists $stref->{'CallGraph'}{ 'Chain'} {$entry} ) {
+	$stref->{'CallGraph'}{ 'Chain'}={};
+	last;
+} else {
+$stref->{'CallGraph'}{ 'Chain'} {$entry}++
+}
+
+=cut
+
 sub create_call_graph { ( my $stref, my $subname ) = @_;
-    for my $entry ( @{ $stref->{'CallGraph'}{ $subname } } ) {
-    	my $str = format_call_tree_line($entry,$stref);
-    	print $str;
-    	$stref->{'Indents'} += 4;    	
-    	create_call_graph ($stref,$entry);
-    	$stref->{'Indents'} -= 4; 
-    }
+#		$stref->{'CallGraph'}{ 'CallChain'} {$subname}++;
+#	if (not exists $stref->{'CallGraph'}{'Loop'}{$subname}) {
+#		my $cut=0;
+	    for my $entry ( @{ $stref->{'CallGraph'}{ $subname } } ) {
+
+#	    	if (exists $stref->{'CallGraph'}{ 'CallChain'} {$entry}
+#	    	&& $stref->{'CallGraph'}{ 'CallChain'} {$entry}>1
+#	    	 ) {
+#	            $stref->{'CallGraph'}{'Loop'}{$entry}=1;
+#	            $cut=1;
+#	                           $stref->{'CallGraph'}{ 'CallChain'} {$entry}--;
+#	        } else {
+#	            $stref->{'CallGraph'}{ 'CallChain'} {$entry}++;
+#	        }
+#	    	if ($cut==0) {
+	    	my $str = format_call_tree_line($entry,$stref);
+	    	print $str;
+	    	
+	    	   $stref->{'Indents'} += 4;    	
+	    	   create_call_graph ($stref,$entry);
+	    	   $stref->{'Indents'} -= 4;
+#	    	} else {
+#	    		$cut=0;
+#	    	}
+	    }
+#	} 
 }
 # -----------------------------------------------------------------------------
 sub create_dot_call_graph {
