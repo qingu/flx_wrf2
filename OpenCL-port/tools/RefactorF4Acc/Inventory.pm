@@ -46,7 +46,7 @@ sub find_subroutines_functions_and_includes {
     	if ($dir eq '.') {
     	   $path=$prefix;
     	} 
-    	print "$path\n";
+#    	print "$path\n";
         find( $tf_finder, $path );
     }
 #    find( $tf_finder, '.' );
@@ -64,7 +64,7 @@ sub find_subroutines_functions_and_includes {
 #    		die;
             
     	} else {
-    	   print "F90 SOURCE: $src\n"; 
+#    	   print "F90 SOURCE: $src\n"; 
     	}
         $stref=process_src($src,$stref);
     }
@@ -98,6 +98,7 @@ sub process_src {
                 if ( $line =~ /^[Cc\*\!]\s+BEGIN\sSUBROUTINE\s(\w+)/ 
         or $line =~ /^\!\s*\$acc\ssubroutine\s(\w+)/i ){
                          my $sub=$1;
+                         die 'No subroutine name ' if $sub eq '';
                         $has_blocks = 1;
                         if ($translate_to ne '') {
                             $stref->{'Subroutines'}{$sub}{'Translate'}= $translate_to;
@@ -136,6 +137,7 @@ sub process_src {
                     print "Found program $2 in $src\n" if $V;
                 }                
                 my $sub  = lc($2);
+                die 'No subroutine name ' if $sub eq '';
                 $f=$sub;                
                 $srctype='Subroutines';
                 $stref->{'Subroutines'}{$sub}={};

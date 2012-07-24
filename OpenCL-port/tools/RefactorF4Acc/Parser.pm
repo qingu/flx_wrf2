@@ -131,6 +131,7 @@ sub analyse_lines {
 		for my $index ( 0 .. scalar( @{$srcref} ) - 1 ) {
 			my $attr = '';
 			my $line = $srcref->[$index][0];
+			
 			my $info = $srcref->[$index][1];
 			if ( $line =~ /^\!\s+/ ) {
 				next;
@@ -147,17 +148,22 @@ sub analyse_lines {
 			if ( $line =~ /implicit\s+none/ ) {
 				$info->{'ImplicitNone'} = 1;
 				$Sf->{'ImplicitNone'}   = $index;
+				
 			} elsif ( $line =~ /^\d*\s+(else\s+if)/ ) {
 				$info->{'ElseIf'} = 1;
+				
 			} elsif ( $line =~
 /^\d*\s+(if|else|select|case|read|write|print|open|close|return|stop)\s*\(/
 			  )
 			{
+				
 				$info->{ ucfirst($1) } = 1;
 			} elsif ( $line =~ /^\d*\s+do\b/ ) {
+				
 				$info->{'Do'} = 1;
 			} elsif ( $line !~ /\bparameter\b/ && $line =~ /[\w\)]\s*=\s*[^=]/ )
 			{
+				
 				$info->{'Assignment'} = 1;
 			}
 
@@ -167,14 +173,16 @@ sub analyse_lines {
 
 			elsif ( $line =~
 #			/(logical|integer|real|double\s*precision|character)\s+(.+)\s*$/
-            /\b(logical|integer|real|double\s*precision|character)\s+([^\*]+)\s*$/
+            /\b(logical|integer|real|double\s*precision|character)\s+([^\*]?.*)\s*$/
 				or $line =~
 #            /((?:logical|integer|real|double\s*precision|character)\*(?:\d+|\(\*\)))\s+(.+)\s*$/				
             /\b((?:logical|integer|real|double\s*precision|character)\s*\*(?:\d+|\(\*\)))\s+(.+)\s*$/
 			  )
 			{
+				#character compoint(maxpoint)*45
+				
 				$type   = $1;
-				$varlst = $2;
+				$varlst = $2; 
 				$type =~ /\*/ && do {
 					( $type, $attr ) = split( /\*/, $type );
 					if ( $attr eq '(' ) { $attr = '*' }
@@ -594,6 +602,7 @@ sub separate_blocks {
 # Based on the content of %blocks
 # TODO: $stref=create_new_subroutine_entries($blocksref,$stref)
 	for my $block ( keys %blocks ) {
+		die "EMPTY block name $block" if $block eq '';
 		next if $block eq 'OUTER';
 		if (not exists $stref->{'Subroutines'}{$block} ) {
 		  $stref->{'Subroutines'}{$block} = {};
@@ -969,7 +978,7 @@ sub get_commons_params_from_includes {
 				my @tcommons = split( /\s*\,\s*/, $commonlst );
 				for my $var (@tcommons) {
 					if ( not defined $vars{$var} ) {
-						print "WARNING: MISSING: <", $var, ">\n" if $W;
+						print "WARNING: common <", $var, "> is not in {'IncludeFiles'}{$f}{'Vars'}\n" if $W;
 					} else {
 						print $var, "\t", $vars{$var}{'Type'}, "\n"
 						  if $V;
@@ -1578,7 +1587,7 @@ sub procLine {
 #                	die if $line=~/\'/;
                     my $keyword = lc($1);
                     my $name = lc($2);
-
+                    die "procLine(): No name for $keyword " if $name eq '';
                     if ( $keyword eq 'function' ) {                        
                         $info-> { 'FunctionSig'} = $name;
                     } else {                        

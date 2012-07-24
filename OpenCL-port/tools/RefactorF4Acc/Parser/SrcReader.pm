@@ -1028,7 +1028,7 @@ Suppose we don't:
 			{
 				my $keyword = lc($1);
 				my $name    = lc($2);
-
+die "procLine(): No $keyword name " if $name eq '';
 				if ( $keyword eq 'function' ) {
 					$info->{'FunctionSig'} = $name;
 				} else {

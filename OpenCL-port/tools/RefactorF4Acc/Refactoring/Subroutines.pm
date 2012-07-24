@@ -47,7 +47,8 @@ Subroutines
 #TODO: The latter must be done everywhere
 sub refactor_all_subroutines {
     ( my $stref ) = @_;
-    for my $f ( keys %{ $stref->{'Subroutines'} } ) {    	
+    for my $f ( keys %{ $stref->{'Subroutines'} } ) {
+    	die "refactor_all_subroutines(): empty subroutine name" if $f eq '';    	
         my $Sf = $stref->{'Subroutines'}{$f};        
         if ( not defined $Sf->{'Status'} ) {
             $Sf->{'Status'} = $UNREAD;
