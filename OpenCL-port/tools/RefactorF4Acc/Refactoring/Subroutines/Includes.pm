@@ -72,7 +72,8 @@ sub create_additional_include_statements {
     my $tags_lref = $annline->[1];
     for my $inc (@{ $Sf->{'LiftedIncludes'} }) {
             print "INFO: instantiating merged INC $inc in $f\n" if $V;
-            my $rline = "      include '$inc'";
+#            my $rline = "      include '$inc'";
+            	my $rline = "      use $inc";
             $tags_lref->{'Include'}{'Name'} = $inc;
             push @{$rlines}, [ $rline, $tags_lref ];                    
     }
@@ -94,6 +95,7 @@ sub create_new_include_statements {
         {    
             print "INFO: instantiating merged INC $inc in $f\n" if $V;
             my $rline = "      include '$inc'";
+#            my $rline = "      use $inc";
             $tags_lref->{'Include'}{'Name'} = $inc;
             push @{$rlines}, [ $rline, $tags_lref ];
         }

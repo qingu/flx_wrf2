@@ -67,7 +67,7 @@ sub context_free_refactorings {
 	my $annlines = get_annotated_sourcelines( $stref, $f );
 	my $firstdecl = 1;
 	$Sf->{'RefactoredCode'} = [];
-	
+	my @include_use_stack=();
 	for my $annline ( @{$annlines} ) {
 		if ( not defined $annline or not defined $annline->[0] ) {
 			croak
@@ -84,7 +84,7 @@ sub context_free_refactorings {
 			 next;
 		}
         if ( exists $tags{'Signature'} ) {
-	       push @extra_lines, ['        implicit none',{'ImplicitNone'=>1}];
+#	       push @extra_lines, ['        implicit none',{'ImplicitNone'=>1}];
         }
         if ( exists $tags{'Goto'} ) {
         $line=~s/\bgo\sto\b/goto/;
@@ -265,6 +265,17 @@ sub context_free_refactorings {
 		elsif ( exists $tags{'SubroutineCall'} ) {			
 			$line = rename_conflicting_vars($line,$stref,$f);
 		}
+		elsif ( exists $tags{'Include'} ) {			
+			
+			my $inc=$tags{'Include'}{'Name'};
+			
+                $line = "      use $inc";
+                # use must come right after subroutine/function/program
+                # or after another use
+                push @include_use_stack, [ $line, $info ];# if $line ne '';
+                next;
+                
+		}
 		push @{ $Sf->{'RefactoredCode'} }, [ $line, $info ];# if $line ne '';
 		if (@extra_lines) {
 			for my $extra_line (@extra_lines) {
@@ -273,12 +284,50 @@ sub context_free_refactorings {
 			@extra_lines = ();
 		}
 	}
-	
+    
+    # now splice the include stack just below the signature
+    if (@include_use_stack) {
+    # 1. Look for the signature
+    my $offset=0;
+    for my $tmpannline ( @{ $Sf->{'RefactoredCode'} } ) {
+    	print join(',',keys %{$tmpannline->[1]}),"\n";
+    	if (exists $tmpannline->[1]{'Signature'} or 
+    	exists $tmpannline->[1]{'SubroutineSig'} or 
+    	exists $tmpannline->[1]{'FunctionSig'}) {
+#    		print "Found sig for $f at $offset\n";
+    		last;
+    	}   
+    	$offset++;
+    	if (exists $tmpannline->[1]{'Include'}) {
+    		die "Hit include without seeing sub or func in $f";
+    	}
+    }
+#    if ($offset !=0) {
+#    print "OFFSET $f:$offset\n";
+#    }
+    if ($offset==0) {
+    	my $firstline=shift @{ $Sf->{'RefactoredCode'} };
+    	my @new  = ($firstline,
+                                @include_use_stack,
+                                @{ $Sf->{'RefactoredCode'} }
+                                );
+                                $Sf->{'RefactoredCode'}=[@new];
+    } else {
+    	my @part1=();
+    	for (0..$offset) {
+    		push @part1, shift @{ $Sf->{'RefactoredCode'} };
+    	}
+    	my @part2=@{ $Sf->{'RefactoredCode'} };
+        my @new  = (@part1,@include_use_stack,@part2);
+        $Sf->{'RefactoredCode'}=[@new];
+        
+    }
+    }	
 #	if ( $f eq 'particles_main_loop' ) {
 #		print "REFACTORED LINES ($f):\n";
 #
 #		for my $tmpline ( @{ $Sf->{'RefactoredCode'} } ) {
-#			print $tmpline->[0], "\t", join( ';', keys %{ $tmpline->[1] } ),"\n";
+#			print $tmpline->[0], "\n";#"\t", join( ';', keys %{ $tmpline->[1] } ),"\n";
 #		}
 #		print "=================\n";
 #		die;

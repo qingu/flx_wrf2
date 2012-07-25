@@ -78,10 +78,11 @@ sub emit_all {
 sub emit_refactored_include {
     ( my $f, my $dir, my $stref ) = @_;
     my $srcref = $stref->{'IncludeFiles'}{$f}{'RefactoredCode'};
+    my $incsrc=$stref->{'IncludeFiles'}{$f}{'Source'};
     if ( defined $srcref ) {
         print "INFO: emitting refactored code for include $f\n" if $V;
         my $mode = '>';
-        open my $SRC, $mode, "$dir/$f" or die $!;
+        open my $SRC, $mode, "$dir/$incsrc" or die $!;
         my $prevline='C ';
         for my $annline ( @{$srcref} ) {
         	my $line = $annline->[0];  

@@ -37,7 +37,7 @@ Includes
 # I guess I should defer splitting the lines until the end
 sub refactor_includes {
 	( my $stref ) = @_;
-
+#    $stref=resolve_module_deps($stref); FIXME!!!
 	for my $f ( keys %{ $stref->{'IncludeFiles'} } ) {
 
 		if (   $stref->{'IncludeFiles'}{$f}{'InclType'} eq 'Common'
@@ -48,6 +48,7 @@ sub refactor_includes {
 			$stref = create_refactored_source($stref, $f);
 		}
 	}
+	
 	return $stref;
 }
 
@@ -58,6 +59,12 @@ sub refactor_include {
 
 	print "\n\n", '#' x 80, "\nRefactoring INC $f\n", '#' x 80, "\n" if $V;
 	my $If = $stref->{'IncludeFiles'}{$f};
+#	my $common=0;
+#	if ( $stref->{'IncludeFiles'}{$f}{'InclType'} eq 'Common' ) {
+#		$common=1;
+		$stref->{'IncludeFiles'}{$f}{'Source'}=$f.'.f'; # FIXME: ad hoc
+		$stref->{'BuildSources'}{'F'}{$f.'.f'}=1;
+#	}
     if (   not exists $If->{'RefactoredCode'}
         or $If->{'RefactoredCode'} == []
         or exists $stref->{'BuildSources'}{'C'}{ $If->{'Source'} } ) # FIXME: needed?
@@ -68,7 +75,13 @@ sub refactor_include {
 	my $annlines = get_annotated_sourcelines( $stref, $f );
 	
 #	croak Dumper($annlines);
+my %deps=();
     my $refactored_lines=[];
+#    if ($common) {
+    	push @{ $refactored_lines },
+    	[ "module $f", {'BeginModule'=>$f} ];
+    	
+#    }
 	for my $annline ( @{$annlines} ) {
 		my $line      = $annline->[0];
 		my $info = $annline->[1];
@@ -82,8 +95,11 @@ sub refactor_include {
 			$skip = 1;
 		}
 		if ( exists $tags{'VarDecl'} ) {
+			$stref=resolve_module_deps($stref,$f,$line);			
 			my @nvars = ();
 			for my $var ( @{ $info->{'VarDecl'} } ) {
+				# Maybe put check for parameters here
+				
 				if ( $stref->{'IncludeFiles'}{$f}{'InclType'} ne 'Parameter'
 					and
 					exists $stref->{'IncludeFiles'}{$f}{'ConflictingGlobals'}
@@ -123,6 +139,16 @@ sub refactor_include {
 
 		}
 	}
+
+        push @{ $refactored_lines },
+        [ "end module $f", {'EndModule'=>$f} ];
+        
+   my $firstline=shift @{ $refactored_lines }; # This is weak. What we need is the line with "module" 
+	for my $dep (keys %{ $stref->{'IncludeFiles'}{$f}{'Deps'} } ) {
+            unshift @{ $refactored_lines },
+            [ "use $dep", {'ModuleDep'=>$dep} ];
+        }
+        unshift @{ $refactored_lines },$firstline;
  $stref->{'IncludeFiles'}{$f}{'RefactoredCode'}  = $refactored_lines;
                   
 	return $stref;
@@ -131,3 +157,40 @@ sub refactor_include {
 
 # -----------------------------------------------------------------------------
 
+sub resolve_module_deps {
+
+    ( my $stref, my $f, my $line) = @_;
+
+#    for my $f ( keys %{ $stref->{'IncludeFiles'} } ) {
+#
+#        if (   $stref->{'IncludeFiles'}{$f}{'InclType'} eq 'Common' )
+#        {            
+#    print "MODULE $f:\n";
+#    my $annlines = get_annotated_sourcelines( $stref, $f );
+#    
+#    for my $annline ( @{$annlines} ) {
+#        my $line      = $annline->[0];
+#        my $info = $annline->[1];
+#        
+#        my %tags      = ( defined $info ) ? %{$info} : ();
+#        next if exists $tags{'Deleted'};
+#        if ( exists $tags{'VarDecl'} && $line =~/dimension\((.+?)\)/) {
+        if ( $line =~/dimension\((.+?)\)/) {
+            my $varlst= $1;
+            my @vars = split(/[:,\+\-]/,$varlst);
+            for my $var ( @vars ) {
+	           if ( not exists $stref->{'IncludeFiles'}{$f}{'Vars'}{$var} ) {
+                    for my $inc ( keys %{ $stref->{'IncludeFiles'} } ) {
+                        if (   $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Parameter' ) {
+                        	if ( exists $stref->{'IncludeFiles'}{$inc}{'Vars'}{$var} ) {
+#                        		print "VAR $var in $inc\n";
+                        		$stref->{'IncludeFiles'}{$f}{'Deps'}{$inc}=1;
+                        		last;
+                        	}            
+            	       }
+                    }
+	           }
+            }
+        } 
+    return $stref;
+}

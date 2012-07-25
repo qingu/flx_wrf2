@@ -180,9 +180,10 @@ sub process_src {
             $line =~ /^\s*include\s+\'(\w+)\'/ && do {
                 my $inc = $1;
                 if ( not exists $stref->{'IncludeFiles'}{$inc} ) {
-                    $stref->{'IncludeFiles'}{$inc}{'Status'} = $UNREAD;
-            $f=$inc;
-            $srctype='IncludeFiles';
+                    $stref->{'IncludeFiles'}{$inc}{'Status'} = $UNREAD;                                        
+                    $srctype='IncludeFiles';
+                    $stref->{$srctype}{$inc}{'Source'}=$inc;
+                    $f=$inc;
                 }
             };
 
