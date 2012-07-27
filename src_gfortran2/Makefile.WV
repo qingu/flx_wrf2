@@ -14,7 +14,7 @@ FC      = gfortran
 #FC      = gfortran-4.6
 #FC      = gfortran-mp-4.3
 FFLAGS  = -O3 -m64 -fconvert=little-endian -frecord-marker=4 -I$(NETCDF)/include
-LDFLAGS =  -L$(NETCDF)/lib -lnetcdff -lm
+LDFLAGS =  -L$(NETCDF)/lib -lnetcdf -lnetcdff -lm
 
 #
 OBJECTS = assignland.o  writeheader.o \
