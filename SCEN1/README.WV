@@ -4,5 +4,7 @@ To run FLEXPART_WRF:
 
 To plot the results:
 
+export AFS2=/Users/wim/SoC_Research/FLEXPART/flx_wrf2/AFS2
+export WRF=/Users/wim/SoC_Research/FLEXPART/flx_wrf2/PlotLib_WRF
 cd plot
 ./prepare_and_plot.pl

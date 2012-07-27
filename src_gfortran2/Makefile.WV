@@ -2,8 +2,8 @@ SHELL = /bin/bash
 MAIN = flexpart_wrf
 INCF	= incl*
 #NETCDF = /Users/wim/SoC_Research/FLEXPART/flx_wrf2/src_gfortran2
-NETCDF = /usr/
-#/opt/local
+#NETCDF = /usr/
+NETCDF=/opt/local
 # /mnt/disk1/work/saji/GNU/
 
 
