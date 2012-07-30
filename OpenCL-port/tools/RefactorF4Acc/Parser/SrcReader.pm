@@ -37,14 +37,14 @@ sub read_fortran_src {
 	my $is_incl = exists $stref->{'IncludeFiles'}{$s} ? 1 : 0;
 
 	my $sub_func_incl = sub_func_or_incl( $s, $stref );
-#	if ($sub_func_incl eq 'ExternalSubroutines') {
-#		$stref->{$sub_func_incl}{$s}{'Status'}=$UNREAD;		
-#	}
+	if ($sub_func_incl eq 'ExternalSubroutines') {
+		$stref->{$sub_func_incl}{$s}{'Status'}=$UNREAD;		
+	}
 	if (not exists $stref->{$sub_func_incl}{$s}{'HasBlocks'} ){
 	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
 	}
 	my $f = $is_incl ? $s : $stref->{$sub_func_incl}{$s}{'Source'};
-#	if (defined $f) {
+    if (defined $f) {
 		
 	
 	my $no_need_to_read=1;
@@ -91,7 +91,7 @@ sub read_fortran_src {
 
 			
 			if ($free_form) {
-				croak "BROKEN! Must be implemented like fixed form below";
+#				croak "BROKEN! Must be implemented like fixed form below";
 =info_free_form_parsing
 The main difference is in the continuation lines:
 For free form, they are
@@ -833,7 +833,7 @@ Suppose we don't:
 			}    #ok
 		}    # if $need_to_read
 #		die Dumper($stref->{'Subroutines'}{'wrf'}{'AnnLines'});
-#} # if $f is defined
+    } # if $f is defined
 		return $stref;
 	}    # END of read_fortran_src()
 

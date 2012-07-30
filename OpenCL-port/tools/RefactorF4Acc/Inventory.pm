@@ -52,12 +52,12 @@ sub find_subroutines_functions_and_includes {
 #    find( $tf_finder, '.' );
     for my $src ( sort keys %src_files ) {#sort WV23JUL2012
     	if  ($src=~/\.c$/) {
-    		warn "C SOURCE: $src\n";
+#    		warn "C SOURCE: $src\n";
     		# FIXME: ugly ad-hoc hack!
     		# WRF uses cpp to make subroutine names match with Fortran
     		# So we need to call cpp first, but with all the correct macros ...
     		# Without any defined macros, it's like this:    	
-    		my @lines=`grep -v '#include' $src  | cpp -P -`;
+#    		my @lines=`grep -v '#include' $src  | cpp -P -`;
     		# I guess we could use some command-line flag to add the macro definitions
     		# And now we must parse C sources too ...
     		

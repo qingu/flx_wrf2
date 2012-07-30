@@ -43,32 +43,24 @@ $stref->{'CallGraph'}{ 'Chain'} {$entry}++
 =cut
 
 sub create_call_graph { ( my $stref, my $subname ) = @_;
-#		$stref->{'CallGraph'}{ 'CallChain'} {$subname}++;
-#	if (not exists $stref->{'CallGraph'}{'Loop'}{$subname}) {
-#		my $cut=0;
-	    for my $entry ( @{ $stref->{'CallGraph'}{ $subname } } ) {
 
-#	    	if (exists $stref->{'CallGraph'}{ 'CallChain'} {$entry}
-#	    	&& $stref->{'CallGraph'}{ 'CallChain'} {$entry}>1
-#	    	 ) {
-#	            $stref->{'CallGraph'}{'Loop'}{$entry}=1;
-#	            $cut=1;
-#	                           $stref->{'CallGraph'}{ 'CallChain'} {$entry}--;
-#	        } else {
-#	            $stref->{'CallGraph'}{ 'CallChain'} {$entry}++;
-#	        }
-#	    	if ($cut==0) {
+    push @{ $stref->{'CallStack'} }, $subname;
+#    print '[',join(',',@{ $stref->{'CallStack'} }),']',"\n";
+    my %subs = map {$_=>1} @{ $stref->{'CallStack'} }; 
+	    for my $entry ( @{ $stref->{'CallGraph'}{ $subname } } ) {
+if (exists $subs{$entry}) {
+	print "Found LOOP for $entry\n";
+	last;
+}
+
 	    	my $str = format_call_tree_line($entry,$stref);
 	    	print $str;
 	    	
 	    	   $stref->{'Indents'} += 4;    	
 	    	   create_call_graph ($stref,$entry);
 	    	   $stref->{'Indents'} -= 4;
-#	    	} else {
-#	    		$cut=0;
-#	    	}
 	    }
-#	} 
+     pop  @{ $stref->{'CallStack'} };	     
 }
 # -----------------------------------------------------------------------------
 sub create_dot_call_graph {
@@ -120,9 +112,9 @@ sub format_call_tree_line {
 	(my $f, my $stref ) = @_;
     my $sub_or_func = sub_func_or_incl( $f, $stref );
     my $src         = $stref->{$sub_or_func}{$f}{'Source'};
-#    if (not defined $src) {
-#    	$src='EXTERNAL SOURCE';
-#    }
+    if (not defined $src) {
+    	$src='<unknown source>';
+    }
     my $nspaces     = 64 - $stref->{'Indents'} - length($f); # -length($src) -2;
     my $incls = join( ',', keys %{ $stref->{$sub_or_func}{$f}{'Includes'} } );
     my $padding = ' ' x ( 32 - length($src) );

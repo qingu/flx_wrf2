@@ -48,7 +48,7 @@ sub parse_fortran_src {
 	
 	my $sub_or_func = sub_func_or_incl( $f, $stref );
 	print "SRC TYPE: $sub_or_func\n" if $V;
-#	if ($sub_or_func ne 'ExternalSubroutines') {
+	if ($sub_or_func ne 'ExternalSubroutines') {
 	my $Sf          = $stref->{$sub_or_func}{$f};
 
 #	 if ($f eq 'boundcond_domainfill') {
@@ -104,7 +104,7 @@ sub parse_fortran_src {
 		#    warn "-------\n";
 #		die;
 #	}
-#}
+}
 	#    $stref=create_annotated_lines($stref,$f);
 	print "LEAVING parse_fortran_src( $f ) with Status $stref->{$sub_or_func}{$f}{'Status'}\n" if $V; 
 	return $stref;
@@ -180,9 +180,19 @@ sub analyse_lines {
 			  )
 			{
 				#character compoint(maxpoint)*45
-				
+				#character *80   sysdepinfo
+				 
 				$type   = $1;
-				$varlst = $2; 
+				$varlst = $2;
+#				die "<$type> <$varlst>" if $line=~/character\ \*80\s+sysdepinfo/;
+				# Now an ad hoc fix for spaces between the type and the asterisk. FIXME! I should just write a better FSM!
+				if ($line=~/\w+\s+(\*\s*(\d+|\(\s*\*\s*\)))/) { # FIXME: I assume after the asterisk there MUST be an integer constant
+				    my $len=$1;
+					$type.=$len;
+					$varlst=~s/^\S+\s+//;
+#					warn "$line\n";
+				}  
+				
 				$type =~ /\*/ && do {
 					( $type, $attr ) = split( /\*/, $type );
 					if ( $attr eq '(' ) { $attr = '*' }
@@ -304,7 +314,7 @@ sub analyse_lines {
 				#                }
 				my @varnames = ();
 				for my $var ( keys %{$pvars} ) {
-					if ( $var eq '' ) { croak "$line in $f" }
+					if ( $var eq '' ) { croak "<$line> in $f" }
 					my $tvar = $var;
 					$vars{$tvar}{'Type'}  = $type;
 					$vars{$tvar}{'Shape'} = $pvars->{$var}{'Shape'};
