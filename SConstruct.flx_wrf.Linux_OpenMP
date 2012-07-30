@@ -1,0 +1,18 @@
+# Generated build script for refactored FLEXPART source code
+# Wed Jul 25 15:23:40 2012
+
+csources =['noop.c']
+
+fsources = ['./advance.f','./assignland.f','./boundcond_domainfill.f','./calcfluxes.f','./calcmatrix.f','./calcpar.f','./calcpar_nests.f','./calcpv.f','./calcpv_nests.f','./caldate.f','./centerofmass.f','./clustering.f','./cmapf1.0.f','./conccalc.f','./concoutput.f','./concoutput_nest.f','./convect43c.f','./convmix.f','./coordtrafo.f','./drydepokernel.f','./drydepokernel_nest.f','./erf.f','./ew.f','./flexpart_wrf.f','./fluxoutput.f','./getfields.f','./getrb.f','./getrc.f','./getvdep.f','./gridcheck.f','./gridcheck_nests.f','./hanna.f','./hanna1.f','./hanna_short.f','./init_domainfill.f','./initialize.f','./interpol_all.f','./interpol_all_nests.f','./interpol_misslev.f','./interpol_misslev_nests.f','./interpol_rain.f','./interpol_rain_nests.f','./interpol_vdep.f','./interpol_vdep_nests.f','./interpol_wind.f','./interpol_wind_nests.f','./interpol_wind_short.f','./interpol_wind_short_nests.f','./juldate.f','./map_proj_wrf.f','./map_proj_wrf_subaa.f','./mean.f','./obukhov.f','./openouttraj.f','./openreceptors.f','./outgrid_init.f','./outgrid_init_nest.f','./part0.f','./partdep.f','./partoutput.f','./partoutput_short.f','./pbl_profile.f','./plumetraj.f','./psih.f','./psim.f','./qvsat.f','./raerod.f','./random.f','./read_ncwrfout.f','./readageclasses.f','./readavailable.f','./readcommand.f','./readdepo.f','./readlanduse.f','./readoutgrid.f','./readpartpositions.f','./readpaths.f','./readreceptors.f','./readreleases.f','./readspecies.f','./readwind.f','./readwind_nests.f','./redist.f','./releaseparticles.f','./richardson.f','./scalev.f','./skplin.f','./sort2.f','./timemanager.f','./verttransform.f','./verttransform_nests.f','./wetdepo.f','./wetdepokernel.f','./wetdepokernel_nest.f','./windalign.f','./writeheader.f','./writeheader_nest.f','include_wrf_map_utils.f','includecom.f','includeconv.f','includehanna.f','includeinterpol.f','includepar.f']
+
+envC=Environment(CC='gcc',CPPPATH=['/Users/wim/SoC_Research/F2C-ACC/include/']); # FIXME: use ENV
+if csources:
+    envC.Library('wrfc',csources)
+
+FFLAGS  = ['-O3', '-m64', '-ffree-form', '-fconvert=little-endian', '-frecord-marker=4','-fopenmp']
+envF=Environment(FORTRAN='/usr/bin/gfortran',LINKFLAGS=['-fopenmp'],FORTRANFLAGS=FFLAGS,FORTRANPATH=['.','/usr/include'])
+#envF=Environment(FORTRAN='/usr/bin/gfortran',FORTRANFLAGS=FFLAGS,FORTRANPATH=['.','/usr/include'])
+if csources:
+    envF.Program('flexpart_wrf',fsources,LIBS=['netcdf','netcdff','wrfc','m'],LIBPATH=['.','/usr/lib'])   
+else:
+    envF.Program('flexpart_wrf',fsources,LIBS=['netcdf','netcdff','m'],LIBPATH=['.','/usr/lib'])
