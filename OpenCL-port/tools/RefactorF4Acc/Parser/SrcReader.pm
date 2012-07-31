@@ -123,6 +123,7 @@ Suppose we don't:
 					        # emit line
 					        if ( $line ne '' ) {
 #					        	print "PUSH $line\n";
+
 					            ( $stref, $s, $srctype ) =
 					            pushAnnLine( $stref, $s, $srctype,$line, $free_form );
 					        }	
@@ -136,6 +137,7 @@ Suppose we don't:
 							# In cont but line is not cont => end of cont line => 
 							# emit comments;
 					        for my $commentline (@comments_stack) {
+					        	
 					            ( $stref, $s, $srctype ) =
 					                                      pushAnnLine( $stref, $s, $srctype,
 					                                        $commentline, $free_form );
@@ -144,6 +146,7 @@ Suppose we don't:
 							
 							# emit joined line
 					        if ( $joinedline ne '' ) {
+					        	
 					            ( $stref, $s, $srctype ) =
 					            pushAnnLine( $stref, $s, $srctype,$joinedline, $free_form );
 					        }   
@@ -204,6 +207,7 @@ Suppose we don't:
 							 #  n
 							 #=> join l, emit joined, set l=n, set maybe_in_cont
 								$joinedline .= removeCont( $line, $free_form );
+								
 								( $stref, $s, $srctype ) =
 								  pushAnnLine( $stref, $s, $srctype,
 									$joinedline, $free_form );
@@ -454,7 +458,9 @@ Suppose we don't:
 									$joinedline = '';
 									print DBG "---\n";
 								}
-								for my $commentline (@comments_stack) {
+								# FIXME: comments that come before a function/subroutine signature
+								# are ignored because $s is unknown, set to ''
+								for my $commentline (@comments_stack) {																	
 									( $stref, $s, $srctype ) =
 									  pushAnnLine( $stref, $s, $srctype,
 										$commentline, $free_form );
@@ -877,6 +883,7 @@ Suppose we don't:
 			$f                                 = $pline->[1]{'FunctionSig'};
 			$stref->{$srctype}{$f}{'AnnLines'} = [];
 		}
+		
 		push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
 #		print "PUSHED: $pline->[0]\n" if $V;
 		return ( $stref, $f, $srctype );
@@ -1024,7 +1031,7 @@ Suppose we don't:
 				$line =~ s/\bINCLUDE\b/include/;
 			} elsif ( $line !~ /\'/
 			    && $line !~/^\s*end/i 
-				&& $line =~ /\b(program|subroutine|function)\s+(\w+)/i )
+				&& $line =~ /\b(program|recursive\s+subroutine|subroutine|function)\s+(\w+)/i )
 			{
 				my $keyword = lc($1);
 				my $name    = lc($2);

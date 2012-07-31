@@ -16,6 +16,8 @@ use strict;
 use Carp;
 use Data::Dumper;
 
+use RefactorF4Acc::Refactoring::Common qw( get_annotated_sourcelines );
+
 use Exporter;
 
 @RefactorF4Acc::Refactoring::Subroutines::Signatures::ISA = qw(Exporter);
@@ -43,7 +45,10 @@ sub create_refactored_subroutine_signature {
     my $rline = '';
     if ( $Sf->{'Program'} ) {
         $rline = '      program ' . $f;
-    } else {
+    } elsif ( $Sf->{'Recursive'} ) {
+    	# FIXME: deal with RECURSIVE!
+        $rline = '      recursive subroutine ' . $f . '(' . $args_str . ')';    
+    } else {    	
         $rline = '      subroutine ' . $f . '(' . $args_str . ')';
     }
     $tags_lref->{'Refactored'} = 1;
@@ -56,42 +61,60 @@ sub create_refactored_subroutine_signature {
 sub refactor_kernel_signatures {
     ( my $stref, my $f ) = @_;
     my $Sf        = $stref->{'Subroutines'}{$f};
-#	my $lines=$Sf->{'Lines'};
-#	
-#    my $tags_lref = $annline->[1];    
-#    my $args_ref = $Sf->{'RefactoredArgs'}{'List'};
-#    my $args_str = join( ',', @{$args_ref} );
-#    print "NEW ARGS: $args_str\n" if $V;
-#    my $rline = '';
-#    if ( $Sf->{'Program'} ) {
-#        $rline = '      program ' . $f;
-#    } else {
-#        $rline = '      subroutine ' . $f . '(' . $args_str . ')';
-#    }
-#    $tags_lref->{'Refactored'} = 1;
+    my $args_ref = $Sf->{'RefactoredArgs'}{'List'};
     $Sf->{'HasRefactoredArgs'} = 1;
-#    push @{$rlines}, [ $rline, $tags_lref ];
-#
-#    # IO direction information
-#    for my $arg ( @{$args_ref} ) {
-#        if ( exists $Sf->{'RefactoredArgs'}{$arg}{'IODir'} ) {
-#            my $iodir = $Sf->{'RefactoredArgs'}{$arg}{'IODir'};
-#            my $kind  = $Sf->{'RefactoredArgs'}{$arg}{'Kind'};
-#            my $type  = $Sf->{'RefactoredArgs'}{$arg}{'Type'};
-#            my $ntabs = ' ' x 8;
-#            if ( $iodir eq 'In' and $kind eq 'Scalar' ) {
-#                $ntabs = '';
-#            } elsif ( $iodir eq 'Out' ) {
-#                $ntabs = ' ' x 4;
-#            }
-#            my $comment = "C      $ntabs$arg:\t$iodir, $kind, $type";
-#            push @${rlines}, [ $comment, { 'Comment' => 1 } ];
-#        } else {
-#            print "WARNING: No IO info for $arg in $f\n" if $W;
-#        }
-#    }
+    # IO direction information
+    my @rlines=( [ "!    SUBROUTINE $f IO INFO\n", { 'Comment' => 1 } ] );
+    for my $arg ( @{$args_ref} ) {    	
+        if ( exists $Sf->{'RefactoredArgs'}{'Set'}{$arg}{'IODir'} ) {
+            my $iodir = $Sf->{'RefactoredArgs'}{'Set'}{$arg}{'IODir'};
+            my $kind  = $Sf->{'RefactoredArgs'}{'Set'}{$arg}{'Kind'};
+            my $type  = $Sf->{'RefactoredArgs'}{'Set'}{$arg}{'Type'};
+            my $ntabs = ' ' x 8;
+            if ( $iodir eq 'In' and $kind eq 'Scalar' ) {
+                $ntabs = '';
+            } elsif ( $iodir eq 'Out' ) {
+                $ntabs = ' ' x 4;
+            }
+            my $comment = "!      $ntabs$arg:\t$iodir, $kind, $type";
+            push @rlines, [ $comment, { 'Comment' => 1 } ];
+        } else {
+            print "WARNING: No IO info for $arg in $f\n" if $W;
+        }
+    }
+
+    # Now add $rlines to the refactored signature!
+    my @extra_lines = @rlines;
+    
+    if ( $Sf->{'Status'} != $PARSED ) {
+        croak "NOT PARSED: $f\n".caller()."\n";
+    }
+    my $annlines = get_annotated_sourcelines( $stref, $f );
+    $Sf->{'RefactoredCode'}=[];
+    for my $annline ( @{$annlines} ) {    	
+        if ( not defined $annline or not defined $annline->[0] ) {
+            croak
+              "Undefined source code line for $f in create_refactored_source()";
+        }
+        my $line = $annline->[0];
+        my $info = $annline->[1];
+        
+        my %tags      = %{$info};
+#        print "$line\t".join(',',keys %tags)."\n";
+        if ( exists $tags{'Signature'} ) {
+            for my $extra_line (@extra_lines) {
+#            	print $extra_line->[0],"\n";
+                push @{ $Sf->{'RefactoredCode'} }, $extra_line;
+            }
+        }
+
+        push @{ $Sf->{'RefactoredCode'} }, [ $line, $info ];# if $line ne '';
+    }
+    
+
+
     return $stref;
-}    # END of refactor_kernel_signatures()
+}    # END of x()
 # -----------------------------------------------------------------------------
 
 sub refactor_subroutine_signature {
