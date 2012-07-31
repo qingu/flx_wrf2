@@ -37,7 +37,8 @@ sub emit_all {
     } elsif ( not -d $targetdir ) {
         die "ERROR: $targetdir exists but is not a directory!\n";
     } else {
-        my @oldsrcs = glob("$targetdir/*.f");
+        my @oldsrcs = glob("$targetdir/*.f95");
+        
         map { unlink $_ } @oldsrcs;
 
         # Check if includes have changed
