@@ -37,27 +37,18 @@ use Exporter;
 # All that should happen in a separate pass. But we do it here anyway
 sub parse_fortran_src {
 	( my $f, my $stref ) = @_;
-#    local $V=1;
-	#	local $V=1 if $f eq 'particles_main_loop';
+#    local $V=1;	
 	print "parse_fortran_src(): PARSING $f\n " if $V;
-
+	
 	# 1. Read the source and do some minimal processsing
 	$stref = read_fortran_src( $f, $stref );#
-	
 	print "DONE read_fortran_src_better( $f )\n" if $V;
 	
 	my $sub_or_func = sub_func_or_incl( $f, $stref );
 	print "SRC TYPE: $sub_or_func\n" if $V;
 	if ($sub_or_func ne 'ExternalSubroutines') {
 	my $Sf          = $stref->{$sub_or_func}{$f};
-
-#	 if ($f eq 'boundcond_domainfill') {
-#	 	show_annlines( $Sf->{'AnnLines'} ); 
-#	 	die; 
-#	 }
 	my $is_incl     = exists $stref->{'IncludeFiles'}{$f} ? 1 : 0;
-
-	#    my $is_func     = exists $stref->{'Functions'}{$f} ? 1 : 0;
 
 # Set 'RefactorGlobals' to 0, we only refactor the globals for subs that are kernel targets and their dependencies
 	if ( not exists $Sf->{'RefactorGlobals'} ) {
@@ -70,22 +61,10 @@ sub parse_fortran_src {
 	# 3. Parse includes
 	$stref = parse_includes( $f, $stref );
 	if ( not $is_incl ) {
-
-# For subroutines, we detect blocks, parse include and parse nested subroutine calls.
-#		$stref = detect_blocks( $stref, $f );
-
-# Note that function calls have been dealt with (as a side effect) in get_var_decls()
-#        if ($is_sub) {
-# Detect the presence of a block in this target, only sets 'HasBlocks'
-# Detect include statements and add to Subroutine 'Include' field
-
 		if ( $stref->{$sub_or_func}{$f}{'HasBlocks'} == 1 ) {					
 			$stref = separate_blocks( $f, $stref );
 		}
-
-#		warn "parse_fortran_src( $f )\n";
-#		warn Dumper($stref->{'Subroutines'}{'particles_main_loop'}{'Vars'}{'drydeposit'} );
-# Recursive descent via subroutine calls
+        # Recursive descent via subroutine calls
 		$stref = parse_subroutine_and_function_calls( $f, $stref );
 		$stref->{$sub_or_func}{$f}{'Status'} = $PARSED;
 		print "DONE PARSING $sub_or_func $f\n" if $V;		
@@ -137,7 +116,6 @@ sub analyse_lines {
 				next;
 			}
 
-#	   print "LINE: $line\n" if $f eq 'init_module_ext_internal';# && $line=~/drydep/;
 	   # FIXME Trailing comments are ignored!
 	   #            if ( $line =~ /^\!\s/ ) {
 	   #                $stref->{$sub_func_incl}{$f}{'Info'}
@@ -155,15 +133,13 @@ sub analyse_lines {
 			} elsif ( $line =~
 /^\d*\s+(if|else|select|case|read|write|print|open|close|return|stop)\s*\(/
 			  )
-			{
-				
+			{				
 				$info->{ ucfirst($1) } = 1;
 			} elsif ( $line =~ /^\d*\s+do\b/ ) {
 				
 				$info->{'Do'} = 1;
 			} elsif ( $line !~ /\bparameter\b/ && $line =~ /[\w\)]\s*=\s*[^=]/ )
-			{
-				
+			{				
 				$info->{'Assignment'} = 1;
 			}
 
@@ -179,18 +155,13 @@ sub analyse_lines {
             /\b((?:logical|integer|real|double\s*precision|character)\s*\*(?:\d+|\(\*\)))\s+(.+)\s*$/
 			  )
 			{
-				#character compoint(maxpoint)*45
-				#character *80   sysdepinfo
-				 
 				$type   = $1;
 				$varlst = $2;
-#				die "<$type> <$varlst>" if $line=~/character\ \*80\s+sysdepinfo/;
 				# Now an ad hoc fix for spaces between the type and the asterisk. FIXME! I should just write a better FSM!
 				if ($line=~/\w+\s+(\*\s*(\d+|\(\s*\*\s*\)))/) { # FIXME: I assume after the asterisk there MUST be an integer constant
 				    my $len=$1;
 					$type.=$len;
 					$varlst=~s/^\S+\s+//;
-#					warn "$line\n";
 				}  
 				
 				$type =~ /\*/ && do {
@@ -384,7 +355,7 @@ sub analyse_lines {
 
 	#           die "FIXME: shapes not correct!";
 	return $stref;
-}    # END of get_var_decls()
+}    # END of analyse_lines()
 
 # -----------------------------------------------------------------------------
 # For every 'include' statement in a subroutine
@@ -619,7 +590,7 @@ sub separate_blocks {
 		  $stref->{'Subroutines'}{$block}{'Source'} = $Sf->{'Source'};
 		} elsif (exists $stref->{'Subroutines'}{$block}{'Translate'} ) {
 			if( $stref->{'Subroutines'}{$block}{'Translate'} eq 'C') {
-				$stref->{'Subroutines'}{$block}{'Source'} = "./$block.f";
+				$stref->{'Subroutines'}{$block}{'Source'} = "./$block.f95";
                  $stref = add_to_C_build_sources( $block, $stref );
             } else {
                 croak '!$acc translate ('.$block.') '.$stref->{'Subroutines'}{$block}{'Translate'}.": Only C translation through F2C_ACC is currently supported.\n";
@@ -1122,96 +1093,96 @@ sub get_commons_params_from_includes {
 
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
-sub pushAnnLine {
-	(my $stref, my $f, my $srctype,my $line, my $free_form)=@_;
-	my $pline = procLine( $line, $free_form );
-	
-    if ( exists $pline->[1]{'SubroutineSig'} ) {
-    	$stref->{$srctype}{$f}{'Status'} = $READ;
-        $srctype='Subroutines';
-#        print "FOUND SUB $f\n";        
-        $f=$pline->[1]{'SubroutineSig'};      
-        $stref->{$srctype}{$f}{'AnnLines'}=[];                          
-    } elsif (exists $pline->[1]{'FunctionSig'} ) {
-    	$stref->{$srctype}{$f}{'Status'} = $READ;
-        $srctype='Functions';        
-        $f=$pline->[1]{'FunctionSig'};
-#        print "FOUND FUNC $f\n";
-        $stref->{$srctype}{$f}{'AnnLines'}=[];
-    }
-    push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
-    print "PUSH: {$srctype}{$f}{'AnnLines'} $pline->[0]\n" if $V;
-#    print "NOW IN $f\n";
-	return ($stref,$f,$srctype);	
-} # pushAnnLine()
+#sub pushAnnLine {
+#	(my $stref, my $f, my $srctype,my $line, my $free_form)=@_;
+#	my $pline = procLine( $line, $free_form );
+#	
+#    if ( exists $pline->[1]{'SubroutineSig'} ) {
+#    	$stref->{$srctype}{$f}{'Status'} = $READ;
+#        $srctype='Subroutines';
+##        print "FOUND SUB $f\n";        
+#        $f=$pline->[1]{'SubroutineSig'};      
+#        $stref->{$srctype}{$f}{'AnnLines'}=[];                          
+#    } elsif (exists $pline->[1]{'FunctionSig'} ) {
+#    	$stref->{$srctype}{$f}{'Status'} = $READ;
+#        $srctype='Functions';        
+#        $f=$pline->[1]{'FunctionSig'};
+##        print "FOUND FUNC $f\n";
+#        $stref->{$srctype}{$f}{'AnnLines'}=[];
+#    }
+#    push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
+#    print "PUSH: {$srctype}{$f}{'AnnLines'} $pline->[0]\n" if $V;
+##    print "NOW IN $f\n";
+#	return ($stref,$f,$srctype);	
+#} # pushAnnLine()
 # -----------------------------------------------------------------------------
 
 # -----------------------------------------------------------------------------
-sub isCont {
-	( my $line, my $free_form ) = @_;
-	my $is_cont = 0;
-	if ( $free_form == 0 ) {
-		if ( $line =~ /^\ {5}[^0\s]/ )
-		{    # continuation line. Continuation character can be anything!
-			$is_cont = 1;
-		} elsif ( $line =~ /^\&/ ) {
-			$is_cont = 1;
-		} elsif ( $line =~ /^\t[1-9]/ ) {
-			$is_cont = 1;
-		}
-	} else {
-		if ( $line =~ /^\s*\&/ ) {
-			$is_cont = 1;
-		}
-	}
-	return $is_cont;
-}
-# -----------------------------------------------------------------------------
-sub removeCont {
-	( my $line, my $free_form ) = @_;
-    chomp $line;
-    if (isCommentOrBlank($line) ) {
-    	return '';
-    } 
-	if ( $free_form == 0 ) {
-		if ( $line =~ /^\ {5}[^0\s]/ )
-		{    # continuation line. Continuation character can be anything!
-			$line =~ s/^\s{5}.\s*/ /;
-		} elsif ( $line =~ /^\&/ ) {
-			$line =~ s/^\&\t*/ /;
-		} elsif ( $line =~ /^\t[1-9]/ ) {
-			$line =~ s/^\t[0-9]/ /;
-		}
-	} else {
-		if ( $line =~ /^\s*\&/ ) {
-			$line =~ s/^\s*\&\s*/ /;
-		}
-	}
-	if ( $line =~ /.\!.*$/ ) {    # FIXME: trailing comments are discarded!
-		my $tline = $line;
-		my $nline = '';
-		my $i     = 0;
-		my %phs   = ();
-		while ( $tline =~ /(\'.+?\')/ ) {
-			$phs{"__PH${i}__"} = $1;
-			$tline =~ s/(\'.+?\')/__PH${i}__/;
-			$i++;
-		}
-		if ( $tline =~ /\!.*$/ ) {
-			$nline = ( split( /\!/, $tline ) )[0];
-			for my $phk ( keys %phs ) {
-				$nline =~ s/$phk/$phs{$phk}/;
-			}
-			$line = $nline;
-		} else {
-			for my $phk ( keys %phs ) {
-                $tline =~ s/$phk/$phs{$phk}/;
-            }
-			$line=$tline;
-		}		
-	}
-	return $line;
-}
+#sub isCont {
+#	( my $line, my $free_form ) = @_;
+#	my $is_cont = 0;
+#	if ( $free_form == 0 ) {
+#		if ( $line =~ /^\ {5}[^0\s]/ )
+#		{    # continuation line. Continuation character can be anything!
+#			$is_cont = 1;
+#		} elsif ( $line =~ /^\&/ ) {
+#			$is_cont = 1;
+#		} elsif ( $line =~ /^\t[1-9]/ ) {
+#			$is_cont = 1;
+#		}
+#	} else {
+#		if ( $line =~ /^\s*\&/ ) {
+#			$is_cont = 1;
+#		}
+#	}
+#	return $is_cont;
+#}
+## -----------------------------------------------------------------------------
+#sub removeCont {
+#	( my $line, my $free_form ) = @_;
+#    chomp $line;
+#    if (isCommentOrBlank($line) ) {
+#    	return '';
+#    } 
+#	if ( $free_form == 0 ) {
+#		if ( $line =~ /^\ {5}[^0\s]/ )
+#		{    # continuation line. Continuation character can be anything!
+#			$line =~ s/^\s{5}.\s*/ /;
+#		} elsif ( $line =~ /^\&/ ) {
+#			$line =~ s/^\&\t*/ /;
+#		} elsif ( $line =~ /^\t[1-9]/ ) {
+#			$line =~ s/^\t[0-9]/ /;
+#		}
+#	} else {
+#		if ( $line =~ /^\s*\&/ ) {
+#			$line =~ s/^\s*\&\s*/ /;
+#		}
+#	}
+#	if ( $line =~ /.\!.*$/ ) {    # FIXME: trailing comments are discarded!
+#		my $tline = $line;
+#		my $nline = '';
+#		my $i     = 0;
+#		my %phs   = ();
+#		while ( $tline =~ /(\'.+?\')/ ) {
+#			$phs{"__PH${i}__"} = $1;
+#			$tline =~ s/(\'.+?\')/__PH${i}__/;
+#			$i++;
+#		}
+#		if ( $tline =~ /\!.*$/ ) {
+#			$nline = ( split( /\!/, $tline ) )[0];
+#			for my $phk ( keys %phs ) {
+#				$nline =~ s/$phk/$phs{$phk}/;
+#			}
+#			$line = $nline;
+#		} else {
+#			for my $phk ( keys %phs ) {
+#                $tline =~ s/$phk/$phs{$phk}/;
+#            }
+#			$line=$tline;
+#		}		
+#	}
+#	return $line;
+#}
 
 
 # -----------------------------------------------------------------------------
@@ -1222,120 +1193,118 @@ sub removeCont {
  - detect and standardise comments
  - add metadata
 =cut
-
-sub procLine {
-	( my $line, my $free_form ) = @_;
-
-	chomp $line;
-	my $info = {};
-
-	# Detect and standardise comments
-	if ( $line =~ /^[CD\*\!]/i or $line =~ /^\ {6}\s*\!/i ) {
-		$line =~ s/^\s*[CcDd\*\!]/! /;
-		$info->{'Comments'} = 1;
-	} elsif ( $line =~ /.\!.*$/ ) {    # FIXME: trailing comments are discarded!
-		my $tline = $line;
-		my $nline = '';
-		my $i     = 0;
-		my %phs   = ();
-		while ( $tline =~ /(\'.+?\')/ ) {
-			$phs{"__PH${i}__"} = $1;
-			$tline =~ s/(\'.+?\')/__PH${i}__/;
-			$i++;
-		}
-        my $cline = $line;
-        $cline =~ s/^.+?\!//;    # FIXME: not quite correct
-
-		if ( $tline =~ /\!.*$/ ) {
-			$nline = ( split( /\!/, $tline ) )[0];
-			for my $phk ( keys %phs ) {
-				$nline =~ s/$phk/$phs{$phk}/;
-			}
-			$line=$nline;
-		} else {
-			for my $phk ( keys %phs ) {
-                $tline =~ s/$phk/$phs{$phk}/;
-            }
-            $line=$tline;
-		}		
-		$info->{'TrailingComment'} = $cline;
-	} else {
-		my $sixspaces = ' ' x 6;
-		$line =~ s/^\t/$sixspaces/;
-		$line =~ /^(\d+)\t/ && do {
-			my $label  = $1;
-			my $ndig   = length($label);
-			my $indent = ' ' x ( 6 - $ndig );
-			my $str    = $label . $indent;
-			$line =~ s/^(\d+)\t/$str/;
-			$info->{'Label'} = $label;
-		};
-		$line =~ /^(\d+)\s+/ && do {
-			my $label = $1;
-			$info->{'Label'} = $label;
-			my $ndig   = length($label);
-			my $indent = ' ' x ( 6 - $ndig );
-			my $str    = $label . $indent;
-			$line =~ s/^(\d+)\s+/$str/;
-		};
-	}
-	;
-	if ( substr( $line, 0, 2 ) ne '! ' ) {
-		if ( $line =~ /^\s+include\s+\'(\w+)\'/i ) {
-			$info->{'Includes'} = $1;
-			$line =~ s/\bINCLUDE\b/include/;
-			
-			
-		} elsif (  $line!~/\'/ && $line =~
-                    /\b(program|recursive\s+subroutine|subroutine|function)\s+(\w+)/i )
-                {
-#                	print "LINE: $line\n";
-#                	die if $line=~/\'/;
-                    my $keyword = lc($1);
-                    my $name = lc($2);
-                    die "procLine(): No name for $keyword " if $name eq '';
-                    if ( $keyword eq 'function' ) {                        
-                        $info-> { 'FunctionSig'} = $name;
-                    } else {                        
-                        $info ->{ 'SubroutineSig'} = $name ;                        
-                    }            
-                    $line=lc($line);
-		} else {
-
-			# replace string constants by placeholders
-			my $phs_ref = {};
-			my $ct=0;
-			while ( $line =~ /(\'.*?\')/ ) {
-				my $strconst = $1;
-				my $ph       = '__PH' . $ct . '__';
-				$phs_ref->{$ph} = $strconst;
-				$line =~ s/\'.*?\'/$ph/;
-				$ct++;
-			}
-			my $lcline =
-			  ( substr( $line, 0, 2 ) eq '! ' )
-			  ? $line
-			  : lc($line);
-			$lcline =~ s/__ph(\d+)__/__PH$1__/g;
-			$line = $lcline;
-			$info->{'PlaceHolders'} = $phs_ref unless (keys %{$phs_ref} == 0);
-		}
-	}
-	return [ $line, $info ];
-} # procLine()
+#
+#sub procLine {
+#	( my $line, my $free_form ) = @_;
+#
+#	chomp $line;
+#	my $info = {};
+#
+#	# Detect and standardise comments
+#	if ( $line =~ /^[CD\*\!]/i or $line =~ /^\ {6}\s*\!/i ) {
+#		$line =~ s/^\s*[CcDd\*\!]/! /;
+#		$info->{'Comments'} = 1;
+#	} elsif ( $line =~ /.\!.*$/ ) {    # FIXME: trailing comments are discarded!
+#		my $tline = $line;
+#		my $nline = '';
+#		my $i     = 0;
+#		my %phs   = ();
+#		while ( $tline =~ /(\'.+?\')/ ) {
+#			$phs{"__PH${i}__"} = $1;
+#			$tline =~ s/(\'.+?\')/__PH${i}__/;
+#			$i++;
+#		}
+#        my $cline = $line;
+#        $cline =~ s/^.+?\!//;    # FIXME: not quite correct
+#
+#		if ( $tline =~ /\!.*$/ ) {
+#			$nline = ( split( /\!/, $tline ) )[0];
+#			for my $phk ( keys %phs ) {
+#				$nline =~ s/$phk/$phs{$phk}/;
+#			}
+#			$line=$nline;
+#		} else {
+#			for my $phk ( keys %phs ) {
+#                $tline =~ s/$phk/$phs{$phk}/;
+#            }
+#            $line=$tline;
+#		}		
+#		$info->{'TrailingComment'} = $cline;
+#	} else {
+#		my $sixspaces = ' ' x 6;
+#		$line =~ s/^\t/$sixspaces/;
+#		$line =~ /^(\d+)\t/ && do {
+#			my $label  = $1;
+#			my $ndig   = length($label);
+#			my $indent = ' ' x ( 6 - $ndig );
+#			my $str    = $label . $indent;
+#			$line =~ s/^(\d+)\t/$str/;
+#			$info->{'Label'} = $label;
+#		};
+#		$line =~ /^(\d+)\s+/ && do {
+#			my $label = $1;
+#			$info->{'Label'} = $label;
+#			my $ndig   = length($label);
+#			my $indent = ' ' x ( 6 - $ndig );
+#			my $str    = $label . $indent;
+#			$line =~ s/^(\d+)\s+/$str/;
+#		};
+#	}
+#	;
+#	if ( substr( $line, 0, 2 ) ne '! ' ) {
+#		if ( $line =~ /^\s+include\s+\'(\w+)\'/i ) {
+#			$info->{'Includes'} = $1;
+#			$line =~ s/\bINCLUDE\b/include/;
+#			
+#			
+#		} elsif (  $line!~/\'/ && $line =~
+#                    /\b(program|recursive\s+subroutine|subroutine|function)\s+(\w+)/i )
+#                {
+#                    my $keyword = lc($1);
+#                    my $name = lc($2);
+#                    die "procLine(): No name for $keyword " if $name eq '';
+#                    if ( $keyword eq 'function' ) {                        
+#                        $info-> { 'FunctionSig'} = $name;
+#                    } else {                        
+#                        $info ->{ 'SubroutineSig'} = $name ;                        
+#                    }            
+#                    $line=lc($line);
+#		} else {
+#
+#			# replace string constants by placeholders
+#			my $phs_ref = {};
+#			my $ct=0;
+#			while ( $line =~ /(\'.*?\')/ ) {
+#				my $strconst = $1;
+#				my $ph       = '__PH' . $ct . '__';
+#				$phs_ref->{$ph} = $strconst;
+#				$line =~ s/\'.*?\'/$ph/;
+#				$ct++;
+#			}
+#			my $lcline =
+#			  ( substr( $line, 0, 2 ) eq '! ' )
+#			  ? $line
+#			  : lc($line);
+#			$lcline =~ s/__ph(\d+)__/__PH$1__/g;
+#			$line = $lcline;
+#			$info->{'PlaceHolders'} = $phs_ref unless (keys %{$phs_ref} == 0);
+#		}
+#	}
+#	return [ $line, $info ];
+#} # procLine()
 
 # -----------------------------------------------------------------------------
-sub isCommentOrBlank {
-	( my $line ) = @_;
-
-	# Detect comments & blank lines
-	if ( $line =~ /^[CD\*\!]/i or $line =~ /^\ {6}\s*\!/i ) {
-		return 1;
-	} elsif ( $line =~ /^\s*$/ ) {
-		return 1;
-	}
-	return 0;
-}
+#sub isCommentOrBlank {
+#	( my $line ) = @_;
+#
+#	# Detect comments & blank lines
+#	if ( $line =~ /^[CD\*\!]/i or $line =~ /^\ {6}\s*\!/i ) {
+#		return 1;
+#	} elsif ( $line =~ /^\s*$/ ) {
+#		return 1;
+#	}
+#	return 0;
+#}
 
 # -----------------------------------------------------------------------------
 # Proper FSM parser for F77 variable declarations (apart from the type)

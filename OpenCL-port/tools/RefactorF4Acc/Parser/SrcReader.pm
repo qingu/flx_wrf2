@@ -44,37 +44,30 @@ sub read_fortran_src {
 	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
 	}
 	my $f = $is_incl ? $s : $stref->{$sub_func_incl}{$s}{'Source'};
+
     if (defined $f) {
-		
-	
-	my $no_need_to_read=1;
-
-	if (not exists $stref->{'SourceContains'}{$f} ) {
-		$no_need_to_read=0;
-	} else {
-	for my $item (keys %{ $stref->{'SourceContains'}{$f} } ) {
-		my $srctype=$stref->{'SourceContains'}{$f}{$item};
-		my $status =$stref->{$srctype}{$item}{'Status'};
-#		print "\tSTATUS $srctype $item = $status\n";
-		# if one of them is still UNREAD, need to read.
-		$no_need_to_read *= ($status != $UNREAD);
+        my $no_need_to_read=1;
+        if (not exists $stref->{'SourceContains'}{$f} ) {
+		  $no_need_to_read=0;
+        } else {
+		for my $item (keys %{ $stref->{'SourceContains'}{$f} } ) {
+			my $srctype=$stref->{'SourceContains'}{$f}{$item};
+			my $status =$stref->{$srctype}{$item}{'Status'};
+			# if one of them is still UNREAD, need to read.
+			$no_need_to_read *= ($status != $UNREAD);
+		}
 	}
-	}
-	my $need_to_read = 1 - $no_need_to_read; 
-#    print ''.($need_to_read ? '' : 'NO ')."NEED TO READ $f\n";
-#	if ( $stref->{$sub_func_incl}{$s}{'Status'} == $UNREAD ) {
+	my $need_to_read = 1 - $no_need_to_read;
+	 
 		if ($need_to_read) {		 
-		my $ok = 1;
-
-		open my $SRC, '<', $f or do {
+		    my $ok = 1;
+		    open my $SRC, '<', $f or do {
 			print DBG "WARNING: Can't find '$f' ($s)\n";
 			$ok = 0;
 		};
 
 		if ($ok) {
-
 			#	print DBG "READING SOURCE for $f ($s, $sub_func_incl)\n" if $V;
-
 			my $line       = '';
 			my $nextline   = '';
 			my $joinedline = '';
@@ -83,7 +76,6 @@ sub read_fortran_src {
 			my @rawlines = <$SRC>;
 			close $SRC;
 
-			#my @lines = grep {!/^\s*$/} @rawlines;
 			my @lines     = @rawlines;
 			push @lines,("      \n");
 			my $free_form = $stref->{$sub_func_incl}{$s}{'FreeForm'};
@@ -91,7 +83,6 @@ sub read_fortran_src {
 
 			
 			if ($free_form) {
-#				croak "BROKEN! Must be implemented like fixed form below";
 =info_free_form_parsing
 The main difference is in the continuation lines:
 For free form, they are

@@ -110,6 +110,7 @@ sub emit_refactored_function {
     my $s      = $Ff->{'Source'};
     if ( defined $srcref ) {
         print "INFO: emitting refactored code for function $f\n" if $V;
+        $s=~s/\.f$/.f95/;
 
         #    } else {
         #       $srcref=$Ff->{'Lines'};
@@ -154,6 +155,7 @@ sub emit_refactored_subroutine {
     my $srcref = $Sf->{'RefactoredCode'};
     if ( defined $srcref ) {
         my $s = $Sf->{'Source'};
+        $s=~s/\.f$/.f95/;
         print "INFO: emitting refactored code for $f in $s\n" if $V;
         if ( $s =~ /\w\/\w/ ) {
 

@@ -141,6 +141,8 @@ sub process_src {
             # Find subroutine/program signatures
             $line =~ /^\s*(recursive\s+subroutine|subroutine|program)\s+(\w+)/i && do {                
                 my $is_prog = (lc($1) eq 'program') ? 1 : 0;
+                my $tmp=$1;
+                my $is_rec = ($tmp =~/recursive/i) ? 1 : 0;
                 if ( $is_prog == 1 ) {
                     print "Found program $2 in $src\n" if $V;
                 }                
@@ -170,6 +172,7 @@ sub process_src {
 	                    $Ssub->{'Source'}  = $src;
 	                    $Ssub->{'Status'}  = $UNREAD;
 	                    $Ssub->{'Program'} = $is_prog;
+	                    $Ssub->{'Recursive'} = $is_rec;
 	                    $Ssub->{'Callers'}  = {};
 	                    if ($translate_to ne '') {
 	                        $Ssub->{'Translate'}  = $translate_to;

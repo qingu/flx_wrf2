@@ -62,8 +62,8 @@ sub refactor_include {
 #	my $common=0;
 #	if ( $stref->{'IncludeFiles'}{$f}{'InclType'} eq 'Common' ) {
 #		$common=1;
-		$stref->{'IncludeFiles'}{$f}{'Source'}=$f.'.f'; # FIXME: ad hoc
-		$stref->{'BuildSources'}{'F'}{$f.'.f'}=1;
+		$stref->{'IncludeFiles'}{$f}{'Source'}=$f.'.f95'; # FIXME: ad hoc
+		$stref->{'BuildSources'}{'F'}{$f.'.f95'}=1;
 #	}
     if (   not exists $If->{'RefactoredCode'}
         or $If->{'RefactoredCode'} == []
