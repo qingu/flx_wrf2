@@ -40,7 +40,8 @@ sub sub_func_or_incl {
 #        #print Dumper($stref);
 #        #croak "No entry for $f in the state\n";
         # Assuming it's a C function
-#WV23JUL        return 'ExternalSubroutines';
+#WV23JUL        
+        return 'ExternalSubroutines';
     }
 }
 

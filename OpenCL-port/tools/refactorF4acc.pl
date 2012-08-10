@@ -4,6 +4,7 @@ use warnings::unused;
 use warnings;
 use warnings FATAL => qw(uninitialized);
 use strict;
+use Data::Dumper;
 
 use RefactorF4Acc::Config;
 use RefactorF4Acc::Utils;
@@ -139,7 +140,7 @@ sub main {
 
     # Parse the source
 	$stateref = parse_fortran_src( $subname, $stateref );
-    
+     
 	if ( $call_tree_only and not $ARGV[1] ) {
 		create_call_graph($stateref,$subname);
 		exit(0);

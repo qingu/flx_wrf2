@@ -290,7 +290,6 @@ sub context_free_refactorings {
     # 1. Look for the signature
     my $offset=0;
     for my $tmpannline ( @{ $Sf->{'RefactoredCode'} } ) {
-#print join(',',keys %{$tmpannline->[1]}),"\n";
     	if (exists $tmpannline->[1]{'Signature'} or 
     	exists $tmpannline->[1]{'SubroutineSig'} or 
     	exists $tmpannline->[1]{'FunctionSig'}) {

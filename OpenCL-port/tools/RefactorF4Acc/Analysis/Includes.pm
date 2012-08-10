@@ -162,6 +162,7 @@ sub merge_includes {
     # We should only do this for subs that need refactoring
     my $pnid = $stref->{'Nodes'}{$nid}{'Parent'};   
     my $sub  = $stref->{'Nodes'}{$nid}{'Subroutine'};
+    
     my $Ssub = $stref->{'Subroutines'}{$sub};
 #    print "merge_includes: $sub\n";
     my $f=$stref->{'Nodes'}{$pnid}{'Subroutine'};
@@ -206,6 +207,7 @@ sub merge_includes {
             }
         }
     }
+    die 'No subroutine name ' if $sub eq '' or not defined $sub;
     $stref->{'Subroutines'}{$sub}=$Ssub ;
     if ( $nid != 0 ) {
         $stref = merge_includes( $stref, $pnid, $nid,$chain );

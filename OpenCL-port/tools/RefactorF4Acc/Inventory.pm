@@ -52,12 +52,12 @@ sub find_subroutines_functions_and_includes {
 #    find( $tf_finder, '.' );
     for my $src ( sort keys %src_files ) {#sort WV23JUL2012
     	if  ($src=~/\.c$/) {
-    		warn "C SOURCE: $src\n";
+#    		warn "C SOURCE: $src\n";
     		# FIXME: ugly ad-hoc hack!
     		# WRF uses cpp to make subroutine names match with Fortran
     		# So we need to call cpp first, but with all the correct macros ...
     		# Without any defined macros, it's like this:    	
-    		my @lines=`grep -v '#include' $src  | cpp -P -`;
+#    		my @lines=`grep -v '#include' $src  | cpp -P -`;
     		# I guess we could use some command-line flag to add the macro definitions
     		# And now we must parse C sources too ...
     		
@@ -82,7 +82,7 @@ sub process_src {
     my $free_form=0;
     my $fstyle='F77';   
     my $translate_to='';
-    
+    my $in_interface_block=0;
     open my $SRC, '<', $src;
     while ( my $line = <$SRC> ) {
 
@@ -130,52 +130,67 @@ sub process_src {
             }
         }
         
+        if ( $line =~ /^\s+interface/i ) { 
+            $in_interface_block=1;
+             $stref->{$srctype}{$f}{'Interface'}={};
+        }
+        if ( $line =~ /^\s+end\s+interface/i ) { 
+            $in_interface_block=0;
+        }
+        
             # Find subroutine/program signatures
             $line =~ /^\s*(recursive\s+subroutine|subroutine|program)\s+(\w+)/i && do {                
                 my $is_prog = (lc($1) eq 'program') ? 1 : 0;
+                my $tmp=$1;
+                my $is_rec = ($tmp =~/recursive/i) ? 1 : 0;
                 if ( $is_prog == 1 ) {
                     print "Found program $2 in $src\n" if $V;
                 }                
                 my $sub  = lc($2);
-                die 'No subroutine name ' if $sub eq '';
-                $f=$sub;                
-                $srctype='Subroutines';
-                $stref->{'Subroutines'}{$sub}={};
-                $stref->{'SourceContains'}{$src}{$f}=$srctype;
-                my $Ssub = $stref->{'Subroutines'}{$sub};
-                if (
-                    not exists $Ssub->{'Source'}
-                    or (    $src =~ /$sub\.f(?:90)?/
-                        and $Ssub->{'Source'} !~ /$sub\.f(?:90)?/ )
-                  )
-                {
-                    if (    exists $Ssub->{'Source'}
-                        and $src =~ /$sub\.f(?:90)?/
-                        and $Ssub->{'Source'} !~ /$sub\.f(?:90)?/ )
-                    {
-                        print "WARNING: Ignoring source "
-                          . $Ssub->{'Source'}
-                          . " because source $src matches subroutine name $sub.\n"
-                          if $W;
-                    }
-                    $Ssub->{'Source'}  = $src;
-                    $Ssub->{'Status'}  = $UNREAD;
-                    $Ssub->{'Program'} = $is_prog;
-                    $Ssub->{'Callers'}  = {};
-                    if ($translate_to ne '') {
-                        $Ssub->{'Translate'}  = $translate_to;
-                        $translate_to = '';
-                    }
-
+                die 'No subroutine name ' if $sub eq '' or not defined $sub;
+                if ($in_interface_block==0) {
+	                $f=$sub;                
+	                $srctype='Subroutines';
+	                $stref->{'Subroutines'}{$sub}={};
+	                $stref->{'SourceContains'}{$src}{$f}=$srctype;
+	                my $Ssub = $stref->{'Subroutines'}{$sub};
+	                if (
+	                    not exists $Ssub->{'Source'}
+	                    or (    $src =~ /$sub\.f(?:90)?/
+	                        and $Ssub->{'Source'} !~ /$sub\.f(?:90)?/ )
+	                  )
+	                {
+	                    if (    exists $Ssub->{'Source'}
+	                        and $src =~ /$sub\.f(?:90)?/
+	                        and $Ssub->{'Source'} !~ /$sub\.f(?:90)?/ )
+	                    {
+	                        print "WARNING: Ignoring source "
+	                          . $Ssub->{'Source'}
+	                          . " because source $src matches subroutine name $sub.\n"
+	                          if $W;
+	                    }
+	                    $Ssub->{'Source'}  = $src;
+	                    $Ssub->{'Status'}  = $UNREAD;
+	                    $Ssub->{'Program'} = $is_prog;
+	                    $Ssub->{'Recursive'} = $is_rec;
+	                    $Ssub->{'Callers'}  = {};
+	                    if ($translate_to ne '') {
+	                        $Ssub->{'Translate'}  = $translate_to;
+	                        $translate_to = '';
+	                    }
+	
+	                } else {
+	                    print
+	"WARNING: Ignoring source $src for $sub because another source, "
+	                      . $Ssub->{'Source'}
+	                      . " exists.\n"
+	                      if $W;
+	                }
                 } else {
-                    print
-"WARNING: Ignoring source $src for $sub because another source, "
-                      . $Ssub->{'Source'}
-                      . " exists.\n"
-                      if $W;
+                	$stref->{$srctype}{$f}{'Interface'}{$sub}=1; #WV: TODO: add functionality here
                 }
             };
-
+            
             # Find include statements
             $line =~ /^\s*include\s+\'(\w+)\'/ && do {
                 my $inc = $1;
@@ -200,7 +215,7 @@ sub process_src {
                   $srctype='Functions';
                   $stref->{'SourceContains'}{$src}{$f}=$srctype;
             };
-            
+         
             $stref->{$srctype}{$f}{'FStyle'}=$fstyle;
             $stref->{$srctype}{$f}{'FreeForm'}=$free_form;  
             $stref->{$srctype}{$f}{'HasBlocks'}=$has_blocks;

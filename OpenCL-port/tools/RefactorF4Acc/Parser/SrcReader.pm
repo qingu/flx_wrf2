@@ -37,44 +37,37 @@ sub read_fortran_src {
 	my $is_incl = exists $stref->{'IncludeFiles'}{$s} ? 1 : 0;
 
 	my $sub_func_incl = sub_func_or_incl( $s, $stref );
-#	if ($sub_func_incl eq 'ExternalSubroutines') {
-#		$stref->{$sub_func_incl}{$s}{'Status'}=$UNREAD;		
-#	}
+	if ($sub_func_incl eq 'ExternalSubroutines') {
+		$stref->{$sub_func_incl}{$s}{'Status'}=$UNREAD;		
+	}
 	if (not exists $stref->{$sub_func_incl}{$s}{'HasBlocks'} ){
 	$stref->{$sub_func_incl}{$s}{'HasBlocks'} = 0;
 	}
 	my $f = $is_incl ? $s : $stref->{$sub_func_incl}{$s}{'Source'};
-#	if (defined $f) {
-		
-	
-	my $no_need_to_read=1;
 
-	if (not exists $stref->{'SourceContains'}{$f} ) {
-		$no_need_to_read=0;
-	} else {
-	for my $item (keys %{ $stref->{'SourceContains'}{$f} } ) {
-		my $srctype=$stref->{'SourceContains'}{$f}{$item};
-		my $status =$stref->{$srctype}{$item}{'Status'};
-#		print "\tSTATUS $srctype $item = $status\n";
-		# if one of them is still UNREAD, need to read.
-		$no_need_to_read *= ($status != $UNREAD);
+    if (defined $f) {
+        my $no_need_to_read=1;
+        if (not exists $stref->{'SourceContains'}{$f} ) {
+		  $no_need_to_read=0;
+        } else {
+		for my $item (keys %{ $stref->{'SourceContains'}{$f} } ) {
+			my $srctype=$stref->{'SourceContains'}{$f}{$item};
+			my $status =$stref->{$srctype}{$item}{'Status'};
+			# if one of them is still UNREAD, need to read.
+			$no_need_to_read *= ($status != $UNREAD);
+		}
 	}
-	}
-	my $need_to_read = 1 - $no_need_to_read; 
-#    print ''.($need_to_read ? '' : 'NO ')."NEED TO READ $f\n";
-#	if ( $stref->{$sub_func_incl}{$s}{'Status'} == $UNREAD ) {
+	my $need_to_read = 1 - $no_need_to_read;
+	 
 		if ($need_to_read) {		 
-		my $ok = 1;
-
-		open my $SRC, '<', $f or do {
+		    my $ok = 1;
+		    open my $SRC, '<', $f or do {
 			print DBG "WARNING: Can't find '$f' ($s)\n";
 			$ok = 0;
 		};
 
 		if ($ok) {
-
 			#	print DBG "READING SOURCE for $f ($s, $sub_func_incl)\n" if $V;
-
 			my $line       = '';
 			my $nextline   = '';
 			my $joinedline = '';
@@ -83,7 +76,6 @@ sub read_fortran_src {
 			my @rawlines = <$SRC>;
 			close $SRC;
 
-			#my @lines = grep {!/^\s*$/} @rawlines;
 			my @lines     = @rawlines;
 			push @lines,("      \n");
 			my $free_form = $stref->{$sub_func_incl}{$s}{'FreeForm'};
@@ -91,7 +83,6 @@ sub read_fortran_src {
 
 			
 			if ($free_form) {
-				croak "BROKEN! Must be implemented like fixed form below";
 =info_free_form_parsing
 The main difference is in the continuation lines:
 For free form, they are
@@ -123,6 +114,7 @@ Suppose we don't:
 					        # emit line
 					        if ( $line ne '' ) {
 #					        	print "PUSH $line\n";
+
 					            ( $stref, $s, $srctype ) =
 					            pushAnnLine( $stref, $s, $srctype,$line, $free_form );
 					        }	
@@ -136,6 +128,7 @@ Suppose we don't:
 							# In cont but line is not cont => end of cont line => 
 							# emit comments;
 					        for my $commentline (@comments_stack) {
+					        	
 					            ( $stref, $s, $srctype ) =
 					                                      pushAnnLine( $stref, $s, $srctype,
 					                                        $commentline, $free_form );
@@ -144,6 +137,7 @@ Suppose we don't:
 							
 							# emit joined line
 					        if ( $joinedline ne '' ) {
+					        	
 					            ( $stref, $s, $srctype ) =
 					            pushAnnLine( $stref, $s, $srctype,$joinedline, $free_form );
 					        }   
@@ -204,6 +198,7 @@ Suppose we don't:
 							 #  n
 							 #=> join l, emit joined, set l=n, set maybe_in_cont
 								$joinedline .= removeCont( $line, $free_form );
+								
 								( $stref, $s, $srctype ) =
 								  pushAnnLine( $stref, $s, $srctype,
 									$joinedline, $free_form );
@@ -454,7 +449,9 @@ Suppose we don't:
 									$joinedline = '';
 									print DBG "---\n";
 								}
-								for my $commentline (@comments_stack) {
+								# FIXME: comments that come before a function/subroutine signature
+								# are ignored because $s is unknown, set to ''
+								for my $commentline (@comments_stack) {																	
 									( $stref, $s, $srctype ) =
 									  pushAnnLine( $stref, $s, $srctype,
 										$commentline, $free_form );
@@ -833,7 +830,7 @@ Suppose we don't:
 			}    #ok
 		}    # if $need_to_read
 #		die Dumper($stref->{'Subroutines'}{'wrf'}{'AnnLines'});
-#} # if $f is defined
+    } # if $f is defined
 		return $stref;
 	}    # END of read_fortran_src()
 
@@ -877,6 +874,7 @@ Suppose we don't:
 			$f                                 = $pline->[1]{'FunctionSig'};
 			$stref->{$srctype}{$f}{'AnnLines'} = [];
 		}
+		
 		push @{ $stref->{$srctype}{$f}{'AnnLines'} }, $pline;
 #		print "PUSHED: $pline->[0]\n" if $V;
 		return ( $stref, $f, $srctype );
@@ -1024,7 +1022,7 @@ Suppose we don't:
 				$line =~ s/\bINCLUDE\b/include/;
 			} elsif ( $line !~ /\'/
 			    && $line !~/^\s*end/i 
-				&& $line =~ /\b(program|subroutine|function)\s+(\w+)/i )
+				&& $line =~ /\b(program|recursive\s+subroutine|subroutine|function)\s+(\w+)/i )
 			{
 				my $keyword = lc($1);
 				my $name    = lc($2);

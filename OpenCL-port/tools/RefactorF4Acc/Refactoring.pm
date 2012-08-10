@@ -49,11 +49,12 @@ sub refactor_all {
     # Later it means rewriting the kernel signatures
     # Basically need this for every factored-out kernel candidate
     # But it doesn't hurt to annotate every subroutine of course 
-    $stref = refactor_kernel_signatures( $stref, $subname); # It would be better if I could do this in determine_argument_io_direction_rec() 
+#    $stref = refactor_kernel_signatures( $stref, $subname); # It would be better if I could do this in determine_argument_io_direction_rec() 
 #    $stref = create_all_refactored_subroutine_sources($stref);
     # When all this is done, we can finally create the refactored sources for the subroutines
     for my $f ( keys %{ $stref->{'Subroutines'} } ) {
-    	if (scalar keys %{$stref->{'Subroutines'}{$f}{'Callers'} } or $stref->{'Subroutines'}{$f}{'Program'} ) {
+    	if (scalar keys %{$stref->{'Subroutines'}{$f}{'Callers'} } or $stref->{'Subroutines'}{$f}{'Program'} ) {    		
+    		$stref = refactor_kernel_signatures( $stref, $f); # FIXME: rename this!
         $stref=create_refactored_source(  $stref, $f );
     	} else {
     		print "WARNING: SKIPPING $f: Callers: ",scalar keys %{$stref->{'Subroutines'}{$f}{'Callers'} },'; Program: ',$stref->{'Subroutines'}{$f}{'Program'},"\n" if $V;

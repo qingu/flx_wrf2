@@ -167,7 +167,7 @@ sub identify_globals_used_in_subroutine {
 #                my $info = $srcref->[$index][1];
                 if ( $line =~ /^\!\s+/ )                            { next; }
                 if ( $line =~ /^\s+end/ )                          { next; }
-                if ( $line =~ /^\s+(subroutine|program)\s+(\w+)/ ) { next; }
+                if ( $line =~ /^\s+(recursive\s+subroutine|subroutine|program)\s+(\w+)/ ) { next; }
 
                 # We shouldn't look for globals in the declarations, silly!
                 if ( $line =~
@@ -216,7 +216,9 @@ sub determine_subroutine_arguments {
             }
 
             # Determine the subroutine arguments
-            if ( $line =~ /^\s+subroutine\s+(\w+)\s*\((.*)\)/ ) {
+            if ( $line =~ /^\s+subroutine\s+(\w+)\s*\((.*)\)/
+            or  $line =~ /^\s+recursive\s+subroutine\s+(\w+)\s*\((.*)\)/
+            ) {
                 my $name   = $1;                
                 my $argstr = $2;
                 $argstr =~ s/^\s+//;
@@ -228,7 +230,9 @@ sub determine_subroutine_arguments {
 #                $srcref->[$index][1]{'Signature'}{'Name'} = $name;
                 $Sf->{'Args'}                                = [@args];
                 last;
-            } elsif ( $line =~ /^\s+subroutine\s+(\w+)[^\(]*$/ ) {
+            } elsif ( $line =~ /^\s+subroutine\s+(\w+)[^\(]*$/ 
+            or $line =~ /^\s+recursive\s+subroutine\s+(\w+)[^\(]*$/ 
+            ) {
 
                 # Subroutine without arguments
                 my $name = $1;
@@ -304,6 +308,7 @@ sub lift_includes {
         # Which child has RefactorGlobals==1?    
     $Sf->{'LiftedIncludes'} =[]; # We will use this to create the additional include statements
     for my $cs (keys %{ $Sf->{'CalledSubs'} }) {             
+    	croak 'No subroutine name ' if $cs eq '' or not defined $cs;
         if ($stref->{'Subroutines'}{$cs}{'RefactorGlobals'}==1) {
             for my $inc (keys %{ $stref->{'Subroutines'}{$cs}{'CommonIncludes'} }) {
                 if (not exists $Sf->{'Includes'}{$inc} and $stref->{'IncludeFiles'}{$inc}{'InclType'} eq 'Common') {
