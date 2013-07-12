@@ -11,6 +11,7 @@ $VERSION = "1.0.0";
 use warnings;
 use strict;
 use Data::Dumper;
+use Carp qw( croak );
 use Exporter;
 
 @RefactorF4Acc::Inventory::ISA = qw(Exporter);
@@ -98,7 +99,7 @@ sub process_src {
                 if ( $line =~ /^[Cc\*\!]\s+BEGIN\sSUBROUTINE\s(\w+)/ 
         or $line =~ /^\!\s*\$acc\ssubroutine\s(\w+)/i ){
                          my $sub=$1;
-                         die 'No subroutine name ' if $sub eq '';
+                         croak 'Detect blocks: No subroutine name from '.$line if $sub eq '';
                         $has_blocks = 1;
                         if ($translate_to ne '') {
                             $stref->{'Subroutines'}{$sub}{'Translate'}= $translate_to;
@@ -142,12 +143,12 @@ sub process_src {
             $line =~ /^\s*(recursive\s+subroutine|subroutine|program)\s+(\w+)/i && do {                
                 my $is_prog = (lc($1) eq 'program') ? 1 : 0;
                 my $tmp=$1;
+                my $sub  = lc($2);
                 my $is_rec = ($tmp =~/recursive/i) ? 1 : 0;
                 if ( $is_prog == 1 ) {
                     print "Found program $2 in $src\n" if $V;
                 }                
-                my $sub  = lc($2);
-                die 'No subroutine name ' if $sub eq '' or not defined $sub;
+                die 'No subroutine name from '.$line if $sub eq '' or not defined $sub;
                 if ($in_interface_block==0) {
 	                $f=$sub;                
 	                $srctype='Subroutines';
